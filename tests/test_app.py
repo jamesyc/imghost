@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from imghost.__main__ import main as cli_main
 from imghost.main import app
 from imghost.models import utcnow
+from imghost.service import UserCreateInput
 
 PNG_1X1 = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -677,6 +678,81 @@ def test_server_quota_rejects_upload_when_exceeded(tmp_path, monkeypatch) -> Non
         )
         assert response.status_code == 507
         assert response.json()["detail"] == "Server storage quota reached."
+
+
+def test_anon_rate_limit_blocks_after_runtime_threshold(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        state = client.app.state.imghost
+        admin = client.portal.call(
+            lambda: state.uploads.create_user(
+                UserCreateInput(
+                username="anon-rate-admin",
+                email="anon-rate-admin@example.com",
+                password="secret",
+                is_admin=True,
+                quota_bytes=None,
+            ),
+                method="admin",
+                correlation_id="anon-rate-admin",
+                source="api",
+            )
+        )
+        issued = client.portal.call(state.uploads.issue_api_key, admin)
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {issued.raw_key}"},
+            json={"rate_limit_anon_rpm": 1, "rate_limit_anon_bph": 1000000, "rate_limit_global_anon_rpm": 10},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "CF-Connecting-IP": "198.51.100.10"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "CF-Connecting-IP": "198.51.100.10"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Upload rate limit exceeded."
+
+
+def test_authenticated_rate_limit_uses_user_identity(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="rateadmin", email="rateadmin@example.com")
+    _, api_key = create_user_and_api_key(capsys, username="ratelimited", email="ratelimited@example.com")
+
+    with TestClient(app) as client:
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"rate_limit_user_rpm": 1, "rate_limit_user_bph": 1000000},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {api_key}", "User-Agent": "Agent-A"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {api_key}", "User-Agent": "Agent-B"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Upload rate limit exceeded."
 
 
 def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:

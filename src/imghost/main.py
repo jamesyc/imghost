@@ -21,6 +21,7 @@ from .config import Settings, load_settings
 from .events import ConfigChanged, EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
+from .rate_limits import InMemoryRateLimiter, hash_anon_identity
 from .repositories import JsonRepository
 from .models import User, utcnow
 from .runtime_config import JsonRuntimeConfig
@@ -45,6 +46,7 @@ class AppState:
         self.repository = JsonRepository(settings.data_dir / "state.json")
         self.audit = JsonAuditLog(settings.data_dir / "audit.json")
         self.runtime_config = JsonRuntimeConfig(settings.data_dir / "config.json")
+        self.rate_limiter = InMemoryRateLimiter(self.runtime_config)
         self.storage = LocalFilesystemBackend(settings.data_dir)
         self.processors = build_processor_registry(
             settings.max_pixel_megapixels * 1_000_000,
@@ -58,6 +60,7 @@ class AppState:
             self.event_bus,
             self.processors,
             self.runtime_config,
+            self.rate_limiter,
         )
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
@@ -184,6 +187,25 @@ def get_state(request: Request) -> AppState:
 
 def correlation_id(request: Request) -> str:
     return request.headers.get("X-Correlation-ID") or str(uuid4())
+
+
+def client_ip(request: Request) -> str:
+    for header_name in ("CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"):
+        value = request.headers.get(header_name)
+        if not value:
+            continue
+        if header_name == "X-Forwarded-For":
+            return value.split(",", 1)[0].strip()
+        return value.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def upload_rate_limit_key(request: Request, user: User | None) -> str:
+    if user is not None:
+        return user.id
+    return hash_anon_identity(client_ip(request), request.headers.get("User-Agent", ""))
 
 
 def media_url(base_url: str, media_id: str, fmt: str) -> str:
@@ -609,7 +631,14 @@ async def upload(
     results = []
     active_album_id = album_id
     for item in file:
-        result = await state.uploads.upload(item, active_album_id, title, cid, actor=actor)
+        result = await state.uploads.upload(
+            item,
+            active_album_id,
+            title,
+            cid,
+            actor=actor,
+            rate_limit_key=upload_rate_limit_key(request, user),
+        )
         active_album_id = result.album.id
         results.append(result)
 

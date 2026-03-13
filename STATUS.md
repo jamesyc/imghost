@@ -9,7 +9,7 @@ The prototype is now well past the original anonymous upload proof-of-concept st
 - Background thumbnail processing and recovery
 - Image, SVG, animated image, and video processing pipelines
 - Cleanup/pruning commands
-- Authenticated registration, browser-aware auth/upload home page, admin user management, quota enforcement, album management, audit log API, and runtime config API
+- Authenticated registration, browser-aware auth/upload home page, admin user management, quota enforcement, runtime-config-backed upload rate limiting, album management, audit log API, and runtime config API
 
 The codebase remains a FastAPI prototype backed by:
 
@@ -17,7 +17,7 @@ The codebase remains a FastAPI prototype backed by:
 - local filesystem storage
 - in-process async task workers
 
-It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or the full production runtime/session config model.
+It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or the full production Redis-backed runtime/session model.
 
 ## Implemented
 
@@ -138,6 +138,25 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `507` when server quota is exceeded
   - `413` when user quota is exceeded
 
+### Rate Limiting
+
+- In-process upload rate limiting for the prototype
+- Runtime-config-backed limits for:
+  - per-anonymous identity uploads per minute
+  - per-anonymous identity bytes per hour
+  - global anonymous uploads per minute
+  - global anonymous bytes per hour
+  - per-authenticated-user uploads per minute
+  - per-authenticated-user bytes per hour
+- Anonymous identity derived from client IP plus user agent
+- IP extraction precedence for proxied deployments:
+  - `CF-Connecting-IP`
+  - `X-Real-IP`
+  - `X-Forwarded-For`
+  - socket client host
+- Current enforcement target:
+  - upload endpoint
+
 ### Admin
 
 - Admin access via existing bearer API-key auth and `is_admin`
@@ -197,6 +216,8 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - registration availability
   - anonymous upload availability
   - anonymous expiry messaging
+- Upload endpoint consumes runtime config for:
+  - anonymous and authenticated rate limits
 
 ### Domain Events Currently Present
 
@@ -225,7 +246,7 @@ These events exist and are emitted in the service layer. Thumbnail, audit, and c
 ### Audit / Config System
 
 - Config change audit/history UI beyond raw audit log
-- Runtime-config-backed rate limiting enforcement
+- Runtime-config-backed rate limiting UI visibility beyond raw config JSON
 
 ### Storage / Infra from Final Design
 
@@ -265,17 +286,17 @@ The next best implementation slice depends on the target:
 
 ### If the goal is backend completeness against `DESIGN.md`
 
-Implement rate limiting next:
+Implement per-user override and production limiter semantics next:
 
-- runtime-config-backed rate limiting enforcement
-- clear fail-open behavior when no Redis-backed limiter exists
-- per-user override model once user-level limits are introduced
+- per-user rate-limit override model
+- Redis-backed limiter behavior matching the final design
+- explicit fail-open/fail-closed behavior around Redis availability
 
-That is now the largest remaining config-consumption gap after the browser UI started reflecting runtime config.
+That is now the main remaining gap in the rate-limit/control-plane area.
 
 ## Test Status
 
 Current automated status at the time of writing:
 
 - `uv run pytest -q`
-- passing: `38 passed`
+- passing: `40 passed`

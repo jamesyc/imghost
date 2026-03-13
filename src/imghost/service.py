@@ -29,6 +29,7 @@ from .events import (
 from .ids import generate_album_id, generate_media_id
 from .models import Album, ApiKey, Media, User, utcnow
 from .processors import ProcessorRegistry
+from .rate_limits import InMemoryRateLimiter
 from .repositories import JsonRepository
 from .runtime_config import JsonRuntimeConfig
 from .storage import LocalFilesystemBackend
@@ -114,6 +115,7 @@ class UploadService:
         event_bus: EventBus,
         processors: ProcessorRegistry,
         runtime_config: JsonRuntimeConfig,
+        rate_limiter: InMemoryRateLimiter,
     ) -> None:
         self.settings = settings
         self.repository = repository
@@ -121,6 +123,7 @@ class UploadService:
         self.event_bus = event_bus
         self.processors = processors
         self.runtime_config = runtime_config
+        self.rate_limiter = rate_limiter
 
     async def upload(
         self,
@@ -130,6 +133,7 @@ class UploadService:
         correlation_id: str,
         *,
         actor: CurrentActor | None = None,
+        rate_limit_key: str | None = None,
     ) -> UploadResult:
         payload = await file.read()
         if not payload:
@@ -138,6 +142,12 @@ class UploadService:
             raise HTTPException(status_code=413, detail="Upload exceeds V1 size limit.")
 
         actor = actor or CurrentActor(user=None, source="web")
+        if rate_limit_key:
+            await self.rate_limiter.enforce_upload_limits(
+                actor_key=rate_limit_key,
+                byte_count=len(payload),
+                authenticated=actor.user is not None,
+            )
         await self._enforce_storage_quotas(actor.user, incoming_bytes=len(payload))
         album = await self._get_or_create_album(
             album_id=album_id,
