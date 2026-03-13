@@ -9,6 +9,9 @@ from pathlib import Path
 class Settings:
     base_url: str
     data_dir: Path
+    secret_key: str
+    session_cookie_name: str
+    session_remember_days: int
     max_upload_bytes: int
     anon_expiry_hours: int
     max_pixel_megapixels: int
@@ -24,6 +27,9 @@ def load_settings() -> Settings:
     return Settings(
         base_url=os.getenv("BASE_URL", "http://localhost:8000").rstrip("/"),
         data_dir=data_dir,
+        secret_key=os.getenv("SECRET_KEY", "dev-secret-key"),
+        session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "imghost_session"),
+        session_remember_days=max(1, int(os.getenv("SESSION_REMEMBER_DAYS", "30"))),
         max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))),
         anon_expiry_hours=int(os.getenv("ANON_EXPIRY_HOURS", "24")),
         max_pixel_megapixels=int(os.getenv("MAX_PIXEL_MEGAPIXELS", "50")),

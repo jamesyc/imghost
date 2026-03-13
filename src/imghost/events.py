@@ -81,6 +81,16 @@ class AlbumReordered:
 
 
 @dataclass(slots=True)
+class AlbumExpiryChanged:
+    album_id: str
+    user_id: str | None
+    old_expiry: str | None
+    new_expiry: str | None
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
 class UserDeleted:
     user_id: str
     deleted_by: str

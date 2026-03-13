@@ -16,6 +16,7 @@ from .events import (
     AlbumCoverSet,
     AlbumCreated,
     AlbumDeleted,
+    AlbumExpiryChanged,
     AlbumReordered,
     AlbumTitleChanged,
     EventBus,
@@ -83,6 +84,23 @@ class UserUpdateInput:
     suspended: bool | None = None
     quota_bytes: int | None | object = UNSET
     password: str | None = None
+
+
+@dataclass
+class PasswordChangeInput:
+    current_password: str
+    new_password: str
+
+
+@dataclass
+class LocalLoginInput:
+    login: str
+    password: str
+
+
+@dataclass
+class AdminAlbumUpdateInput:
+    expires_at: object = UNSET
 
 
 class UploadService:
@@ -671,6 +689,8 @@ class UploadService:
             raise HTTPException(status_code=400, detail="Username is required.")
         if not email:
             raise HTTPException(status_code=400, detail="Email is required.")
+        if await self.repository.get_user_by_username(username):
+            raise HTTPException(status_code=409, detail="Username already exists.")
         if await self.repository.get_user_by_email(email):
             raise HTTPException(status_code=409, detail="Email already exists.")
 
@@ -711,6 +731,80 @@ class UploadService:
         user.updated_at = utcnow()
         await self.repository.update_user(user)
         return user
+
+    async def change_password(self, user: User, payload: PasswordChangeInput) -> User:
+        if user.password_hash is None:
+            raise HTTPException(status_code=400, detail="Password login is not configured for this user.")
+        if self._hash_password(payload.current_password) != user.password_hash:
+            raise HTTPException(status_code=403, detail="Current password is incorrect.")
+        if not payload.new_password.strip():
+            raise HTTPException(status_code=400, detail="New password is required.")
+        user.password_hash = self._hash_password(payload.new_password)
+        user.updated_at = utcnow()
+        await self.repository.update_user(user)
+        return user
+
+    async def authenticate_local_user(self, payload: LocalLoginInput) -> User:
+        login = payload.login.strip()
+        if not login or not payload.password:
+            raise HTTPException(status_code=400, detail="Login and password are required.")
+
+        user = await self.repository.get_user_by_email(login.lower())
+        if user is None:
+            user = await self.repository.get_user_by_username(login)
+        if user is None or user.password_hash is None:
+            raise HTTPException(status_code=401, detail="Invalid credentials.")
+        if user.suspended:
+            raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
+        if self._hash_password(payload.password) != user.password_hash:
+            raise HTTPException(status_code=401, detail="Invalid credentials.")
+        return user
+
+    async def list_albums_for_admin(self) -> list[dict[str, object]]:
+        albums = await self.repository.list_albums()
+        users = {user.id: user for user in await self.repository.list_users()}
+        payload: list[dict[str, object]] = []
+        for album in albums:
+            items = await self.repository.list_album_media(album.id)
+            owner = users.get(album.user_id) if album.user_id else None
+            payload.append(
+                {
+                    "id": album.id,
+                    "title": album.title,
+                    "user_id": album.user_id,
+                    "owner_username": owner.username if owner else None,
+                    "item_count": len(items),
+                    "total_size": self._storage_bytes_for_media(items),
+                    "created_at": album.created_at.isoformat(),
+                    "updated_at": album.updated_at.isoformat(),
+                    "expires_at": album.expires_at.isoformat() if album.expires_at else None,
+                }
+            )
+        return payload
+
+    async def admin_update_album(self, album_id: str, payload: AdminAlbumUpdateInput, correlation_id: str) -> Album:
+        album = await self.repository.get_album(album_id)
+        if album is None:
+            raise HTTPException(status_code=404, detail="Album not found.")
+
+        if payload.expires_at is not UNSET:
+            old_expiry = album.expires_at.isoformat() if album.expires_at else None
+            new_expiry = payload.expires_at.isoformat() if payload.expires_at else None
+            if old_expiry != new_expiry:
+                album.expires_at = payload.expires_at
+                album.updated_at = utcnow()
+                await self.repository.update_album(album)
+                await self.event_bus.emit(
+                    AlbumExpiryChanged(
+                        album_id=album.id,
+                        user_id=album.user_id,
+                        old_expiry=old_expiry,
+                        new_expiry=new_expiry,
+                        source="api",
+                        correlation_id=correlation_id,
+                    )
+                )
+        return album
 
     async def global_storage_stats(self) -> dict[str, object]:
         all_media = await self.repository.list_all_media()

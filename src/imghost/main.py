@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import base64
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import hmac
+import json
 from hashlib import sha256
 from math import ceil
 from typing import Any
@@ -19,7 +22,16 @@ from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
 from .repositories import JsonRepository
 from .models import User, utcnow
-from .service import CurrentActor, UNSET, UploadService, UserCreateInput, UserUpdateInput
+from .service import (
+    AdminAlbumUpdateInput,
+    CurrentActor,
+    LocalLoginInput,
+    PasswordChangeInput,
+    UNSET,
+    UploadService,
+    UserCreateInput,
+    UserUpdateInput,
+)
 from .storage import LocalFilesystemBackend
 from .tasks import AsyncTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 
@@ -118,6 +130,21 @@ class AdminUserPatchRequest(BaseModel):
     suspended: bool | None = None
     quota_bytes: int | None = None
     password: str | None = None
+
+
+class UserPasswordPatchRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class LoginRequest(BaseModel):
+    login: str
+    password: str
+    remember_me: bool = True
+
+
+class AdminAlbumPatchRequest(BaseModel):
+    expires_at: datetime | None = None
 
 
 def get_state(request: Request) -> AppState:
@@ -231,27 +258,107 @@ def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[
 @dataclass
 class ResolvedPrincipal:
     user: User
-    raw_api_key: str
+    raw_api_key: str | None = None
+
+
+def _b64encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(f"{data}{padding}")
+
+
+def create_session_token(settings: Settings, user: User, *, remember_me: bool) -> tuple[str, datetime | None]:
+    created_at = utcnow().replace(microsecond=0)
+    expires_at = None
+    if remember_me:
+        expires_at = created_at + timedelta(days=settings.session_remember_days)
+    payload = {
+        "user_id": user.id,
+        "created_at": created_at.isoformat(),
+        "expires_at": expires_at.isoformat() if expires_at else None,
+    }
+    payload_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    signature = hmac.new(settings.secret_key.encode("utf-8"), payload_bytes, sha256).hexdigest()
+    return f"{_b64encode(payload_bytes)}.{signature}", expires_at
+
+
+def resolve_session_user(settings: Settings, token: str) -> str | None:
+    payload_b64, dot, signature = token.partition(".")
+    if not dot or not payload_b64 or not signature:
+        return None
+    try:
+        payload_bytes = _b64decode(payload_b64)
+    except Exception:
+        return None
+    expected = hmac.new(settings.secret_key.encode("utf-8"), payload_bytes, sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except json.JSONDecodeError:
+        return None
+    expires_at_raw = payload.get("expires_at")
+    if expires_at_raw:
+        try:
+            expires_at = datetime.fromisoformat(expires_at_raw)
+        except ValueError:
+            return None
+        if expires_at <= utcnow():
+            return None
+    user_id = payload.get("user_id")
+    return user_id if isinstance(user_id, str) and user_id else None
+
+
+def apply_session_cookie(response: Response, settings: Settings, token: str, *, expires_at: datetime | None) -> None:
+    max_age = None
+    if expires_at is not None:
+        max_age = max(1, int((expires_at - utcnow()).total_seconds()))
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=max_age,
+    )
+
+
+def clear_session_cookie(response: Response, settings: Settings) -> None:
+    response.delete_cookie(key=settings.session_cookie_name, httponly=True, samesite="lax", secure=False)
 
 
 async def authenticated_principal(request: Request, *, required: bool = False) -> ResolvedPrincipal | None:
     state = get_state(request)
     header = request.headers.get("Authorization", "")
     scheme, _, token = header.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        if required:
-            raise HTTPException(status_code=401, detail="Authentication required.")
-        return None
+    if scheme.lower() == "bearer" and token:
+        api_key = await state.repository.get_api_key_by_hash(sha256(token.encode("utf-8")).hexdigest())
+        if api_key is None:
+            raise HTTPException(status_code=401, detail="Invalid API key.")
+        user = await state.repository.get_user(api_key.user_id)
+        if user is None or user.suspended:
+            raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
+        api_key.last_used_at = utcnow()
+        await state.repository.update_api_key(api_key)
+        return ResolvedPrincipal(user=user, raw_api_key=token)
 
-    api_key = await state.repository.get_api_key_by_hash(sha256(token.encode("utf-8")).hexdigest())
-    if api_key is None:
-        raise HTTPException(status_code=401, detail="Invalid API key.")
-    user = await state.repository.get_user(api_key.user_id)
-    if user is None or user.suspended:
-        raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
-    api_key.last_used_at = utcnow()
-    await state.repository.update_api_key(api_key)
-    return ResolvedPrincipal(user=user, raw_api_key=token)
+    session_token = request.cookies.get(state.settings.session_cookie_name)
+    if session_token:
+        user_id = resolve_session_user(state.settings, session_token)
+        if user_id:
+            user = await state.repository.get_user(user_id)
+            if user is None:
+                raise HTTPException(status_code=401, detail="Invalid session.")
+            if user.suspended:
+                raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
+            return ResolvedPrincipal(user=user)
+
+    if required:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return None
 
 
 async def authenticated_user(request: Request, *, required: bool = False) -> User | None:
@@ -360,6 +467,27 @@ async def upload(
     }
     headers = {"X-Correlation-ID": cid}
     return JSONResponse(payload, headers=headers)
+
+
+@app.post("/api/v1/auth/login")
+async def login(request: Request, payload: LoginRequest) -> JSONResponse:
+    state = get_state(request)
+    cid = correlation_id(request)
+    user = await state.uploads.authenticate_local_user(
+        LocalLoginInput(login=payload.login, password=payload.password)
+    )
+    token, expires_at = create_session_token(state.settings, user, remember_me=payload.remember_me)
+    summary = await state.uploads.get_current_user_summary(user)
+    response = JSONResponse({"authenticated": True, "user": summary}, headers={"X-Correlation-ID": cid})
+    apply_session_cookie(response, state.settings, token, expires_at=expires_at)
+    return response
+
+
+@app.post("/api/v1/auth/logout")
+async def logout(request: Request) -> JSONResponse:
+    response = JSONResponse({"authenticated": False}, headers={"X-Correlation-ID": correlation_id(request)})
+    clear_session_cookie(response, get_state(request).settings)
+    return response
 
 
 @app.get("/api/v1/album/{album_id}")
@@ -575,9 +703,26 @@ async def regenerate_api_key(request: Request) -> JSONResponse:
     )
 
 
+@app.patch("/api/v1/user/me/password")
+async def change_current_user_password(request: Request, payload: UserPasswordPatchRequest) -> JSONResponse:
+    state = get_state(request)
+    user = await authenticated_user(request, required=True)
+    cid = correlation_id(request)
+    await state.uploads.change_password(
+        user,
+        PasswordChangeInput(
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        ),
+    )
+    return JSONResponse({"updated": True}, headers={"X-Correlation-ID": cid})
+
+
 @app.get("/api/v1/user/me/sharex-config")
 async def download_sharex_config(request: Request) -> Response:
     principal = await authenticated_principal(request, required=True)
+    if principal.raw_api_key is None:
+        raise HTTPException(status_code=400, detail="ShareX config download requires API key authentication.")
     state = get_state(request)
     payload = {
         "Version": "14.1.0",
@@ -626,6 +771,14 @@ async def admin_list_users(request: Request) -> JSONResponse:
     state = get_state(request)
     await require_admin_user(request)
     payload = await state.uploads.list_users_with_usage()
+    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
+
+
+@app.get("/api/v1/admin/albums")
+async def admin_list_albums(request: Request) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    payload = await state.uploads.list_albums_for_admin()
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
@@ -695,6 +848,42 @@ async def admin_delete_user(request: Request, user_id: str) -> JSONResponse:
             "user_id": user_id,
             "album_count": deleted["album_count"],
             "media_count": deleted["media_count"],
+        },
+        headers={"X-Correlation-ID": cid},
+    )
+
+
+@app.patch("/api/v1/admin/albums/{album_id}")
+async def admin_patch_album(request: Request, album_id: str, payload: AdminAlbumPatchRequest) -> JSONResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    cid = correlation_id(request)
+    await require_admin_user(request)
+    updated = await state.uploads.admin_update_album(
+        album_id,
+        AdminAlbumUpdateInput(
+            expires_at=payload.expires_at if "expires_at" in payload.model_fields_set else UNSET,
+        ),
+        cid,
+    )
+    items = await state.repository.list_album_media(album_id)
+    return JSONResponse(album_to_payload(state.settings.base_url, updated, items), headers={"X-Correlation-ID": cid})
+
+
+@app.delete("/api/v1/admin/albums/{album_id}")
+async def admin_delete_album(request: Request, album_id: str) -> JSONResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    cid = correlation_id(request)
+    admin = await require_admin_user(request)
+    album, items = await state.uploads.delete_album(album_id, None, cid, actor_user=admin)
+    return JSONResponse(
+        {
+            "deleted": True,
+            "album_id": album.id,
+            "item_count": len(items),
         },
         headers={"X-Correlation-ID": cid},
     )

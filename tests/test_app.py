@@ -1,4 +1,5 @@
 import json
+import hashlib
 from io import BytesIO
 from time import monotonic, sleep
 from zipfile import ZipFile
@@ -686,3 +687,161 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
 
         forbidden = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {user_key}"})
         assert forbidden.status_code == 403
+
+
+def test_user_can_change_password_with_current_password(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    user_id, api_key = create_user_and_api_key(capsys, username="iris", email="iris@example.com")
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["users"][user_id]["password_hash"] = hashlib.sha256(b"old-pass").hexdigest()
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+    with TestClient(app) as client:
+        bad = client.patch(
+            "/api/v1/user/me/password",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"current_password": "wrong", "new_password": "new-pass"},
+        )
+        assert bad.status_code == 403
+
+        good = client.patch(
+            "/api/v1/user/me/password",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"current_password": "old-pass", "new_password": "new-pass"},
+        )
+        assert good.status_code == 200
+        assert good.json()["updated"] is True
+
+        updated_state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert updated_state["users"][user_id]["password_hash"] == hashlib.sha256(b"new-pass").hexdigest()
+
+
+def test_local_login_sets_session_cookie_and_authenticates_browser_flow(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="kira", email="kira@example.com")
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["users"][user_id]["password_hash"] = hashlib.sha256(b"open-sesame").hexdigest()
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "kira@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+        assert "imghost_session=" in login.headers["set-cookie"]
+        assert "Max-Age=" in login.headers["set-cookie"]
+        assert login.json()["authenticated"] is True
+
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 200
+        assert me.json()["id"] == user_id
+
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+        wait_for_thumbnail(client, payload["media_id"])
+
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        assert persisted["albums"][payload["album_id"]]["user_id"] == user_id
+        assert persisted["albums"][payload["album_id"]]["expires_at"] is None
+        assert persisted["albums"][payload["album_id"]]["delete_token"] is None
+
+        logout = client.post("/api/v1/auth/logout")
+        assert logout.status_code == 200
+        assert logout.json()["authenticated"] is False
+
+        after_logout = client.get("/api/v1/user/me")
+        assert after_logout.status_code == 401
+
+
+def test_local_login_supports_username_session_cookie_and_sharex_requires_api_key(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="lena", email="lena@example.com")
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["users"][user_id]["password_hash"] = hashlib.sha256(b"letmein").hexdigest()
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+    with TestClient(app) as client:
+        bad = client.post(
+            "/api/v1/auth/login",
+            json={"login": "lena", "password": "wrong"},
+        )
+        assert bad.status_code == 401
+
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "lena", "password": "letmein", "remember_me": False},
+        )
+        assert login.status_code == 200
+        assert "imghost_session=" in login.headers["set-cookie"]
+        assert "Max-Age=" not in login.headers["set-cookie"]
+
+        sharex = client.get("/api/v1/user/me/sharex-config")
+        assert sharex.status_code == 400
+        assert sharex.json()["detail"] == "ShareX config download requires API key authentication."
+
+
+def test_admin_album_management_lists_sets_expiry_and_deletes(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="admin2", email="admin2@example.com")
+    user_id, user_key = create_user_and_api_key(capsys, username="jules", email="jules@example.com")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {user_key}"},
+            data={"title": "Managed"},
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+
+        albums = client.get("/api/v1/admin/albums", headers={"Authorization": f"Bearer {admin_key}"})
+        assert albums.status_code == 200
+        album = next(item for item in albums.json() if item["id"] == payload["album_id"])
+        assert album["owner_username"] == "jules"
+        assert album["user_id"] == user_id
+        assert album["item_count"] == 1
+
+        expiry = (utcnow().replace(microsecond=0)).isoformat()
+        patched = client.patch(
+            f"/api/v1/admin/albums/{payload['album_id']}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"expires_at": expiry},
+        )
+        assert patched.status_code == 200
+        assert patched.json()["expires_at"] == expiry
+
+        cleared = client.patch(
+            f"/api/v1/admin/albums/{payload['album_id']}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"expires_at": None},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["expires_at"] is None
+
+        deleted = client.delete(
+            f"/api/v1/admin/albums/{payload['album_id']}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+
+        assert client.get("/api/v1/admin/albums", headers={"Authorization": f"Bearer {user_key}"}).status_code == 403

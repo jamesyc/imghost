@@ -63,6 +63,14 @@ class JsonRepository:
                     return user
         return None
 
+    async def get_user_by_username(self, username: str) -> User | None:
+        async with self._lock:
+            state = self._load()
+            for user in state.users.values():
+                if user.username == username:
+                    return user
+        return None
+
     async def update_user(self, user: User) -> User:
         async with self._lock:
             state = self._load()
@@ -203,6 +211,12 @@ class JsonRepository:
             state = self._load()
             items = [album for album in state.albums.values() if album.expires_at is not None and album.expires_at <= now]
         return sorted(items, key=lambda album: album.expires_at or now)
+
+    async def list_albums(self) -> list[Album]:
+        async with self._lock:
+            state = self._load()
+            items = list(state.albums.values())
+        return sorted(items, key=lambda album: album.created_at)
 
     async def list_album_media(self, album_id: str) -> list[Media]:
         async with self._lock:
