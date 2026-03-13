@@ -18,6 +18,8 @@ class User:
     is_admin: bool
     suspended: bool
     quota_bytes: int | None
+    rate_limit_rpm: int | None
+    rate_limit_bph: int | None
     created_at: datetime
     updated_at: datetime
 
@@ -36,6 +38,8 @@ class User:
         values.setdefault("is_admin", False)
         values.setdefault("suspended", False)
         values.setdefault("quota_bytes", None)
+        values.setdefault("rate_limit_rpm", None)
+        values.setdefault("rate_limit_bph", None)
         return cls(**values)
 
 

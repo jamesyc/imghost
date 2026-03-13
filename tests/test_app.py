@@ -755,6 +755,45 @@ def test_authenticated_rate_limit_uses_user_identity(tmp_path, monkeypatch, caps
         assert second.json()["detail"] == "Upload rate limit exceeded."
 
 
+def test_user_rate_limit_override_takes_precedence_over_runtime_default(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="overrideadmin", email="overrideadmin@example.com")
+    user_id, api_key = create_user_and_api_key(capsys, username="overrideuser", email="overrideuser@example.com")
+
+    with TestClient(app) as client:
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"rate_limit_user_rpm": 5, "rate_limit_user_bph": 1000000},
+        )
+        assert configured.status_code == 200
+
+        overridden = client.patch(
+            f"/api/v1/admin/users/{user_id}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"rate_limit_rpm": 1},
+        )
+        assert overridden.status_code == 200
+        assert overridden.json()["rate_limit_rpm"] == 1
+
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Upload rate limit exceeded."
+
+
 def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -784,20 +823,36 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
                 "email": "harry@example.com",
                 "password": "secret",
                 "quota_bytes": 12345,
+                "rate_limit_rpm": 12,
+                "rate_limit_bph": 34567,
             },
         )
         assert created.status_code == 201
         created_user = created.json()
         assert created_user["quota_bytes"] == 12345
+        assert created_user["rate_limit_rpm"] == 12
+        assert created_user["rate_limit_bph"] == 34567
+
+        refreshed_users = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_key}"})
+        assert refreshed_users.status_code == 200
+        refreshed_list = {item["id"]: item for item in refreshed_users.json()}
+        assert refreshed_list[created_user["id"]]["rate_limit_rpm"] == 12
+        assert refreshed_list[created_user["id"]]["rate_limit_bph"] == 34567
 
         patched = client.patch(
             f"/api/v1/admin/users/{created_user['id']}",
             headers={"Authorization": f"Bearer {admin_key}"},
-            json={"suspended": True, "quota_bytes": 999},
+            json={"suspended": True, "quota_bytes": 999, "rate_limit_rpm": 7},
         )
         assert patched.status_code == 200
         assert patched.json()["suspended"] is True
         assert patched.json()["quota_bytes"] == 999
+        assert patched.json()["rate_limit_rpm"] == 7
+
+        refreshed_users = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_key}"})
+        assert refreshed_users.status_code == 200
+        refreshed_list = {item["id"]: item for item in refreshed_users.json()}
+        assert refreshed_list[created_user["id"]]["rate_limit_rpm"] == 7
 
         stats = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {admin_key}"})
         assert stats.status_code == 200

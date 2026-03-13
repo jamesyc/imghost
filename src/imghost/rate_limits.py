@@ -7,6 +7,7 @@ from time import monotonic
 
 from fastapi import HTTPException
 
+from .models import User
 from .runtime_config import JsonRuntimeConfig
 
 MINUTE_SECONDS = 60.0
@@ -46,13 +47,13 @@ class InMemoryRateLimiter:
         *,
         actor_key: str,
         byte_count: int,
-        authenticated: bool,
+        user: User | None,
     ) -> None:
         now = monotonic()
-        if authenticated:
+        if user is not None:
             counter = self._user_windows.setdefault(actor_key, WindowCounter())
-            rpm_limit = int(await self.runtime_config.get_value("rate_limit_user_rpm"))
-            bph_limit = int(await self.runtime_config.get_value("rate_limit_user_bph"))
+            rpm_limit = user.rate_limit_rpm if user.rate_limit_rpm is not None else int(await self.runtime_config.get_value("rate_limit_user_rpm"))
+            bph_limit = user.rate_limit_bph if user.rate_limit_bph is not None else int(await self.runtime_config.get_value("rate_limit_user_bph"))
             self._enforce_counter(counter, now=now, rpm_limit=rpm_limit, bph_limit=bph_limit, byte_count=byte_count)
             counter.add(now=now, byte_count=byte_count)
             return

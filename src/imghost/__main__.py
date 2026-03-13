@@ -65,6 +65,8 @@ async def run_cli(argv: list[str] | None = None) -> int:
             is_admin=args.admin,
             suspended=False,
             quota_bytes=args.quota_bytes,
+            rate_limit_rpm=None,
+            rate_limit_bph=None,
             created_at=utcnow(),
             updated_at=utcnow(),
         )

@@ -139,11 +139,15 @@ class AdminUserCreateRequest(BaseModel):
     password: str | None = None
     is_admin: bool = False
     quota_bytes: int | None = None
+    rate_limit_rpm: int | None = None
+    rate_limit_bph: int | None = None
 
 
 class AdminUserPatchRequest(BaseModel):
     suspended: bool | None = None
     quota_bytes: int | None = None
+    rate_limit_rpm: int | None = None
+    rate_limit_bph: int | None = None
     password: str | None = None
 
 
@@ -1074,6 +1078,8 @@ async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -
             password=payload.password,
             is_admin=payload.is_admin,
             quota_bytes=payload.quota_bytes,
+            rate_limit_rpm=payload.rate_limit_rpm,
+            rate_limit_bph=payload.rate_limit_bph,
         ),
         method="admin",
         correlation_id=cid,
@@ -1088,6 +1094,8 @@ async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -
             "is_admin": created.is_admin,
             "suspended": created.suspended,
             "quota_bytes": created.quota_bytes if created.quota_bytes is not None else state.settings.default_user_quota_bytes,
+            "rate_limit_rpm": created.rate_limit_rpm,
+            "rate_limit_bph": created.rate_limit_bph,
         },
         status_code=201,
         headers={"X-Correlation-ID": cid},
@@ -1104,6 +1112,8 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
         payload=UserUpdateInput(
             suspended=payload.suspended if "suspended" in payload.model_fields_set else None,
             quota_bytes=payload.quota_bytes if "quota_bytes" in payload.model_fields_set else UNSET,
+            rate_limit_rpm=payload.rate_limit_rpm if "rate_limit_rpm" in payload.model_fields_set else UNSET,
+            rate_limit_bph=payload.rate_limit_bph if "rate_limit_bph" in payload.model_fields_set else UNSET,
             password=payload.password if "password" in payload.model_fields_set else None,
         ),
         correlation_id=cid,
@@ -1117,6 +1127,8 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
             "is_admin": updated.is_admin,
             "suspended": updated.suspended,
             "quota_bytes": updated.quota_bytes if updated.quota_bytes is not None else state.settings.default_user_quota_bytes,
+            "rate_limit_rpm": updated.rate_limit_rpm,
+            "rate_limit_bph": updated.rate_limit_bph,
         },
         headers={"X-Correlation-ID": cid},
     )

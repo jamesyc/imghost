@@ -80,12 +80,16 @@ class UserCreateInput:
     password: str | None
     is_admin: bool
     quota_bytes: int | None
+    rate_limit_rpm: int | None = None
+    rate_limit_bph: int | None = None
 
 
 @dataclass
 class UserUpdateInput:
     suspended: bool | None = None
     quota_bytes: int | None | object = UNSET
+    rate_limit_rpm: int | None | object = UNSET
+    rate_limit_bph: int | None | object = UNSET
     password: str | None = None
 
 
@@ -146,7 +150,7 @@ class UploadService:
             await self.rate_limiter.enforce_upload_limits(
                 actor_key=rate_limit_key,
                 byte_count=len(payload),
-                authenticated=actor.user is not None,
+                user=actor.user,
             )
         await self._enforce_storage_quotas(actor.user, incoming_bytes=len(payload))
         album = await self._get_or_create_album(
@@ -698,6 +702,8 @@ class UploadService:
                 "is_admin": user.is_admin,
                 "suspended": user.suspended,
                 "quota_bytes": user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes,
+                "rate_limit_rpm": user.rate_limit_rpm,
+                "rate_limit_bph": user.rate_limit_bph,
                 "storage_used_bytes": usage_by_user.get(user.id, 0),
                 "media_count": count_by_user.get(user.id, 0),
                 "created_at": user.created_at.isoformat(),
@@ -736,6 +742,8 @@ class UploadService:
             is_admin=payload.is_admin,
             suspended=False,
             quota_bytes=payload.quota_bytes,
+            rate_limit_rpm=payload.rate_limit_rpm,
+            rate_limit_bph=payload.rate_limit_bph,
             created_at=now,
             updated_at=now,
         )
@@ -770,6 +778,14 @@ class UploadService:
             )
         if payload.quota_bytes is not UNSET:
             user.quota_bytes = payload.quota_bytes if payload.quota_bytes is None or isinstance(payload.quota_bytes, int) else None
+        if payload.rate_limit_rpm is not UNSET:
+            user.rate_limit_rpm = (
+                payload.rate_limit_rpm if payload.rate_limit_rpm is None or isinstance(payload.rate_limit_rpm, int) else None
+            )
+        if payload.rate_limit_bph is not UNSET:
+            user.rate_limit_bph = (
+                payload.rate_limit_bph if payload.rate_limit_bph is None or isinstance(payload.rate_limit_bph, int) else None
+            )
         if payload.password is not None:
             user.password_hash = self._hash_password(payload.password)
         user.updated_at = utcnow()

@@ -89,6 +89,9 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 ### Users / Authentication
 
 - Persisted `User` model
+- Persisted per-user upload limit override fields:
+  - `rate_limit_rpm`
+  - `rate_limit_bph`
 - Persisted `ApiKey` model
 - One active API key per user
 - Bearer API-key auth
@@ -148,6 +151,9 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - global anonymous bytes per hour
   - per-authenticated-user uploads per minute
   - per-authenticated-user bytes per hour
+- Effective per-authenticated-user rate-limit resolution:
+  - explicit user override if set
+  - otherwise runtime-config default
 - Anonymous identity derived from client IP plus user agent
 - IP extraction precedence for proxied deployments:
   - `CF-Connecting-IP`
@@ -173,6 +179,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `DELETE /api/v1/admin/albums/{albumId}`
 - Admin album expiry set/clear
 - Admin user suspend/quota/password updates
+- Admin user create/patch/list payloads include per-user upload rate-limit overrides
 - Audit log API:
   - `GET /api/v1/admin/audit`
   - filterable by event type, actor, correlation ID, and date range
