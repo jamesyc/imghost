@@ -797,6 +797,72 @@ def test_local_login_supports_username_session_cookie_and_sharex_requires_api_ke
         assert sharex.json()["detail"] == "ShareX config download requires API key authentication."
 
 
+def test_registration_creates_user_session_and_audit_entry(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="regadmin", email="regadmin@example.com")
+
+    with TestClient(app) as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            headers={"X-Correlation-ID": "register-flow"},
+            json={
+                "username": "newuser",
+                "email": "newuser@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+        assert "imghost_session=" in registered.headers["set-cookie"]
+        payload = registered.json()
+        assert payload["authenticated"] is True
+        user_id = payload["user"]["id"]
+        assert payload["user"]["username"] == "newuser"
+
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 200
+        assert me.json()["id"] == user_id
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "user_created", "correlation_id": "register-flow"},
+        )
+        assert audit.status_code == 200
+        audit_payload = audit.json()
+        assert len(audit_payload) == 1
+        assert audit_payload[0]["actor_id"] == user_id
+        assert audit_payload[0]["metadata"]["method"] == "registration"
+        assert audit_payload[0]["target_id"] == user_id
+
+
+def test_registration_respects_allow_registration_runtime_config(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="regcfgadmin", email="regcfgadmin@example.com")
+
+    with TestClient(app) as client:
+        disabled = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"allow_registration": False},
+        )
+        assert disabled.status_code == 200
+
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "blocked",
+                "email": "blocked@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Registration is disabled."
+
+
 def test_admin_album_management_lists_sets_expiry_and_deletes(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

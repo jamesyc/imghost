@@ -23,6 +23,7 @@ from .events import (
     MediaDeleted,
     MediaUploaded,
     UserDeleted,
+    UserRegistered,
     UserSuspended,
 )
 from .ids import generate_album_id, generate_media_id
@@ -694,13 +695,23 @@ class UploadService:
             for user in users
         ]
 
-    async def create_user(self, payload: UserCreateInput) -> User:
+    async def create_user(
+        self,
+        payload: UserCreateInput,
+        *,
+        method: str = "admin",
+        correlation_id: str | None = None,
+        actor_id: str | None = None,
+        source: str = "api",
+    ) -> User:
         username = payload.username.strip()
         email = payload.email.strip().lower()
         if not username:
             raise HTTPException(status_code=400, detail="Username is required.")
         if not email:
             raise HTTPException(status_code=400, detail="Email is required.")
+        if payload.password is not None and not payload.password.strip():
+            raise HTTPException(status_code=400, detail="Password is required.")
         if await self.repository.get_user_by_username(username):
             raise HTTPException(status_code=409, detail="Username already exists.")
         if await self.repository.get_user_by_email(email):
@@ -719,6 +730,16 @@ class UploadService:
             updated_at=now,
         )
         await self.repository.create_user(user)
+        if correlation_id is not None:
+            await self.event_bus.emit(
+                UserRegistered(
+                    user_id=user.id,
+                    actor_id=actor_id if actor_id is not None else (user.id if method == "registration" else None),
+                    method=method,
+                    source=source,
+                    correlation_id=correlation_id,
+                )
+            )
         return user
 
     async def update_user(self, user_id: str, payload: UserUpdateInput, correlation_id: str, *, actor_id: str | None = None) -> User:

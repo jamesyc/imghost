@@ -18,6 +18,7 @@ from .events import (
     MediaDeleted,
     MediaUploaded,
     UserDeleted,
+    UserRegistered,
     UserSuspended,
 )
 from .models import AuditEvent, utcnow
@@ -249,6 +250,22 @@ def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> No
             },
         )
 
+    async def write_user_registered(event: UserRegistered) -> None:
+        await audit_log.write_audit_event(
+            "user_created",
+            event.actor_id,
+            None,
+            "user",
+            event.user_id,
+            event.correlation_id,
+            {
+                "target_user_id": event.user_id,
+                "method": event.method,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
     async def write_user_suspended(event: UserSuspended) -> None:
         await audit_log.write_audit_event(
             "user_suspended",
@@ -291,5 +308,6 @@ def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> No
     event_bus.subscribe(AlbumReordered, write_album_reordered)
     event_bus.subscribe(AlbumExpiryChanged, write_album_expiry_changed)
     event_bus.subscribe(UserDeleted, write_user_deleted)
+    event_bus.subscribe(UserRegistered, write_user_registered)
     event_bus.subscribe(UserSuspended, write_user_suspended)
     event_bus.subscribe(ConfigChanged, write_config_changed)

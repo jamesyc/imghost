@@ -9,7 +9,7 @@ The prototype is now well past the original anonymous upload proof-of-concept st
 - Background thumbnail processing and recovery
 - Image, SVG, animated image, and video processing pipelines
 - Cleanup/pruning commands
-- Admin user management, quota enforcement, album management, audit log API, and runtime config API
+- Authenticated registration, admin user management, quota enforcement, album management, audit log API, and runtime config API
 
 The codebase remains a FastAPI prototype backed by:
 
@@ -17,7 +17,7 @@ The codebase remains a FastAPI prototype backed by:
 - local filesystem storage
 - in-process async task workers
 
-It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or the full production runtime config model.
+It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or the full production runtime/session config model.
 
 ## Implemented
 
@@ -94,6 +94,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - Bearer API-key auth
 - API key `last_used_at` tracking
 - Local password login by username or email
+- Self-service registration with username, email, and password
 - Signed cookie session auth
 - Browser logout endpoint
 - Remember-me session support
@@ -110,6 +111,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `GET /api/v1/user/me`
 - Local auth endpoints:
   - `POST /api/v1/auth/login`
+  - `POST /api/v1/auth/register`
   - `POST /api/v1/auth/logout`
 - API key regeneration:
   - `POST /api/v1/user/me/api-key`
@@ -170,6 +172,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `AlbumReordered`
   - `AlbumExpiryChanged`
   - `ConfigChanged`
+  - `UserRegistered`
   - `UserDeleted`
   - `UserSuspended`
 
@@ -182,6 +185,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `anon_upload_enabled`
   - `anon_expiry_hours`
   - rate-limit config keys from the design
+- Immediate registration enable/disable without restart via `allow_registration`
 - Immediate anonymous upload behavior changes without restart for:
   - anonymous upload enable/disable
   - anonymous expiry hours
@@ -197,6 +201,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - `AlbumReordered`
 - `AlbumExpiryChanged`
 - `ConfigChanged`
+- `UserRegistered`
 - `UserDeleted`
 - `UserSuspended`
 
@@ -206,14 +211,12 @@ These events exist and are emitted in the service layer. Thumbnail, audit, and c
 
 ### Authentication / Sessions
 
-- Registration flow
 - Redis-backed session management
 - OAuth / SSO
 
 ### Audit / Config System
 
 - Config change audit/history UI beyond raw audit log
-- Runtime-config-backed registration flow
 - Runtime-config-backed rate limiting enforcement
 
 ### Storage / Infra from Final Design
@@ -243,12 +246,10 @@ The anonymous/public media host path is already at a solid prototype-MVP level.
 The backend now has a credible logged-in-user MVP:
 
 1. local login/logout/session support is implemented
-2. current user uploads, password change, account deletion, and ShareX export are implemented
+2. registration is implemented
+3. current user uploads, password change, account deletion, and ShareX export are implemented
 
-The remaining gap is account creation strategy:
-
-1. optional registration if self-service sign-up is desired
-2. otherwise admin-created accounts are already workable
+The remaining gaps are polish and scale-oriented concerns, not the core logged-in flow.
 
 ## Recommended Next Step
 
@@ -256,17 +257,17 @@ The next best implementation slice depends on the target:
 
 ### If the goal is backend completeness against `DESIGN.md`
 
-Implement registration and config consumption next:
+Implement broader config consumption next:
 
-- registration endpoint gated by `allow_registration`
-- consume runtime config in more places beyond anonymous upload behavior
+- consume runtime config in more places beyond anonymous upload behavior and registration
 - add real rate limiting if/when Redis arrives
+- surface config state in browser UI
 
-That is now the most obvious missing path after the config control plane landed.
+That is now the most obvious missing path after registration landed.
 
 ## Test Status
 
 Current automated status at the time of writing:
 
 - `uv run pytest -q`
-- passing: `34 passed`
+- passing: `36 passed`

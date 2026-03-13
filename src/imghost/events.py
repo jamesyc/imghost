@@ -117,6 +117,15 @@ class UserSuspended:
 
 
 @dataclass(slots=True)
+class UserRegistered:
+    user_id: str
+    actor_id: str | None
+    method: str
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
 class ConfigChanged:
     key: str
     actor_id: str | None

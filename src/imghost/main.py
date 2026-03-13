@@ -155,6 +155,13 @@ class LoginRequest(BaseModel):
     remember_me: bool = True
 
 
+class RegistrationRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    remember_me: bool = True
+
+
 class AdminAlbumPatchRequest(BaseModel):
     expires_at: datetime | None = None
 
@@ -504,6 +511,31 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
     )
     token, expires_at = create_session_token(state.settings, user, remember_me=payload.remember_me)
     summary = await state.uploads.get_current_user_summary(user)
+    response = JSONResponse({"authenticated": True, "user": summary}, headers={"X-Correlation-ID": cid})
+    apply_session_cookie(response, state.settings, token, expires_at=expires_at)
+    return response
+
+
+@app.post("/api/v1/auth/register")
+async def register(request: Request, payload: RegistrationRequest) -> JSONResponse:
+    state = get_state(request)
+    cid = correlation_id(request)
+    if not await state.runtime_config.get_value("allow_registration"):
+        raise HTTPException(status_code=403, detail="Registration is disabled.")
+    created = await state.uploads.create_user(
+        UserCreateInput(
+            username=payload.username,
+            email=payload.email,
+            password=payload.password,
+            is_admin=False,
+            quota_bytes=None,
+        ),
+        method="registration",
+        correlation_id=cid,
+        source="web",
+    )
+    token, expires_at = create_session_token(state.settings, created, remember_me=payload.remember_me)
+    summary = await state.uploads.get_current_user_summary(created)
     response = JSONResponse({"authenticated": True, "user": summary}, headers={"X-Correlation-ID": cid})
     apply_session_cookie(response, state.settings, token, expires_at=expires_at)
     return response
@@ -870,7 +902,8 @@ async def admin_patch_config(request: Request, payload: AdminConfigPatchRequest)
 @app.post("/api/v1/admin/users")
 async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    cid = correlation_id(request)
+    admin = await require_admin_user(request)
     created = await state.uploads.create_user(
         payload=UserCreateInput(
             username=payload.username,
@@ -878,7 +911,11 @@ async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -
             password=payload.password,
             is_admin=payload.is_admin,
             quota_bytes=payload.quota_bytes,
-        )
+        ),
+        method="admin",
+        correlation_id=cid,
+        actor_id=admin.id,
+        source="api",
     )
     return JSONResponse(
         {
@@ -890,7 +927,7 @@ async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -
             "quota_bytes": created.quota_bytes if created.quota_bytes is not None else state.settings.default_user_quota_bytes,
         },
         status_code=201,
-        headers={"X-Correlation-ID": correlation_id(request)},
+        headers={"X-Correlation-ID": cid},
     )
 
 
