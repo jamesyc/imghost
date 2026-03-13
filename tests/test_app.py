@@ -27,6 +27,16 @@ def wait_for_thumbnail(client: TestClient, media_id: str, *, suffix: str = "jpg"
     raise AssertionError(f"thumbnail for {media_id} was not ready within {timeout} seconds")
 
 
+def create_user_and_api_key(capsys, *, username: str, email: str) -> tuple[str, str]:
+    assert cli_main(["create-user", "--username", username, "--email", email]) == 0
+    create_output = capsys.readouterr().out.strip().splitlines()
+    user_id = create_output[-1].split(": ", 1)[1]
+    assert cli_main(["issue-api-key", "--user-id", user_id]) == 0
+    issue_lines = capsys.readouterr().out.strip().splitlines()
+    api_key = issue_lines[-1].split(": ", 1)[1]
+    return user_id, api_key
+
+
 def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -437,3 +447,84 @@ def test_album_payload_and_page_show_video_compatibility_warning(tmp_path, monke
         page_response = client.get(f"/a/{payload['album_id']}")
         assert page_response.status_code == 200
         assert "HEVC encoding" in page_response.text
+
+
+def test_api_key_upload_creates_user_album_and_current_user_view(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    user_id, api_key = create_user_and_api_key(capsys, username="alice", email="alice@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert "delete_token=" not in payload["delete_url"]
+        wait_for_thumbnail(client, payload["media_id"])
+
+        me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {api_key}"})
+        assert me.status_code == 200
+        me_payload = me.json()
+        assert me_payload["id"] == user_id
+        assert me_payload["username"] == "alice"
+        assert me_payload["has_api_key"] is True
+        assert me_payload["storage_used_bytes"] > 0
+
+        state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        assert state["albums"][payload["album_id"]]["user_id"] == user_id
+        assert state["albums"][payload["album_id"]]["expires_at"] is None
+        assert state["media"][payload["media_id"]]["user_id"] == user_id
+
+
+def test_api_key_upload_requires_single_new_album_request(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="bob", email="bob@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
+            ],
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "API key uploads must contain exactly one file."
+
+
+def test_api_key_can_rotate_and_delete_album_via_get(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="carol", email="carol@example.com")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+
+        rotated = client.post("/api/v1/user/me/api-key", headers={"Authorization": f"Bearer {api_key}"})
+        assert rotated.status_code == 200
+        new_api_key = rotated.json()["api_key"]
+        assert new_api_key != api_key
+
+        old_me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {api_key}"})
+        assert old_me.status_code == 401
+
+        delete = client.get(
+            f"/api/v1/album/{payload['album_id']}/delete",
+            headers={"Authorization": f"Bearer {new_api_key}"},
+        )
+        assert delete.status_code == 200
+        assert delete.json()["deleted"] is True

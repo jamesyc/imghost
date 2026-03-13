@@ -7,11 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .models import Album, Media
+from .models import Album, ApiKey, Media, User
 
 
 @dataclass
 class State:
+    users: dict[str, User]
+    api_keys: dict[str, ApiKey]
     albums: dict[str, Album]
     media: dict[str, Media]
 
@@ -22,21 +24,90 @@ class JsonRepository:
         self._lock = Lock()
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         if not self.state_path.exists():
-            self.state_path.write_text('{"albums": {}, "media": {}}', encoding="utf-8")
+            self.state_path.write_text('{"users": {}, "api_keys": {}, "albums": {}, "media": {}}', encoding="utf-8")
 
     def _load(self) -> State:
         payload = json.loads(self.state_path.read_text(encoding="utf-8"))
         return State(
+            users={key: User.from_dict(value) for key, value in payload.get("users", {}).items()},
+            api_keys={key: ApiKey.from_dict(value) for key, value in payload.get("api_keys", {}).items()},
             albums={key: Album.from_dict(value) for key, value in payload["albums"].items()},
             media={key: Media.from_dict(value) for key, value in payload["media"].items()},
         )
 
     def _save(self, state: State) -> None:
         payload: dict[str, Any] = {
+            "users": {key: value.to_dict() for key, value in state.users.items()},
+            "api_keys": {key: value.to_dict() for key, value in state.api_keys.items()},
             "albums": {key: value.to_dict() for key, value in state.albums.items()},
             "media": {key: value.to_dict() for key, value in state.media.items()},
         }
         self.state_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    async def create_user(self, user: User) -> User:
+        async with self._lock:
+            state = self._load()
+            state.users[user.id] = user
+            self._save(state)
+        return user
+
+    async def get_user(self, user_id: str) -> User | None:
+        async with self._lock:
+            return self._load().users.get(user_id)
+
+    async def get_user_by_email(self, email: str) -> User | None:
+        async with self._lock:
+            state = self._load()
+            for user in state.users.values():
+                if user.email == email:
+                    return user
+        return None
+
+    async def update_user(self, user: User) -> User:
+        async with self._lock:
+            state = self._load()
+            state.users[user.id] = user
+            self._save(state)
+        return user
+
+    async def upsert_api_key(self, api_key: ApiKey) -> ApiKey:
+        async with self._lock:
+            state = self._load()
+            for key_id, item in list(state.api_keys.items()):
+                if item.user_id == api_key.user_id:
+                    state.api_keys.pop(key_id, None)
+            state.api_keys[api_key.id] = api_key
+            self._save(state)
+        return api_key
+
+    async def get_api_key_by_hash(self, key_hash: str) -> ApiKey | None:
+        async with self._lock:
+            state = self._load()
+            for api_key in state.api_keys.values():
+                if api_key.key_hash == key_hash:
+                    return api_key
+        return None
+
+    async def get_api_key_for_user(self, user_id: str) -> ApiKey | None:
+        async with self._lock:
+            state = self._load()
+            for api_key in state.api_keys.values():
+                if api_key.user_id == user_id:
+                    return api_key
+        return None
+
+    async def update_api_key(self, api_key: ApiKey) -> ApiKey:
+        async with self._lock:
+            state = self._load()
+            state.api_keys[api_key.id] = api_key
+            self._save(state)
+        return api_key
+
+    async def list_user_media(self, user_id: str) -> list[Media]:
+        async with self._lock:
+            state = self._load()
+            items = [item for item in state.media.values() if item.user_id == user_id]
+        return sorted(items, key=lambda item: item.created_at)
 
     async def create_album(self, album: Album) -> Album:
         async with self._lock:

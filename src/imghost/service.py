@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import mimetypes
 import secrets
+from hashlib import sha256
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import HTTPException, UploadFile
@@ -21,7 +23,7 @@ from .events import (
     MediaUploaded,
 )
 from .ids import generate_album_id, generate_media_id
-from .models import Album, Media, utcnow
+from .models import Album, ApiKey, Media, User, utcnow
 from .processors import ProcessorRegistry
 from .repositories import JsonRepository
 from .storage import LocalFilesystemBackend
@@ -53,6 +55,18 @@ class PruneResult:
     bytes_freed: int
 
 
+@dataclass
+class CurrentActor:
+    user: User | None
+    source: str
+
+
+@dataclass
+class ApiKeyIssueResult:
+    api_key: ApiKey
+    raw_key: str
+
+
 class UploadService:
     def __init__(
         self,
@@ -68,54 +82,85 @@ class UploadService:
         self.event_bus = event_bus
         self.processors = processors
 
-    async def upload(self, file: UploadFile, album_id: str | None, title: str | None, correlation_id: str) -> UploadResult:
+    async def upload(
+        self,
+        file: UploadFile,
+        album_id: str | None,
+        title: str | None,
+        correlation_id: str,
+        *,
+        actor: CurrentActor | None = None,
+    ) -> UploadResult:
         payload = await file.read()
         if not payload:
             raise HTTPException(status_code=400, detail="Empty file upload.")
         if len(payload) > self.settings.max_upload_bytes:
             raise HTTPException(status_code=413, detail="Upload exceeds V1 size limit.")
 
-        album = await self._get_or_create_album(album_id=album_id, title=title, correlation_id=correlation_id)
+        actor = actor or CurrentActor(user=None, source="web")
+        album = await self._get_or_create_album(
+            album_id=album_id,
+            title=title,
+            correlation_id=correlation_id,
+            actor=actor,
+        )
         if len(await self.repository.list_album_media(album.id)) >= MAX_ALBUM_ITEMS:
             raise HTTPException(status_code=413, detail="Album item limit reached.")
-        media = await self._create_media(album.id, file, payload, correlation_id)
+        media = await self._create_media(album.id, file, payload, correlation_id, actor=actor)
         album.updated_at = utcnow()
         if not album.title and title:
             album.title = title
         await self.repository.update_album(album)
         return UploadResult(album=album, media=media)
 
-    async def _get_or_create_album(self, album_id: str | None, title: str | None, correlation_id: str) -> Album:
+    async def _get_or_create_album(
+        self,
+        album_id: str | None,
+        title: str | None,
+        correlation_id: str,
+        *,
+        actor: CurrentActor,
+    ) -> Album:
         if album_id:
             album = await self.repository.get_album(album_id)
             if album is None:
                 raise HTTPException(status_code=404, detail="Album not found.")
+            if actor.user is not None and album.user_id != actor.user.id:
+                raise HTTPException(status_code=403, detail="Album does not belong to authenticated user.")
             return album
 
         now = utcnow()
         album = Album(
             id=generate_album_id(),
             title=title,
-            user_id=None,
+            user_id=actor.user.id if actor.user else None,
             cover_media_id=None,
-            delete_token=secrets.token_urlsafe(24),
+            delete_token=None if actor.user else secrets.token_urlsafe(24),
             created_at=now,
             updated_at=now,
-            expires_at=now + timedelta(hours=self.settings.anon_expiry_hours),
+            expires_at=None if actor.user else now + timedelta(hours=self.settings.anon_expiry_hours),
         )
         await self.repository.create_album(album)
         await self.event_bus.emit(
             AlbumCreated(
                 album_id=album.id,
-                user_id=None,
+                user_id=actor.user.id if actor.user else None,
                 item_count=0,
-                source="web",
+                source=actor.source,
                 correlation_id=correlation_id,
             )
         )
         return album
 
-    async def _create_media(self, album_id: str, file: UploadFile, payload: bytes, correlation_id: str) -> Media:
+    async def _create_media(
+        self,
+        album_id: str,
+        file: UploadFile,
+        payload: bytes,
+        correlation_id: str,
+        *,
+        actor: CurrentActor,
+    ) -> Media:
         media_id = generate_media_id()
         content_type = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
         suffix = Path(file.filename or "upload.bin").suffix.lower() or mimetypes.guess_extension(content_type) or ""
@@ -136,14 +181,15 @@ class UploadService:
         content_type = sanitized.mime_type
         fmt = sanitized.format
         suffix = f".{fmt if fmt != 'jpeg' else 'jpg'}"
-        storage_key = f"originals/anon/{media_id}{suffix}"
+        owner_segment = actor.user.id if actor.user else "anon"
+        storage_key = f"originals/{owner_segment}/{media_id}{suffix}"
         await self.storage.put(storage_key, payload)
         position = await self.repository.next_position(album_id)
 
         media = Media(
             id=media_id,
             album_id=album_id,
-            user_id=None,
+            user_id=actor.user.id if actor.user else None,
             filename_orig=file.filename or media_id,
             media_type=media_type,
             format=fmt,
@@ -167,11 +213,11 @@ class UploadService:
             MediaUploaded(
                 media_id=media.id,
                 album_id=media.album_id,
-                user_id=None,
+                user_id=actor.user.id if actor.user else None,
                 file_size=media.file_size,
                 media_type=media.media_type,
                 format=media.format,
-                source="web",
+                source=actor.source,
                 correlation_id=correlation_id,
             )
         )
@@ -212,11 +258,18 @@ class UploadService:
             media.thumb_is_orig = False
         await self.repository.update_media(media)
 
-    async def delete_album(self, album_id: str, delete_token: str | None, correlation_id: str) -> tuple[Album, list[Media]]:
+    async def delete_album(
+        self,
+        album_id: str,
+        delete_token: str | None,
+        correlation_id: str,
+        *,
+        actor_user: User | None = None,
+    ) -> tuple[Album, list[Media]]:
         album = await self.repository.get_album(album_id)
         if album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
-        self._require_delete_token(album, delete_token)
+        self._require_album_access(album, delete_token, actor_user)
 
         media_items = await self.repository.list_album_media(album_id)
         for media in media_items:
@@ -490,6 +543,11 @@ class UploadService:
         if album.delete_token and delete_token != album.delete_token:
             raise HTTPException(status_code=403, detail="Invalid delete token.")
 
+    def _require_album_access(self, album: Album, delete_token: str | None, actor_user: User | None) -> None:
+        if actor_user is not None and (actor_user.is_admin or album.user_id == actor_user.id):
+            return
+        self._require_delete_token(album, delete_token)
+
     def _normalize_title(self, title: str | None | object) -> str | None:
         if title is None:
             return None
@@ -531,3 +589,29 @@ class UploadService:
             if media.thumb_key and media.thumb_key != media.storage_key:
                 total += media.thumb_size or 0
         return total
+
+    async def get_current_user_summary(self, user: User) -> dict[str, object]:
+        items = await self.repository.list_user_media(user.id)
+        usage = self._storage_bytes_for_media(items)
+        api_key = await self.repository.get_api_key_for_user(user.id)
+        return {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "quota_bytes": user.quota_bytes,
+            "storage_used_bytes": usage,
+            "has_api_key": api_key is not None,
+            "api_key_last_used_at": api_key.last_used_at.isoformat() if api_key and api_key.last_used_at else None,
+        }
+
+    async def issue_api_key(self, user: User) -> ApiKeyIssueResult:
+        raw_key = secrets.token_hex(16)
+        api_key = ApiKey(
+            id=str(uuid4()),
+            user_id=user.id,
+            key_hash=sha256(raw_key.encode("utf-8")).hexdigest(),
+            created_at=utcnow(),
+            last_used_at=None,
+        )
+        await self.repository.upsert_api_key(api_key)
+        return ApiKeyIssueResult(api_key=api_key, raw_key=raw_key)

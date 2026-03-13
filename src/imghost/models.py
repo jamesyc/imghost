@@ -10,6 +10,60 @@ def utcnow() -> datetime:
 
 
 @dataclass
+class User:
+    id: str
+    username: str
+    email: str
+    password_hash: str | None
+    is_admin: bool
+    suspended: bool
+    quota_bytes: int | None
+    created_at: datetime
+    updated_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in ("created_at", "updated_at"):
+            data[key] = data[key].isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "User":
+        values = data.copy()
+        for key in ("created_at", "updated_at"):
+            values[key] = datetime.fromisoformat(values[key])
+        values.setdefault("password_hash", None)
+        values.setdefault("is_admin", False)
+        values.setdefault("suspended", False)
+        values.setdefault("quota_bytes", None)
+        return cls(**values)
+
+
+@dataclass
+class ApiKey:
+    id: str
+    user_id: str
+    key_hash: str
+    created_at: datetime
+    last_used_at: datetime | None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in ("created_at", "last_used_at"):
+            if data[key] is not None:
+                data[key] = data[key].isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ApiKey":
+        values = data.copy()
+        values["created_at"] = datetime.fromisoformat(values["created_at"])
+        if values.get("last_used_at") is not None:
+            values["last_used_at"] = datetime.fromisoformat(values["last_used_at"])
+        return cls(**values)
+
+
+@dataclass
 class Album:
     id: str
     title: str | None

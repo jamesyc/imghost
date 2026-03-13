@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from hashlib import sha256
 from math import ceil
 from typing import Any
 from uuid import uuid4
@@ -16,7 +17,8 @@ from .events import EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
 from .repositories import JsonRepository
-from .service import UNSET, UploadService
+from .models import User, utcnow
+from .service import CurrentActor, UNSET, UploadService
 from .storage import LocalFilesystemBackend
 from .tasks import AsyncTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 
@@ -164,10 +166,11 @@ def humanize_expiry(expires_at: datetime | None) -> str | None:
 
 
 def album_delete_url(base_url: str, album: Any) -> str | None:
+    path = f"{base_url}/api/v1/album/{album.id}/delete"
     if not album.delete_token:
-        return None
+        return path
     query = urlencode({"delete_token": album.delete_token})
-    return f"{base_url}/api/v1/album/{album.id}/delete?{query}"
+    return f"{path}?{query}"
 
 
 def resolve_cover_media(album: Any, media_items: list[Any]) -> Any | None:
@@ -208,6 +211,26 @@ def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[
             for item in media_items
         ],
     }
+
+
+async def authenticated_user(request: Request, *, required: bool = False) -> User | None:
+    state = get_state(request)
+    header = request.headers.get("Authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        if required:
+            raise HTTPException(status_code=401, detail="Authentication required.")
+        return None
+
+    api_key = await state.repository.get_api_key_by_hash(sha256(token.encode("utf-8")).hexdigest())
+    if api_key is None:
+        raise HTTPException(status_code=401, detail="Invalid API key.")
+    user = await state.repository.get_user(api_key.user_id)
+    if user is None or user.suspended:
+        raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
+    api_key.last_used_at = utcnow()
+    await state.repository.update_api_key(api_key)
+    return user
 
 
 def compatibility_warning(item: Any) -> str | None:
@@ -269,10 +292,17 @@ async def upload(
 ) -> JSONResponse:
     state = get_state(request)
     cid = correlation_id(request)
+    user = await authenticated_user(request, required=False)
+    actor = CurrentActor(user=user, source="api" if user else "web")
+    if user is not None:
+        if len(file) != 1:
+            raise HTTPException(status_code=400, detail="API key uploads must contain exactly one file.")
+        if album_id is not None:
+            raise HTTPException(status_code=400, detail="API key uploads always create a new album.")
     results = []
     active_album_id = album_id
     for item in file:
-        result = await state.uploads.upload(item, active_album_id, title, cid)
+        result = await state.uploads.upload(item, active_album_id, title, cid, actor=actor)
         active_album_id = result.album.id
         results.append(result)
 
@@ -473,7 +503,8 @@ async def delete_album(request: Request, album_id: str, delete_token: str | None
         raise HTTPException(status_code=404)
     state = get_state(request)
     cid = correlation_id(request)
-    album, items = await state.uploads.delete_album(album_id, delete_token, cid)
+    user = await authenticated_user(request, required=False)
+    album, items = await state.uploads.delete_album(album_id, delete_token, cid, actor_user=user)
     return JSONResponse(
         {
             "deleted": True,
@@ -487,6 +518,28 @@ async def delete_album(request: Request, album_id: str, delete_token: str | None
 @app.get("/api/v1/album/{album_id}/delete")
 async def delete_album_via_get(request: Request, album_id: str, delete_token: str | None = None) -> JSONResponse:
     return await delete_album(request, album_id, delete_token)
+
+
+@app.get("/api/v1/user/me")
+async def get_current_user(request: Request) -> JSONResponse:
+    state = get_state(request)
+    user = await authenticated_user(request, required=True)
+    summary = await state.uploads.get_current_user_summary(user)
+    return JSONResponse(summary, headers={"X-Correlation-ID": correlation_id(request)})
+
+
+@app.post("/api/v1/user/me/api-key")
+async def regenerate_api_key(request: Request) -> JSONResponse:
+    state = get_state(request)
+    user = await authenticated_user(request, required=True)
+    issued = await state.uploads.issue_api_key(user)
+    return JSONResponse(
+        {
+            "api_key": issued.raw_key,
+            "created_at": issued.api_key.created_at.isoformat(),
+        },
+        headers={"X-Correlation-ID": correlation_id(request)},
+    )
 
 
 @app.patch("/api/v1/album/{album_id}")
