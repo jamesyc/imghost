@@ -37,6 +37,7 @@ class MediaUploaded:
 class AlbumDeleted:
     album_id: str
     user_id: str | None
+    actor_id: str | None
     item_count: int
     total_size: int
     source: str
@@ -48,6 +49,7 @@ class MediaDeleted:
     media_id: str
     album_id: str
     user_id: str | None
+    actor_id: str | None
     file_size: int
     source: str
     correlation_id: str
@@ -57,6 +59,7 @@ class MediaDeleted:
 class AlbumTitleChanged:
     album_id: str
     user_id: str | None
+    actor_id: str | None
     old_title: str | None
     new_title: str | None
     source: str
@@ -67,6 +70,7 @@ class AlbumTitleChanged:
 class AlbumCoverSet:
     album_id: str
     user_id: str | None
+    actor_id: str | None
     media_id: str | None
     source: str
     correlation_id: str
@@ -76,6 +80,7 @@ class AlbumCoverSet:
 class AlbumReordered:
     album_id: str
     user_id: str | None
+    actor_id: str | None
     source: str
     correlation_id: str
 
@@ -84,6 +89,7 @@ class AlbumReordered:
 class AlbumExpiryChanged:
     album_id: str
     user_id: str | None
+    actor_id: str | None
     old_expiry: str | None
     new_expiry: str | None
     source: str
@@ -93,6 +99,7 @@ class AlbumExpiryChanged:
 @dataclass(slots=True)
 class UserDeleted:
     user_id: str
+    actor_id: str | None
     deleted_by: str
     album_count: int
     media_count: int
@@ -103,6 +110,7 @@ class UserDeleted:
 @dataclass(slots=True)
 class UserSuspended:
     user_id: str
+    actor_id: str | None
     suspended: bool
     source: str
     correlation_id: str

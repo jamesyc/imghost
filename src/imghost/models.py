@@ -124,3 +124,30 @@ class Media:
         values = data.copy()
         values["created_at"] = datetime.fromisoformat(values["created_at"])
         return cls(**values)
+
+
+@dataclass
+class AuditEvent:
+    id: str
+    event_type: str
+    actor_id: str | None
+    actor_ip_hash: str | None
+    target_type: str
+    target_id: str
+    correlation_id: str
+    metadata: dict[str, Any]
+    created_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["created_at"] = self.created_at.isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AuditEvent":
+        values = data.copy()
+        values["created_at"] = datetime.fromisoformat(values["created_at"])
+        values.setdefault("actor_id", None)
+        values.setdefault("actor_ip_hash", None)
+        values.setdefault("metadata", {})
+        return cls(**values)

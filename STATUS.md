@@ -9,7 +9,7 @@ The prototype is now well past the original anonymous upload proof-of-concept st
 - Background thumbnail processing and recovery
 - Image, SVG, animated image, and video processing pipelines
 - Cleanup/pruning commands
-- Admin user management, quota enforcement, and album management
+- Admin user management, quota enforcement, album management, and audit log API
 
 The codebase remains a FastAPI prototype backed by:
 
@@ -17,7 +17,7 @@ The codebase remains a FastAPI prototype backed by:
 - local filesystem storage
 - in-process async task workers
 
-It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or audit/config abstractions.
+It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or runtime config abstractions.
 
 ## Implemented
 
@@ -148,6 +148,25 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `DELETE /api/v1/admin/albums/{albumId}`
 - Admin album expiry set/clear
 - Admin user suspend/quota/password updates
+- Audit log API:
+  - `GET /api/v1/admin/audit`
+  - filterable by event type, actor, correlation ID, and date range
+
+### Audit
+
+- JSON-backed audit writer/reader abstraction
+- Audit persistence triggered by event bus listeners
+- Audit entries for current domain events:
+  - `AlbumCreated`
+  - `MediaUploaded`
+  - `AlbumDeleted`
+  - `MediaDeleted`
+  - `AlbumTitleChanged`
+  - `AlbumCoverSet`
+  - `AlbumReordered`
+  - `AlbumExpiryChanged`
+  - `UserDeleted`
+  - `UserSuspended`
 
 ### Domain Events Currently Present
 
@@ -162,7 +181,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - `UserDeleted`
 - `UserSuspended`
 
-These events exist and are emitted in the service layer, but most non-thumbnail listeners from the design are still not implemented.
+These events exist and are emitted in the service layer. Thumbnail and audit listeners are now implemented; metrics and other future listeners from the design are still pending.
 
 ## Not Yet Implemented
 
@@ -174,10 +193,6 @@ These events exist and are emitted in the service layer, but most non-thumbnail 
 
 ### Audit / Config System
 
-- Audit writer abstraction
-- Audit reader abstraction
-- Event-driven audit persistence
-- `GET /api/v1/admin/audit`
 - Runtime config persistence layer
 - `PATCH /api/v1/admin/config`
 - env-lock/runtime-config dual-layer model
@@ -193,7 +208,7 @@ These events exist and are emitted in the service layer, but most non-thumbnail 
 ### Additional User/Admin Features
 
 - Admin album rescue/expiry UI beyond API
-- Admin audit browsing
+- Admin audit browsing UI beyond API
 - Admin configuration panel
 - Per-user rate-limit overrides
 - Dedicated admin password reset semantics beyond generic patching
@@ -222,17 +237,17 @@ The next best implementation slice depends on the target:
 
 ### If the goal is backend completeness against `DESIGN.md`
 
-Implement audit logging next:
+Implement runtime config next:
 
-- audit writer/reader abstraction
-- event listeners for current domain events
-- `GET /api/v1/admin/audit`
+- config writer/reader abstraction
+- persisted config values with env-lock behavior
+- `PATCH /api/v1/admin/config`
 
-That is the largest remaining architectural gap now that media, cleanup, API-key auth, quotas, and first-pass admin APIs are in place.
+That is now the most obvious missing admin/control-plane slice after audit logging landed.
 
 ## Test Status
 
 Current automated status at the time of writing:
 
 - `uv run pytest -q`
-- passing: `30 passed`
+- passing: `31 passed`

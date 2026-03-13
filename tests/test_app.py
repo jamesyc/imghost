@@ -845,3 +845,68 @@ def test_admin_album_management_lists_sets_expiry_and_deletes(tmp_path, monkeypa
         assert deleted.json()["deleted"] is True
 
         assert client.get("/api/v1/admin/albums", headers={"Authorization": f"Bearer {user_key}"}).status_code == 403
+
+
+def test_admin_audit_log_tracks_events_and_supports_filters(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="auditadmin", email="audit-admin@example.com")
+    user_id, user_key = create_user_and_api_key(capsys, username="audited", email="audited@example.com")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {user_key}", "X-Correlation-ID": "audit-upload"},
+        )
+        assert upload.status_code == 200
+        album_id = upload.json()["album_id"]
+
+        suspend = client.patch(
+            f"/api/v1/admin/users/{user_id}",
+            headers={"Authorization": f"Bearer {admin_key}", "X-Correlation-ID": "audit-suspend"},
+            json={"suspended": True},
+        )
+        assert suspend.status_code == 200
+
+        expiry = client.patch(
+            f"/api/v1/admin/albums/{album_id}",
+            headers={"Authorization": f"Bearer {admin_key}", "X-Correlation-ID": "audit-expiry"},
+            json={"expires_at": utcnow().replace(microsecond=0).isoformat()},
+        )
+        assert expiry.status_code == 200
+
+        upload_events = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"correlation_id": "audit-upload"},
+        )
+        assert upload_events.status_code == 200
+        upload_payload = upload_events.json()
+        assert [item["event_type"] for item in upload_payload] == ["media_uploaded", "album_created"]
+        assert all(item["actor_id"] == user_id for item in upload_payload)
+        assert all(item["correlation_id"] == "audit-upload" for item in upload_payload)
+
+        suspended_events = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "user_suspended", "actor_id": admin_id},
+        )
+        assert suspended_events.status_code == 200
+        suspended_payload = suspended_events.json()
+        assert len(suspended_payload) == 1
+        assert suspended_payload[0]["target_type"] == "user"
+        assert suspended_payload[0]["target_id"] == user_id
+        assert suspended_payload[0]["metadata"]["suspended"] is True
+
+        ranged = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"after": "2999-01-01T00:00:00+00:00"},
+        )
+        assert ranged.status_code == 200
+        assert ranged.json() == []
+
+        forbidden = client.get("/api/v1/admin/audit", headers={"Authorization": f"Bearer {user_key}"})
+        assert forbidden.status_code == 403

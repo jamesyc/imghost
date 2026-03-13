@@ -12,10 +12,11 @@ from typing import Any
 from uuid import uuid4
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
+from .audit import JsonAuditLog, register_audit_listeners
 from .config import Settings, load_settings
 from .events import EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
@@ -41,6 +42,7 @@ class AppState:
         self.settings = settings
         self.event_bus = EventBus()
         self.repository = JsonRepository(settings.data_dir / "state.json")
+        self.audit = JsonAuditLog(settings.data_dir / "audit.json")
         self.storage = LocalFilesystemBackend(settings.data_dir)
         self.processors = build_processor_registry(
             settings.max_pixel_megapixels * 1_000_000,
@@ -50,6 +52,7 @@ class AppState:
         self.uploads = UploadService(settings, self.repository, self.storage, self.event_bus, self.processors)
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
+        register_audit_listeners(self.event_bus, self.audit)
 
     def _build_task_queue(self) -> TaskQueue:
         context = TaskContext(self.repository, self.storage, self.processors)
@@ -782,6 +785,35 @@ async def admin_list_albums(request: Request) -> JSONResponse:
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
+@app.get("/api/v1/admin/audit")
+async def admin_list_audit(
+    request: Request,
+    event_type: str | None = None,
+    actor_id: str | None = None,
+    correlation_id_filter: str | None = Query(default=None, alias="correlation_id"),
+    after: datetime | None = None,
+    before: datetime | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 500.")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    events = await state.audit.query_audit_log(
+        event_type=event_type,
+        actor_id=actor_id,
+        correlation_id=correlation_id_filter,
+        after=after,
+        before=before,
+        limit=limit,
+        offset=offset,
+    )
+    return JSONResponse([event.to_dict() for event in events], headers={"X-Correlation-ID": correlation_id(request)})
+
+
 @app.post("/api/v1/admin/users")
 async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -> JSONResponse:
     state = get_state(request)
@@ -813,7 +845,7 @@ async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -
 async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPatchRequest) -> JSONResponse:
     state = get_state(request)
     cid = correlation_id(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     updated = await state.uploads.update_user(
         user_id,
         payload=UserUpdateInput(
@@ -822,6 +854,7 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
             password=payload.password if "password" in payload.model_fields_set else None,
         ),
         correlation_id=cid,
+        actor_id=admin.id,
     )
     return JSONResponse(
         {
@@ -840,8 +873,8 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
 async def admin_delete_user(request: Request, user_id: str) -> JSONResponse:
     state = get_state(request)
     cid = correlation_id(request)
-    await require_admin_user(request)
-    deleted = await state.uploads.delete_user_by_id(user_id, cid, deleted_by="admin")
+    admin = await require_admin_user(request)
+    deleted = await state.uploads.delete_user_by_id(user_id, cid, deleted_by="admin", actor_id=admin.id)
     return JSONResponse(
         {
             "deleted": True,
@@ -859,13 +892,14 @@ async def admin_patch_album(request: Request, album_id: str, payload: AdminAlbum
         raise HTTPException(status_code=404)
     state = get_state(request)
     cid = correlation_id(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     updated = await state.uploads.admin_update_album(
         album_id,
         AdminAlbumUpdateInput(
             expires_at=payload.expires_at if "expires_at" in payload.model_fields_set else UNSET,
         ),
         cid,
+        actor_id=admin.id,
     )
     items = await state.repository.list_album_media(album_id)
     return JSONResponse(album_to_payload(state.settings.base_url, updated, items), headers={"X-Correlation-ID": cid})

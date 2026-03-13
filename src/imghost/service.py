@@ -322,6 +322,7 @@ class UploadService:
             AlbumDeleted(
                 album_id=deleted_album.id,
                 user_id=deleted_album.user_id,
+                actor_id=actor_user.id if actor_user else None,
                 item_count=len(deleted_media),
                 total_size=sum(item.file_size + (item.thumb_size or 0) for item in deleted_media),
                 source="web",
@@ -358,6 +359,7 @@ class UploadService:
                     AlbumTitleChanged(
                         album_id=album.id,
                         user_id=album.user_id,
+                        actor_id=None,
                         old_title=old_title,
                         new_title=normalized_title,
                         source="web",
@@ -374,6 +376,7 @@ class UploadService:
                     AlbumCoverSet(
                         album_id=album.id,
                         user_id=album.user_id,
+                        actor_id=None,
                         media_id=next_cover,
                         source="web",
                         correlation_id=correlation_id,
@@ -420,6 +423,7 @@ class UploadService:
             AlbumReordered(
                 album_id=album.id,
                 user_id=album.user_id,
+                actor_id=None,
                 source="web",
                 correlation_id=correlation_id,
             )
@@ -454,6 +458,7 @@ class UploadService:
                 media_id=deleted_media.id,
                 album_id=deleted_media.album_id,
                 user_id=deleted_media.user_id,
+                actor_id=None,
                 file_size=deleted_media.file_size + (deleted_media.thumb_size or 0),
                 source="web",
                 correlation_id=correlation_id,
@@ -468,6 +473,7 @@ class UploadService:
                     AlbumDeleted(
                         album_id=deleted_album.id,
                         user_id=deleted_album.user_id,
+                        actor_id=None,
                         item_count=0,
                         total_size=0,
                         source="web",
@@ -545,6 +551,7 @@ class UploadService:
                 AlbumDeleted(
                     album_id=deleted_album.id,
                     user_id=deleted_album.user_id,
+                    actor_id=None,
                     item_count=len(deleted_media),
                     total_size=self._storage_bytes_for_media(deleted_media),
                     source="system",
@@ -709,7 +716,7 @@ class UploadService:
         await self.repository.create_user(user)
         return user
 
-    async def update_user(self, user_id: str, payload: UserUpdateInput, correlation_id: str) -> User:
+    async def update_user(self, user_id: str, payload: UserUpdateInput, correlation_id: str, *, actor_id: str | None = None) -> User:
         user = await self.repository.get_user(user_id)
         if user is None:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -719,6 +726,7 @@ class UploadService:
             await self.event_bus.emit(
                 UserSuspended(
                     user_id=user.id,
+                    actor_id=actor_id,
                     suspended=user.suspended,
                     source="api",
                     correlation_id=correlation_id,
@@ -782,7 +790,14 @@ class UploadService:
             )
         return payload
 
-    async def admin_update_album(self, album_id: str, payload: AdminAlbumUpdateInput, correlation_id: str) -> Album:
+    async def admin_update_album(
+        self,
+        album_id: str,
+        payload: AdminAlbumUpdateInput,
+        correlation_id: str,
+        *,
+        actor_id: str | None = None,
+    ) -> Album:
         album = await self.repository.get_album(album_id)
         if album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
@@ -798,6 +813,7 @@ class UploadService:
                     AlbumExpiryChanged(
                         album_id=album.id,
                         user_id=album.user_id,
+                        actor_id=actor_id,
                         old_expiry=old_expiry,
                         new_expiry=new_expiry,
                         source="api",
@@ -819,9 +835,16 @@ class UploadService:
         }
 
     async def delete_user_account(self, user: User, correlation_id: str) -> dict[str, int]:
-        return await self.delete_user_by_id(user.id, correlation_id, deleted_by="self")
+        return await self.delete_user_by_id(user.id, correlation_id, deleted_by="self", actor_id=user.id)
 
-    async def delete_user_by_id(self, user_id: str, correlation_id: str, *, deleted_by: str) -> dict[str, int]:
+    async def delete_user_by_id(
+        self,
+        user_id: str,
+        correlation_id: str,
+        *,
+        deleted_by: str,
+        actor_id: str | None = None,
+    ) -> dict[str, int]:
         user = await self.repository.get_user(user_id)
         if user is None:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -839,6 +862,7 @@ class UploadService:
         await self.event_bus.emit(
             UserDeleted(
                 user_id=deleted_user.id,
+                actor_id=actor_id,
                 deleted_by=deleted_by,
                 album_count=len(deleted_albums),
                 media_count=len(deleted_media),
