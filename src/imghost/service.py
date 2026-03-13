@@ -10,19 +10,37 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from fastapi import HTTPException, UploadFile
 
 from .config import Settings
-from .events import AlbumCreated, AlbumDeleted, EventBus, MediaUploaded
+from .events import (
+    AlbumCoverSet,
+    AlbumCreated,
+    AlbumDeleted,
+    AlbumReordered,
+    AlbumTitleChanged,
+    EventBus,
+    MediaDeleted,
+    MediaUploaded,
+)
 from .ids import generate_album_id, generate_media_id
 from .models import Album, Media, utcnow
 from .repositories import JsonRepository
 from .storage import LocalFilesystemBackend
 
 MAX_ALBUM_ITEMS = 1000
+UNSET = object()
 
 
 @dataclass
 class UploadResult:
     album: Album
     media: Media
+
+
+@dataclass
+class MediaDeleteResult:
+    deleted_media: Media
+    album: Album | None
+    remaining_items: list[Media]
+    album_deleted: bool
 
 
 class UploadService:
@@ -136,8 +154,7 @@ class UploadService:
         album = await self.repository.get_album(album_id)
         if album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
-        if album.delete_token and delete_token != album.delete_token:
-            raise HTTPException(status_code=403, detail="Invalid delete token.")
+        self._require_delete_token(album, delete_token)
 
         media_items = await self.repository.list_album_media(album_id)
         for media in media_items:
@@ -160,6 +177,168 @@ class UploadService:
             )
         )
         return deleted_album, deleted_media
+
+    async def update_album(
+        self,
+        album_id: str,
+        delete_token: str | None,
+        correlation_id: str,
+        *,
+        title: str | None | object = UNSET,
+        cover_media_id: str | None | object = UNSET,
+    ) -> tuple[Album, list[Media]]:
+        album = await self.repository.get_album(album_id)
+        if album is None:
+            raise HTTPException(status_code=404, detail="Album not found.")
+        self._require_delete_token(album, delete_token)
+
+        items = await self.repository.list_album_media(album_id)
+        media_by_id = {item.id: item for item in items}
+        changed = False
+
+        if title is not UNSET:
+            normalized_title = self._normalize_title(title)
+            if album.title != normalized_title:
+                old_title = album.title
+                album.title = normalized_title
+                changed = True
+                await self.event_bus.emit(
+                    AlbumTitleChanged(
+                        album_id=album.id,
+                        user_id=album.user_id,
+                        old_title=old_title,
+                        new_title=normalized_title,
+                        source="web",
+                        correlation_id=correlation_id,
+                    )
+                )
+
+        if cover_media_id is not UNSET:
+            next_cover = self._normalize_cover_media_id(cover_media_id, media_by_id)
+            if album.cover_media_id != next_cover:
+                album.cover_media_id = next_cover
+                changed = True
+                await self.event_bus.emit(
+                    AlbumCoverSet(
+                        album_id=album.id,
+                        user_id=album.user_id,
+                        media_id=next_cover,
+                        source="web",
+                        correlation_id=correlation_id,
+                    )
+                )
+
+        if changed:
+            album.updated_at = utcnow()
+            await self.repository.update_album(album)
+        return album, await self.repository.list_album_media(album_id)
+
+    async def reorder_album(
+        self,
+        album_id: str,
+        delete_token: str | None,
+        order: list[tuple[str, int]],
+        correlation_id: str,
+    ) -> tuple[Album, list[Media]]:
+        album = await self.repository.get_album(album_id)
+        if album is None:
+            raise HTTPException(status_code=404, detail="Album not found.")
+        self._require_delete_token(album, delete_token)
+
+        items = await self.repository.list_album_media(album_id)
+        media_by_id = {item.id: item for item in items}
+        if not order:
+            raise HTTPException(status_code=400, detail="At least one position update is required.")
+
+        positions: dict[str, int] = {}
+        for media_id, position in order:
+            media = media_by_id.get(media_id)
+            if media is None:
+                raise HTTPException(status_code=404, detail=f"Media {media_id} not found in album.")
+            positions[media_id] = position
+
+        reordered = await self.repository.update_media_positions(album_id, positions)
+        if self._needs_rebalance(reordered):
+            positions = {item.id: index * 1000 for index, item in enumerate(reordered, start=1)}
+            reordered = await self.repository.update_media_positions(album_id, positions)
+
+        album.updated_at = utcnow()
+        await self.repository.update_album(album)
+        await self.event_bus.emit(
+            AlbumReordered(
+                album_id=album.id,
+                user_id=album.user_id,
+                source="web",
+                correlation_id=correlation_id,
+            )
+        )
+        return album, reordered
+
+    async def delete_media(
+        self,
+        media_id: str,
+        delete_token: str | None,
+        correlation_id: str,
+    ) -> MediaDeleteResult:
+        media = await self.repository.get_media(media_id)
+        if media is None:
+            raise HTTPException(status_code=404, detail="Media not found.")
+
+        album = await self.repository.get_album(media.album_id)
+        if album is None:
+            raise HTTPException(status_code=404, detail="Album not found.")
+        self._require_delete_token(album, delete_token)
+
+        await self.storage.delete(media.storage_key)
+        if media.thumb_key and media.thumb_key != media.storage_key:
+            await self.storage.delete(media.thumb_key)
+
+        deleted_media = await self.repository.delete_media(media_id)
+        if deleted_media is None:
+            raise HTTPException(status_code=404, detail="Media not found.")
+
+        await self.event_bus.emit(
+            MediaDeleted(
+                media_id=deleted_media.id,
+                album_id=deleted_media.album_id,
+                user_id=deleted_media.user_id,
+                file_size=deleted_media.file_size + (deleted_media.thumb_size or 0),
+                source="web",
+                correlation_id=correlation_id,
+            )
+        )
+
+        remaining_items = await self.repository.list_album_media(album.id)
+        if not remaining_items:
+            deleted_album, _ = await self.repository.delete_album(album.id)
+            if deleted_album is not None:
+                await self.event_bus.emit(
+                    AlbumDeleted(
+                        album_id=deleted_album.id,
+                        user_id=deleted_album.user_id,
+                        item_count=0,
+                        total_size=0,
+                        source="web",
+                        correlation_id=correlation_id,
+                    )
+                )
+            return MediaDeleteResult(
+                deleted_media=deleted_media,
+                album=None,
+                remaining_items=[],
+                album_deleted=True,
+            )
+
+        if album.cover_media_id == deleted_media.id:
+            album.cover_media_id = None
+        album.updated_at = utcnow()
+        await self.repository.update_album(album)
+        return MediaDeleteResult(
+            deleted_media=deleted_media,
+            album=album,
+            remaining_items=remaining_items,
+            album_deleted=False,
+        )
 
     async def build_album_zip(self, album_id: str) -> bytes:
         album = await self.repository.get_album(album_id)
@@ -193,3 +372,30 @@ class UploadService:
                 seen_names.add(deduped)
                 return deduped
             index += 1
+
+    def _require_delete_token(self, album: Album, delete_token: str | None) -> None:
+        if album.delete_token and delete_token != album.delete_token:
+            raise HTTPException(status_code=403, detail="Invalid delete token.")
+
+    def _normalize_title(self, title: str | None | object) -> str | None:
+        if title is None:
+            return None
+        if not isinstance(title, str):
+            raise HTTPException(status_code=400, detail="Invalid title.")
+        normalized = title.strip()
+        return normalized or None
+
+    def _normalize_cover_media_id(self, cover_media_id: str | None | object, media_by_id: dict[str, Media]) -> str | None:
+        if cover_media_id is None:
+            return None
+        if not isinstance(cover_media_id, str):
+            raise HTTPException(status_code=400, detail="Invalid cover_media_id.")
+        if cover_media_id not in media_by_id:
+            raise HTTPException(status_code=404, detail="Cover media not found in album.")
+        return cover_media_id
+
+    def _needs_rebalance(self, items: list[Media]) -> bool:
+        for previous, current in zip(items, items[1:]):
+            if current.position - previous.position < 2:
+                return True
+        return False

@@ -43,6 +43,43 @@ class AlbumDeleted:
     correlation_id: str
 
 
+@dataclass(slots=True)
+class MediaDeleted:
+    media_id: str
+    album_id: str
+    user_id: str | None
+    file_size: int
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class AlbumTitleChanged:
+    album_id: str
+    user_id: str | None
+    old_title: str | None
+    new_title: str | None
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class AlbumCoverSet:
+    album_id: str
+    user_id: str | None
+    media_id: str | None
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class AlbumReordered:
+    album_id: str
+    user_id: str | None
+    source: str
+    correlation_id: str
+
+
 class EventBus:
     def __init__(self) -> None:
         self._listeners: dict[type, list[Listener]] = defaultdict(list)

@@ -95,3 +95,14 @@ class JsonRepository:
                 state.media.pop(item.id, None)
             self._save(state)
             return album, sorted(media_items, key=lambda item: item.position)
+
+    async def update_media_positions(self, album_id: str, positions: dict[str, int]) -> list[Media]:
+        async with self._lock:
+            state = self._load()
+            media_items = [item for item in state.media.values() if item.album_id == album_id]
+            for item in media_items:
+                if item.id in positions:
+                    item.position = positions[item.id]
+                    state.media[item.id] = item
+            self._save(state)
+            return sorted(media_items, key=lambda item: item.position)

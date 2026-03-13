@@ -9,12 +9,13 @@ from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 from .config import Settings, load_settings
 from .events import EventBus
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .repositories import JsonRepository
-from .service import UploadService
+from .service import UNSET, UploadService
 from .storage import LocalFilesystemBackend
 
 
@@ -36,6 +37,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="imghost V1", lifespan=lifespan)
+
+
+class AlbumPatchRequest(BaseModel):
+    title: str | None = None
+    cover_media_id: str | None = None
+
+
+class AlbumOrderItem(BaseModel):
+    media_id: str
+    position: int
 
 
 def get_state(request: Request) -> AppState:
@@ -99,6 +110,7 @@ def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[
     return {
         "id": album.id,
         "title": album.title,
+        "cover_media_id": album.cover_media_id,
         "created_at": album.created_at.isoformat(),
         "updated_at": album.updated_at.isoformat(),
         "expires_at": album.expires_at.isoformat() if album.expires_at else None,
@@ -150,7 +162,6 @@ async def index(request: Request) -> str:
   <body>
     <main>
       <section class="card">
-        <p class="hint">Step 3 of 5: V1 upload flow is live.</p>
         <h1>imghost</h1>
         <p>Paste or pick one or more files to create an anonymous album with clean media URLs.</p>
         <form action="/api/v1/upload" method="post" enctype="multipart/form-data">
@@ -363,6 +374,66 @@ async def delete_album(request: Request, album_id: str, delete_token: str | None
 @app.get("/api/v1/album/{album_id}/delete")
 async def delete_album_via_get(request: Request, album_id: str, delete_token: str | None = None) -> JSONResponse:
     return await delete_album(request, album_id, delete_token)
+
+
+@app.patch("/api/v1/album/{album_id}")
+async def patch_album(
+    request: Request,
+    album_id: str,
+    payload: AlbumPatchRequest,
+    delete_token: str | None = None,
+) -> JSONResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    cid = correlation_id(request)
+    album, items = await state.uploads.update_album(
+        album_id,
+        delete_token,
+        cid,
+        title=payload.title if "title" in payload.model_fields_set else UNSET,
+        cover_media_id=payload.cover_media_id if "cover_media_id" in payload.model_fields_set else UNSET,
+    )
+    return JSONResponse(album_to_payload(state.settings.base_url, album, items), headers={"X-Correlation-ID": cid})
+
+
+@app.patch("/api/v1/album/{album_id}/order")
+async def patch_album_order(
+    request: Request,
+    album_id: str,
+    items: list[AlbumOrderItem],
+    delete_token: str | None = None,
+) -> JSONResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    cid = correlation_id(request)
+    album, media_items = await state.uploads.reorder_album(
+        album_id,
+        delete_token,
+        [(item.media_id, item.position) for item in items],
+        cid,
+    )
+    return JSONResponse(album_to_payload(state.settings.base_url, album, media_items), headers={"X-Correlation-ID": cid})
+
+
+@app.delete("/api/v1/media/{media_id}")
+async def delete_media(request: Request, media_id: str, delete_token: str | None = None) -> JSONResponse:
+    if not is_valid_id(media_id, MEDIA_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    cid = correlation_id(request)
+    result = await state.uploads.delete_media(media_id, delete_token, cid)
+    return JSONResponse(
+        {
+            "deleted": True,
+            "media_id": result.deleted_media.id,
+            "album_id": result.deleted_media.album_id,
+            "album_deleted": result.album_deleted,
+            "remaining_item_count": len(result.remaining_items),
+        },
+        headers={"X-Correlation-ID": cid},
+    )
 
 
 @app.get("/health/live")
