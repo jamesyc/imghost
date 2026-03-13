@@ -415,6 +415,81 @@ def compatibility_warning(item: Any) -> str | None:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> str:
     state = get_state(request)
+    user = await authenticated_user(request, required=False)
+    allow_registration = bool(await state.runtime_config.get_value("allow_registration"))
+    anon_upload_enabled = bool(await state.runtime_config.get_value("anon_upload_enabled"))
+    anon_expiry_hours = int(await state.runtime_config.get_value("anon_expiry_hours"))
+    upload_enabled = user is not None or anon_upload_enabled
+    auth_panel = ""
+    if user is None:
+        register_block = (
+            """
+        <section class="card auth-card">
+          <h2>Create Account</h2>
+          <form id="register-form" class="auth-form">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="email" name="email" placeholder="Email" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <label class="check"><input type="checkbox" name="remember_me" checked> Remember me</label>
+            <button type="submit">Register</button>
+          </form>
+        </section>
+            """
+            if allow_registration
+            else """
+        <section class="card auth-card">
+          <h2>Create Account</h2>
+          <p class="hint">Registration is currently disabled.</p>
+        </section>
+            """
+        )
+        auth_panel = f"""
+      <section class="auth-grid">
+        <section class="card auth-card">
+          <h2>Sign In</h2>
+          <form id="login-form" class="auth-form">
+            <input type="text" name="login" placeholder="Username or email" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <label class="check"><input type="checkbox" name="remember_me" checked> Remember me</label>
+            <button type="submit">Sign In</button>
+          </form>
+        </section>
+        {register_block}
+      </section>
+        """
+    else:
+        auth_panel = f"""
+      <section class="card auth-card">
+        <h2>Signed In</h2>
+        <p>Logged in as <strong>{user.username}</strong>.</p>
+        <form id="logout-form" class="auth-form">
+          <button type="submit">Log Out</button>
+        </form>
+      </section>
+        """
+    upload_block = (
+        f"""
+      <section class="card">
+        <h1>imghost</h1>
+        <p>{'Upload with your session-backed account.' if user else 'Paste or pick one or more files to create an anonymous album with clean media URLs.'}</p>
+        <form action="/api/v1/upload" method="post" enctype="multipart/form-data">
+          <input type="text" name="title" placeholder="Album title (optional)">
+          <input type="file" name="file" required multiple>
+          <button type="submit">Upload</button>
+        </form>
+        <p class="hint">Base URL: {state.settings.base_url}</p>
+        {f'<p class="hint">Anonymous uploads currently expire after {anon_expiry_hours} hour(s).</p>' if user is None else '<p class="hint">Authenticated uploads do not expire by default.</p>'}
+      </section>
+        """
+        if upload_enabled
+        else f"""
+      <section class="card">
+        <h1>imghost</h1>
+        <p>Anonymous uploads are currently disabled. Sign in to upload.</p>
+        <p class="hint">Base URL: {state.settings.base_url}</p>
+      </section>
+        """
+    )
     return f"""
 <!doctype html>
 <html lang="en">
@@ -428,27 +503,86 @@ async def index(request: Request) -> str:
       main {{ max-width: 760px; margin: 0 auto; padding: 48px 20px 64px; }}
       .card {{ background: var(--card); border: 1px solid #eadcc2; border-radius: 20px; padding: 24px; box-shadow: 0 12px 30px rgba(20,33,61,.08); }}
       h1 {{ font-size: 3rem; margin: 0 0 12px; }}
+      h2 {{ margin: 0 0 12px; }}
       p {{ line-height: 1.5; }}
       form {{ display: grid; gap: 12px; margin-top: 24px; }}
       input, button {{ font: inherit; }}
-      input[type="text"], input[type="file"] {{ padding: 12px; background: white; border: 1px solid #d4c5a8; border-radius: 12px; }}
+      input[type="text"], input[type="email"], input[type="password"], input[type="file"] {{ padding: 12px; background: white; border: 1px solid #d4c5a8; border-radius: 12px; }}
       button {{ padding: 14px 18px; border: 0; border-radius: 999px; background: var(--accent); color: white; cursor: pointer; }}
       .hint {{ color: #6b7280; font-size: .95rem; }}
+      .auth-grid {{ display: grid; gap: 16px; margin-bottom: 18px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }}
+      .auth-card {{ margin-bottom: 18px; }}
+      .auth-form {{ margin-top: 12px; }}
+      .check {{ display: flex; gap: 8px; align-items: center; font-size: .95rem; color: #6b7280; }}
+      .flash {{ min-height: 1.4rem; color: #7c5414; }}
     </style>
   </head>
   <body>
     <main>
-      <section class="card">
-        <h1>imghost</h1>
-        <p>Paste or pick one or more files to create an anonymous album with clean media URLs.</p>
-        <form action="/api/v1/upload" method="post" enctype="multipart/form-data">
-          <input type="text" name="title" placeholder="Album title (optional)">
-          <input type="file" name="file" required multiple>
-          <button type="submit">Upload</button>
-        </form>
-        <p class="hint">Base URL: {state.settings.base_url}</p>
-      </section>
+      <p id="flash" class="flash"></p>
+      {auth_panel}
+      {upload_block}
     </main>
+    <script>
+      const flash = document.getElementById("flash");
+      const showMessage = (message) => {{
+        if (flash) {{
+          flash.textContent = message;
+        }}
+      }};
+      const submitJson = async (form, url) => {{
+        const formData = new FormData(form);
+        const payload = Object.fromEntries(formData.entries());
+        if ("remember_me" in payload) {{
+          payload.remember_me = formData.get("remember_me") === "on";
+        }}
+        const response = await fetch(url, {{
+          method: "POST",
+          headers: {{ "Content-Type": "application/json" }},
+          body: JSON.stringify(payload),
+        }});
+        const data = await response.json().catch(() => ({{}}));
+        if (!response.ok) {{
+          throw new Error(data.detail || "Request failed.");
+        }}
+      }};
+      const loginForm = document.getElementById("login-form");
+      if (loginForm) {{
+        loginForm.addEventListener("submit", async (event) => {{
+          event.preventDefault();
+          try {{
+            await submitJson(loginForm, "/api/v1/auth/login");
+            window.location.reload();
+          }} catch (error) {{
+            showMessage(error.message);
+          }}
+        }});
+      }}
+      const registerForm = document.getElementById("register-form");
+      if (registerForm) {{
+        registerForm.addEventListener("submit", async (event) => {{
+          event.preventDefault();
+          try {{
+            await submitJson(registerForm, "/api/v1/auth/register");
+            window.location.reload();
+          }} catch (error) {{
+            showMessage(error.message);
+          }}
+        }});
+      }}
+      const logoutForm = document.getElementById("logout-form");
+      if (logoutForm) {{
+        logoutForm.addEventListener("submit", async (event) => {{
+          event.preventDefault();
+          try {{
+            await fetch("/api/v1/auth/logout", {{ method: "POST" }});
+            window.location.reload();
+          }} catch {{
+            showMessage("Logout failed.");
+          }}
+        }});
+      }}
+    </script>
   </body>
 </html>
 """

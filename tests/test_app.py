@@ -106,6 +106,56 @@ def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
         assert deleted_album_response.status_code == 404
 
 
+def test_index_page_reflects_runtime_config_and_session_state(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="indexadmin", email="indexadmin@example.com")
+
+    with TestClient(app) as client:
+        anonymous = client.get("/")
+        assert anonymous.status_code == 200
+        assert 'id="login-form"' in anonymous.text
+        assert 'id="register-form"' in anonymous.text
+        assert "Anonymous uploads currently expire after 24 hour(s)." in anonymous.text
+
+        updated = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"allow_registration": False, "anon_upload_enabled": False},
+        )
+        assert updated.status_code == 200
+
+        disabled = client.get("/")
+        assert disabled.status_code == 200
+        assert "Registration is currently disabled." in disabled.text
+        assert "Anonymous uploads are currently disabled. Sign in to upload." in disabled.text
+        assert 'action="/api/v1/upload"' not in disabled.text
+
+
+def test_index_page_shows_session_upload_state_when_logged_in(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "browseruser",
+                "email": "browser@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "Logged in as <strong>browseruser</strong>." in page.text
+        assert 'id="logout-form"' in page.text
+        assert "Authenticated uploads do not expire by default." in page.text
+        assert 'action="/api/v1/upload"' in page.text
+
+
 def test_multi_file_upload_reuses_album_and_delete_removes_media(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

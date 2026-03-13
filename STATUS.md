@@ -9,7 +9,7 @@ The prototype is now well past the original anonymous upload proof-of-concept st
 - Background thumbnail processing and recovery
 - Image, SVG, animated image, and video processing pipelines
 - Cleanup/pruning commands
-- Authenticated registration, admin user management, quota enforcement, album management, audit log API, and runtime config API
+- Authenticated registration, browser-aware auth/upload home page, admin user management, quota enforcement, album management, audit log API, and runtime config API
 
 The codebase remains a FastAPI prototype backed by:
 
@@ -98,6 +98,10 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - Signed cookie session auth
 - Browser logout endpoint
 - Remember-me session support
+- Home page reflects session state and auth actions:
+  - sign-in form for anonymous users
+  - registration form when allowed
+  - logout action for signed-in users
 - CLI bootstrap:
   - `python -m imghost create-user`
   - `python -m imghost issue-api-key`
@@ -189,6 +193,10 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - Immediate anonymous upload behavior changes without restart for:
   - anonymous upload enable/disable
   - anonymous expiry hours
+- Home page UI consumes runtime config for:
+  - registration availability
+  - anonymous upload availability
+  - anonymous expiry messaging
 
 ### Domain Events Currently Present
 
@@ -257,17 +265,17 @@ The next best implementation slice depends on the target:
 
 ### If the goal is backend completeness against `DESIGN.md`
 
-Implement broader config consumption next:
+Implement rate limiting next:
 
-- consume runtime config in more places beyond anonymous upload behavior and registration
-- add real rate limiting if/when Redis arrives
-- surface config state in browser UI
+- runtime-config-backed rate limiting enforcement
+- clear fail-open behavior when no Redis-backed limiter exists
+- per-user override model once user-level limits are introduced
 
-That is now the most obvious missing path after registration landed.
+That is now the largest remaining config-consumption gap after the browser UI started reflecting runtime config.
 
 ## Test Status
 
 Current automated status at the time of writing:
 
 - `uv run pytest -q`
-- passing: `36 passed`
+- passing: `38 passed`
