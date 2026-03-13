@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
-from asyncio import Lock
 from datetime import datetime
-from pathlib import Path
 from uuid import uuid4
 
+from .db import Database
 from .events import (
     AdminLoggedIn,
     AlbumCoverSet,
@@ -26,23 +24,9 @@ from .events import (
 from .models import AuditEvent, utcnow
 
 
-class JsonAuditLog:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self._lock = Lock()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if not self.path.exists():
-            self.path.write_text("[]", encoding="utf-8")
-
-    def _load(self) -> list[AuditEvent]:
-        payload = json.loads(self.path.read_text(encoding="utf-8"))
-        return [AuditEvent.from_dict(item) for item in payload]
-
-    def _save(self, events: list[AuditEvent]) -> None:
-        self.path.write_text(
-            json.dumps([event.to_dict() for event in events], indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+class PostgresAuditLog:
+    def __init__(self, database: Database) -> None:
+        self.database = database
 
     async def write_audit_event(
         self,
@@ -54,6 +38,7 @@ class JsonAuditLog:
         correlation_id: str,
         metadata: dict[str, object],
     ) -> AuditEvent:
+        pool = self.database.require_pool()
         audit_event = AuditEvent(
             id=str(uuid4()),
             event_type=event_type,
@@ -65,11 +50,37 @@ class JsonAuditLog:
             metadata=dict(metadata),
             created_at=utcnow(),
         )
-        async with self._lock:
-            events = self._load()
-            events.append(audit_event)
-            self._save(events)
-        return audit_event
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO audit_log (
+                  id, event_type, actor_id, actor_ip_hash, target_type, target_id, correlation_id, metadata, created_at
+                ) VALUES (
+                  $1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8::jsonb, $9
+                )
+                RETURNING id, event_type, actor_id, actor_ip_hash, target_type, target_id, correlation_id, metadata, created_at
+                """,
+                audit_event.id,
+                audit_event.event_type,
+                audit_event.actor_id,
+                audit_event.actor_ip_hash,
+                audit_event.target_type,
+                audit_event.target_id,
+                audit_event.correlation_id,
+                audit_event.metadata,
+                audit_event.created_at,
+            )
+        return AuditEvent(
+            id=str(row["id"]),
+            event_type=row["event_type"],
+            actor_id=str(row["actor_id"]) if row["actor_id"] is not None else None,
+            actor_ip_hash=row["actor_ip_hash"],
+            target_type=row["target_type"],
+            target_id=row["target_id"],
+            correlation_id=row["correlation_id"],
+            metadata=row["metadata"] or {},
+            created_at=row["created_at"],
+        )
 
     async def query_audit_log(
         self,
@@ -83,30 +94,38 @@ class JsonAuditLog:
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditEvent]:
-        async with self._lock:
-            events = self._load()
+        query = """
+        SELECT id, event_type, actor_id, actor_ip_hash, target_type, target_id, correlation_id, metadata, created_at
+        FROM audit_log
+        WHERE ($1::text IS NULL OR event_type = $1)
+          AND ($2::uuid IS NULL OR actor_id = $2::uuid)
+          AND ($3::text IS NULL OR correlation_id = $3)
+          AND ($4::timestamptz IS NULL OR created_at >= $4)
+          AND ($5::timestamptz IS NULL OR created_at <= $5)
+          AND ($6::text IS NULL OR actor_id::text = $6 OR target_id = $6)
+        ORDER BY created_at DESC
+        LIMIT $7 OFFSET $8
+        """
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, event_type, actor_id, correlation_id, after, before, user_id, limit, offset)
+        return [
+            AuditEvent(
+                id=str(row["id"]),
+                event_type=row["event_type"],
+                actor_id=str(row["actor_id"]) if row["actor_id"] is not None else None,
+                actor_ip_hash=row["actor_ip_hash"],
+                target_type=row["target_type"],
+                target_id=row["target_id"],
+                correlation_id=row["correlation_id"],
+                metadata=row["metadata"] or {},
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
-        filtered: list[AuditEvent] = []
-        for event in events:
-            if event_type is not None and event.event_type != event_type:
-                continue
-            if actor_id is not None and event.actor_id != actor_id:
-                continue
-            if user_id is not None and event.actor_id != user_id and event.target_id != user_id:
-                continue
-            if correlation_id is not None and event.correlation_id != correlation_id:
-                continue
-            if after is not None and event.created_at < after:
-                continue
-            if before is not None and event.created_at > before:
-                continue
-            filtered.append(event)
 
-        filtered.sort(key=lambda event: event.created_at, reverse=True)
-        return filtered[offset : offset + limit]
-
-
-def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> None:
+def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -> None:
     async def write_album_created(event: AlbumCreated) -> None:
         await audit_log.write_audit_event(
             "album_created",

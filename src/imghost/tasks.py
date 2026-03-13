@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from .processors import ProcessorRegistry
-from .repositories import JsonRepository
+from .repositories import PostgresRepository
 from .storage import LocalFilesystemBackend
 
 TaskHandler = Callable[..., Awaitable[None]]
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class TaskContext:
-    repository: JsonRepository
+    repository: PostgresRepository
     storage: LocalFilesystemBackend
     processors: ProcessorRegistry
 

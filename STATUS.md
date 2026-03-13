@@ -13,11 +13,12 @@ The prototype is now well past the original anonymous upload proof-of-concept st
 
 The codebase remains a FastAPI prototype backed by:
 
-- JSON file repository/state
+- PostgreSQL-backed repository, audit log, and runtime config storage
+- Docker Compose PostgreSQL service with bind-mounted local data directory
 - local filesystem storage
 - in-process async task workers
 
-It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or the full production Redis-backed runtime/session model.
+It does **not** yet implement the full production architecture from `DESIGN.md` such as Redis, S3-compatible object storage, OAuth/SSO, or the full production Redis-backed runtime/session model.
 
 ## Implemented
 
@@ -89,6 +90,26 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - Prune dry-run mode
 - `python -m imghost prune`
 - `python -m imghost prune --dry-run`
+
+### Database / Persistence
+
+- Docker Compose Postgres service:
+  - `docker-compose.yml`
+  - bind-mounted data directory at `./postgres-data`
+- Schema bootstrap SQL loaded via `db/init/001-init.sql`
+- Postgres-backed app adapters for:
+  - repository/state
+  - audit log
+  - runtime config
+- `DATABASE_URL` runtime configuration
+- `asyncpg` added via `uv`
+- Verified smoke path against live Postgres container:
+  - schema initialization
+  - CLI user creation
+  - CLI API key issuance
+- Current caveat:
+  - this is an initial DB cut, not a full finished migration
+  - legacy tests still assume the old JSON-state test harness and have not been rewritten yet
 
 ### Users / Authentication
 
@@ -197,7 +218,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 
 ### Audit
 
-- JSON-backed audit writer/reader abstraction
+- Postgres-backed audit writer/reader abstraction
 - Audit persistence triggered by event bus listeners
 - Audit entries for current domain events:
   - `AlbumCreated`
@@ -217,7 +238,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 
 ### Runtime Config
 
-- JSON-backed runtime config writer/reader abstraction
+- Postgres-backed runtime config writer/reader abstraction
 - Effective value resolution with env lock support
 - Persisted overrides for:
   - `allow_registration`
@@ -268,7 +289,6 @@ These events exist and are emitted in the service layer. Thumbnail, audit, and c
 
 ### Storage / Infra from Final Design
 
-- PostgreSQL repositories
 - Redis-backed task queue / sessions / rate limits
 - S3-compatible object storage backend
 - multi-service worker deployment
@@ -325,3 +345,9 @@ Current automated status at the time of writing:
   - `uv run pytest -q tests/test_app.py -k 'admin_password_reset or admin_user_management or admin_audit_log or user_can_change_password'`
   - `uv run pytest -q tests/test_app.py -k 'admin_audit_log or admin_login'`
   - `uv run pytest -q tests/test_app.py -k 'admin_user_management or admin_password_reset or local_login or registration_creates_user_session_and_audit_entry'`
+- additional DB smoke checks passing:
+  - `docker compose up -d`
+  - `docker compose exec -T postgres psql -U imghost -d imghost -c "\\dt"`
+  - `DATABASE_URL=postgresql://imghost:imghost@localhost:5432/imghost uv run python -m imghost create-user --username pgadmin --email pgadmin@example.com`
+  - `DATABASE_URL=postgresql://imghost:imghost@localhost:5432/imghost uv run python -m imghost issue-api-key --user-id 72a00f56-54d2-4da5-aff7-8b8b095fbc53`
+  - `uv run python -m compileall src`

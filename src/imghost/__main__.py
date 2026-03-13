@@ -35,57 +35,61 @@ async def run_cli(argv: list[str] | None = None) -> int:
     settings = load_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     state = AppState(settings)
+    await state.database.connect()
 
-    if args.command == "prune":
-        result = await state.uploads.prune_expired_albums(dry_run=args.dry_run)
-        mode = "dry-run" if args.dry_run else "deleted"
-        print(
-            f"prune {mode}: albums={len(result.album_ids)} items={result.item_count} bytes={result.bytes_freed}"
-        )
-        if result.album_ids:
-            print("\n".join(result.album_ids))
-        return 0
+    try:
+        if args.command == "prune":
+            result = await state.uploads.prune_expired_albums(dry_run=args.dry_run)
+            mode = "dry-run" if args.dry_run else "deleted"
+            print(
+                f"prune {mode}: albums={len(result.album_ids)} items={result.item_count} bytes={result.bytes_freed}"
+            )
+            if result.album_ids:
+                print("\n".join(result.album_ids))
+            return 0
 
-    if args.command == "retry-thumbnails":
-        await state.tasks.start()
-        try:
-            enqueued = await state.recover_thumbnails(include_failed=True)
-            await state.tasks.join()
-        finally:
-            await state.tasks.stop()
-        print(f"re-enqueued thumbnails: {enqueued}")
-        return 0
+        if args.command == "retry-thumbnails":
+            await state.tasks.start()
+            try:
+                enqueued = await state.recover_thumbnails(include_failed=True)
+                await state.tasks.join()
+            finally:
+                await state.tasks.stop()
+            print(f"re-enqueued thumbnails: {enqueued}")
+            return 0
 
-    if args.command == "create-user":
-        user = User(
-            id=str(uuid4()),
-            username=args.username,
-            email=args.email,
-            password_hash=None,
-            is_admin=args.admin,
-            suspended=False,
-            quota_bytes=args.quota_bytes,
-            rate_limit_rpm=None,
-            rate_limit_bph=None,
-            created_at=utcnow(),
-            updated_at=utcnow(),
-        )
-        await state.repository.create_user(user)
-        print(f"created user: {user.id}")
-        return 0
+        if args.command == "create-user":
+            user = User(
+                id=str(uuid4()),
+                username=args.username,
+                email=args.email,
+                password_hash=None,
+                is_admin=args.admin,
+                suspended=False,
+                quota_bytes=args.quota_bytes,
+                rate_limit_rpm=None,
+                rate_limit_bph=None,
+                created_at=utcnow(),
+                updated_at=utcnow(),
+            )
+            await state.repository.create_user(user)
+            print(f"created user: {user.id}")
+            return 0
 
-    if args.command == "issue-api-key":
-        user = await state.repository.get_user(args.user_id)
-        if user is None:
-            print("user not found")
-            return 1
-        issued = await state.uploads.issue_api_key(user)
-        print(f"user_id: {user.id}")
-        print(f"api_key: {issued.raw_key}")
-        return 0
+        if args.command == "issue-api-key":
+            user = await state.repository.get_user(args.user_id)
+            if user is None:
+                print("user not found")
+                return 1
+            issued = await state.uploads.issue_api_key(user)
+            print(f"user_id: {user.id}")
+            print(f"api_key: {issued.raw_key}")
+            return 0
 
-    parser.error(f"Unknown command: {args.command}")
-    return 2
+        parser.error(f"Unknown command: {args.command}")
+        return 2
+    finally:
+        await state.database.close()
 
 
 def main(argv: list[str] | None = None) -> int:

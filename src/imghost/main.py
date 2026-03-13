@@ -17,15 +17,16 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from .audit import JsonAuditLog, register_audit_listeners
+from .audit import PostgresAuditLog, register_audit_listeners
 from .config import Settings, load_settings
+from .db import Database
 from .events import AdminLoggedIn, ConfigChanged, EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
 from .rate_limits import InMemoryRateLimiter, hash_anon_identity
-from .repositories import JsonRepository
+from .repositories import PostgresRepository
 from .models import User, utcnow
-from .runtime_config import JsonRuntimeConfig
+from .runtime_config import PostgresRuntimeConfig
 from .service import (
     AdminAlbumUpdateInput,
     CurrentActor,
@@ -43,10 +44,11 @@ from .tasks import AsyncTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 class AppState:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.database = Database(settings.database_url)
         self.event_bus = EventBus()
-        self.repository = JsonRepository(settings.data_dir / "state.json")
-        self.audit = JsonAuditLog(settings.data_dir / "audit.json")
-        self.runtime_config = JsonRuntimeConfig(settings.data_dir / "config.json")
+        self.repository = PostgresRepository(self.database)
+        self.audit = PostgresAuditLog(self.database)
+        self.runtime_config = PostgresRuntimeConfig(self.database)
         self.rate_limiter = InMemoryRateLimiter(self.runtime_config)
         self.storage = LocalFilesystemBackend(settings.data_dir)
         self.processors = build_processor_registry(
@@ -74,11 +76,13 @@ class AppState:
         return AsyncTaskQueue(context, worker_count=self.settings.thumbnail_worker_count)
 
     async def start(self) -> None:
+        await self.database.connect()
         await self.tasks.start()
         await self.recover_thumbnails(include_failed=False)
 
     async def stop(self) -> None:
         await self.tasks.stop()
+        await self.database.close()
 
     async def _enqueue_thumbnail(self, event: MediaUploaded) -> None:
         await self.tasks.enqueue(

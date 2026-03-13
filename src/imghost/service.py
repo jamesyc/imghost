@@ -31,8 +31,8 @@ from .ids import generate_album_id, generate_media_id
 from .models import Album, ApiKey, Media, User, utcnow
 from .processors import ProcessorRegistry
 from .rate_limits import InMemoryRateLimiter
-from .repositories import JsonRepository
-from .runtime_config import JsonRuntimeConfig
+from .repositories import PostgresRepository
+from .runtime_config import PostgresRuntimeConfig
 from .storage import LocalFilesystemBackend
 
 MAX_ALBUM_ITEMS = 1000
@@ -115,11 +115,11 @@ class UploadService:
     def __init__(
         self,
         settings: Settings,
-        repository: JsonRepository,
+        repository: PostgresRepository,
         storage: LocalFilesystemBackend,
         event_bus: EventBus,
         processors: ProcessorRegistry,
-        runtime_config: JsonRuntimeConfig,
+        runtime_config: PostgresRuntimeConfig,
         rate_limiter: InMemoryRateLimiter,
     ) -> None:
         self.settings = settings

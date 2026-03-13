@@ -8,6 +8,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Settings:
     base_url: str
+    database_url: str
     data_dir: Path
     secret_key: str
     session_cookie_name: str
@@ -26,6 +27,7 @@ def load_settings() -> Settings:
     data_dir = Path(os.getenv("IMGHOST_DATA_DIR", "data")).resolve()
     return Settings(
         base_url=os.getenv("BASE_URL", "http://localhost:8000").rstrip("/"),
+        database_url=os.getenv("DATABASE_URL", "postgresql://imghost:imghost@localhost:5432/imghost"),
         data_dir=data_dir,
         secret_key=os.getenv("SECRET_KEY", "dev-secret-key"),
         session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "imghost_session"),

@@ -8,7 +8,7 @@ from time import monotonic
 from fastapi import HTTPException
 
 from .models import User
-from .runtime_config import JsonRuntimeConfig
+from .runtime_config import PostgresRuntimeConfig
 
 MINUTE_SECONDS = 60.0
 HOUR_SECONDS = 3600.0
@@ -36,7 +36,7 @@ class WindowCounter:
 
 
 class InMemoryRateLimiter:
-    def __init__(self, runtime_config: JsonRuntimeConfig) -> None:
+    def __init__(self, runtime_config: PostgresRuntimeConfig) -> None:
         self.runtime_config = runtime_config
         self._anon_windows: dict[str, WindowCounter] = {}
         self._user_windows: dict[str, WindowCounter] = {}

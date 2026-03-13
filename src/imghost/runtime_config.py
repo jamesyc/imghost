@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-from asyncio import Lock
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import HTTPException
 
-from .models import utcnow
+from .db import Database
 
 ConfigType = Literal["bool", "int"]
 
@@ -66,19 +64,9 @@ class RuntimeConfigValue:
         }
 
 
-class JsonRuntimeConfig:
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        self._lock = Lock()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        if not self.path.exists():
-            self.path.write_text("{}", encoding="utf-8")
-
-    def _load(self) -> dict[str, dict[str, Any]]:
-        return json.loads(self.path.read_text(encoding="utf-8"))
-
-    def _save(self, payload: dict[str, dict[str, Any]]) -> None:
-        self.path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+class PostgresRuntimeConfig:
+    def __init__(self, database: Database) -> None:
+        self.database = database
 
     def _is_locked(self, spec: RuntimeConfigSpec) -> bool:
         return os.getenv(spec.lock_env, "false").strip().lower() == "true"
@@ -94,11 +82,18 @@ class JsonRuntimeConfig:
             raise HTTPException(status_code=400, detail=f"{spec.key} must be non-negative.")
         return raw_value
 
-    def _resolve_value(self, spec: RuntimeConfigSpec, state: dict[str, dict[str, Any]]) -> RuntimeConfigValue:
+    def _decode_stored_value(self, spec: RuntimeConfigSpec, raw_value: str | None) -> bool | int | None:
+        if raw_value is None:
+            return None
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=500, detail=f"Invalid stored config value for {spec.key}.") from exc
+        return self._coerce_value(spec, parsed)
+
+    def _resolve_value(self, spec: RuntimeConfigSpec, stored_value: str | None, updated_at: str | None) -> RuntimeConfigValue:
         default = spec.default()
-        stored = state.get(spec.key)
-        stored_value = stored.get("value") if stored else None
-        updated_at = stored.get("updated_at") if stored else None
+        decoded = self._decode_stored_value(spec, stored_value)
         if self._is_locked(spec):
             return RuntimeConfigValue(
                 key=spec.key,
@@ -106,10 +101,10 @@ class JsonRuntimeConfig:
                 default=default,
                 locked=True,
                 source="locked",
-                stored_value=stored_value,
+                stored_value=decoded,
                 updated_at=updated_at,
             )
-        if stored_value is None:
+        if decoded is None:
             return RuntimeConfigValue(
                 key=spec.key,
                 value=default,
@@ -121,18 +116,27 @@ class JsonRuntimeConfig:
             )
         return RuntimeConfigValue(
             key=spec.key,
-            value=self._coerce_value(spec, stored_value),
+            value=decoded,
             default=default,
             locked=False,
             source="runtime",
-            stored_value=stored_value,
+            stored_value=decoded,
             updated_at=updated_at,
         )
 
     async def list_effective(self) -> dict[str, RuntimeConfigValue]:
-        async with self._lock:
-            state = self._load()
-        return {key: self._resolve_value(spec, state) for key, spec in RUNTIME_CONFIG_SPECS.items()}
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT key, value, updated_at FROM config")
+        state = {row["key"]: row for row in rows}
+        return {
+            key: self._resolve_value(
+                spec,
+                state.get(key)["value"] if key in state else None,
+                state.get(key)["updated_at"].isoformat() if key in state else None,
+            )
+            for key, spec in RUNTIME_CONFIG_SPECS.items()
+        }
 
     async def get_value(self, key: str) -> bool | int:
         if key not in RUNTIME_CONFIG_SPECS:
@@ -146,26 +150,27 @@ class JsonRuntimeConfig:
         if unknown_keys:
             raise HTTPException(status_code=400, detail=f"Unknown config key(s): {', '.join(sorted(unknown_keys))}.")
 
-        async with self._lock:
-            state = self._load()
-            changes: list[dict[str, Any]] = []
-            now = utcnow().isoformat()
+        effective = await self.list_effective()
+        changes: list[dict[str, Any]] = []
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn, conn.transaction():
             for key, raw_value in updates.items():
                 spec = RUNTIME_CONFIG_SPECS[key]
                 if self._is_locked(spec):
                     raise HTTPException(status_code=403, detail=f"{key} is locked by environment configuration.")
                 coerced = self._coerce_value(spec, raw_value)
-                current = self._resolve_value(spec, state)
+                current = effective[key]
                 if current.value == coerced and current.source == "runtime":
                     continue
-                state[key] = {"value": coerced, "updated_at": now}
-                changes.append(
-                    {
-                        "key": key,
-                        "old_value": current.value,
-                        "new_value": coerced,
-                    }
+                await conn.execute(
+                    """
+                    INSERT INTO config (key, value)
+                    VALUES ($1, $2)
+                    ON CONFLICT (key)
+                    DO UPDATE SET value = EXCLUDED.value
+                    """,
+                    key,
+                    json.dumps(coerced),
                 )
-            if changes:
-                self._save(state)
+                changes.append({"key": key, "old_value": current.value, "new_value": coerced})
         return changes
