@@ -15,6 +15,7 @@ class Album:
     title: str | None
     user_id: str | None
     cover_media_id: str | None
+    delete_token: str | None
     created_at: datetime
     updated_at: datetime
     expires_at: datetime | None
@@ -29,6 +30,7 @@ class Album:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Album":
         values = data.copy()
+        values.setdefault("delete_token", None)
         for key in ("created_at", "updated_at", "expires_at"):
             if values.get(key) is not None:
                 values[key] = datetime.fromisoformat(values[key])
@@ -68,4 +70,3 @@ class Media:
         values = data.copy()
         values["created_at"] = datetime.fromisoformat(values["created_at"])
         return cls(**values)
-

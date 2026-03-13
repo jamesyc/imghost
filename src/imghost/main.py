@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from math import ceil
 from typing import Any
 from uuid import uuid4
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from .config import Settings, load_settings
 from .events import EventBus
@@ -62,13 +64,48 @@ def is_expired(expires_at: datetime | None) -> bool:
     return expires_at is not None and expires_at <= datetime.now(UTC)
 
 
+def humanize_expiry(expires_at: datetime | None) -> str | None:
+    if expires_at is None:
+        return None
+    delta = expires_at - datetime.now(UTC)
+    total_seconds = max(0, int(delta.total_seconds()))
+    if total_seconds < 3600:
+        minutes = max(1, ceil(total_seconds / 60))
+        return f"This album expires in {minutes} minute(s)."
+    if total_seconds < 86400:
+        hours = ceil(total_seconds / 3600)
+        return f"This album expires in {hours} hour(s)."
+    days = ceil(total_seconds / 86400)
+    return f"This album expires in {days} day(s)."
+
+
+def album_delete_url(base_url: str, album: Any) -> str | None:
+    if not album.delete_token:
+        return None
+    query = urlencode({"delete_token": album.delete_token})
+    return f"{base_url}/api/v1/album/{album.id}/delete?{query}"
+
+
+def resolve_cover_media(album: Any, media_items: list[Any]) -> Any | None:
+    if album.cover_media_id:
+        for item in media_items:
+            if item.id == album.cover_media_id:
+                return item
+    return media_items[0] if media_items else None
+
+
 def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[str, Any]:
+    cover = resolve_cover_media(album, media_items)
     return {
         "id": album.id,
         "title": album.title,
         "created_at": album.created_at.isoformat(),
         "updated_at": album.updated_at.isoformat(),
         "expires_at": album.expires_at.isoformat() if album.expires_at else None,
+        "delete_url": album_delete_url(base_url, album),
+        "item_count": len(media_items),
+        "total_size": sum(item.file_size for item in media_items),
+        "cover_url": media_url(base_url, cover.id, cover.format) if cover else None,
         "items": [
             {
                 "id": item.id,
@@ -79,6 +116,7 @@ def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[
                 "thumb_url": thumb_url(base_url, item.id, item.format),
                 "position": item.position,
                 "file_size": item.file_size,
+                "thumb_status": item.thumb_status,
             }
             for item in media_items
         ],
@@ -151,13 +189,14 @@ async def upload(
         "media_id": primary.media.id,
         "media_url": media_url(state.settings.base_url, primary.media.id, primary.media.format),
         "thumb_url": thumb_url(state.settings.base_url, primary.media.id, primary.media.format),
-        "delete_url": f"{state.settings.base_url}/api/v1/album/{primary.album.id}",
+        "delete_url": album_delete_url(state.settings.base_url, primary.album),
         "expires_at": primary.album.expires_at.isoformat() if primary.album.expires_at else None,
         "items": [
             {
                 "media_id": result.media.id,
                 "media_url": media_url(state.settings.base_url, result.media.id, result.media.format),
                 "thumb_url": thumb_url(state.settings.base_url, result.media.id, result.media.format),
+                "thumb_status": result.media.thumb_status,
             }
             for result in results
         ],
@@ -187,12 +226,18 @@ async def album_page(request: Request, album_id: str) -> str:
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
     items = await state.repository.list_album_media(album_id)
+    expiry_hint = humanize_expiry(album.expires_at)
     cards = []
     for item in items:
+        preview_url = thumb_url(state.settings.base_url, item.id, item.format)
         if item.media_type == "video":
-            media_tag = f'<video controls preload="metadata" src="{media_url(state.settings.base_url, item.id, item.format)}"></video>'
+            poster_attr = f' poster="{preview_url}"' if item.thumb_status == "done" else ""
+            media_tag = f'<video controls preload="metadata" src="{media_url(state.settings.base_url, item.id, item.format)}"{poster_attr}></video>'
         else:
-            media_tag = f'<img src="{media_url(state.settings.base_url, item.id, item.format)}" alt="{item.filename_orig}">'
+            if item.thumb_status == "done":
+                media_tag = f'<img src="{preview_url}" alt="{item.filename_orig}">'
+            else:
+                media_tag = '<div class="placeholder">Thumbnail pending</div>'
         cards.append(
             f"""
             <article class="item">
@@ -215,18 +260,22 @@ async def album_page(request: Request, album_id: str) -> str:
       .hero {{ margin-bottom: 24px; }}
       .grid {{ display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }}
       .item {{ background: #fffdf8; border: 1px solid #e3d6be; border-radius: 18px; padding: 12px; }}
-      img, video {{ width: 100%; display: block; border-radius: 12px; background: #ebe6dc; }}
+      img, video, .placeholder {{ width: 100%; display: block; border-radius: 12px; background: #ebe6dc; }}
+      .placeholder {{ min-height: 220px; display: grid; place-items: center; color: #786b57; font-style: italic; }}
       input {{ width: 100%; margin-top: 12px; padding: 10px; border-radius: 10px; border: 1px solid #d5c6ab; }}
       .hint {{ color: #786b57; }}
+      .banner {{ background: #fff2d8; border: 1px solid #e6c88f; color: #7c5414; border-radius: 14px; padding: 10px 14px; margin: 12px 0 0; }}
+      .actions {{ margin-top: 16px; }}
     </style>
   </head>
   <body>
     <main>
       <section class="hero">
-        <p class="hint">Step 4 of 5: album rendering is implemented.</p>
+        <p class="hint">V1.1 public album view.</p>
         <h1>{album.title or "Untitled album"}</h1>
         <p>{len(items)} item(s) · Created {album.created_at.isoformat()}</p>
-        <p>{("Expires " + album.expires_at.isoformat()) if album.expires_at else ""}</p>
+        {f'<p class="banner">{expiry_hint}</p>' if expiry_hint else ''}
+        <p class="actions"><a href="/api/v1/album/{album.id}/zip">Download as ZIP</a></p>
       </section>
       <section class="grid">
         {''.join(cards)}
@@ -248,6 +297,8 @@ async def stream_media(request: Request, raw_id: str, thumb: bool) -> StreamingR
     album = await state.repository.get_album(media.album_id)
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
+    if thumb and media.thumb_status != "done":
+        return StreamingResponse(iter(()), status_code=202)
     key = media.storage_key if (not thumb or media.thumb_is_orig or not media.thumb_key) else media.thumb_key
     stream = await state.storage.get_stream(key, request.headers.get("Range"))
     headers = {
@@ -273,6 +324,45 @@ async def raw_media(request: Request, raw_id: str) -> StreamingResponse:
 @app.get("/t/{raw_id}")
 async def thumbnail_media(request: Request, raw_id: str) -> StreamingResponse:
     return await stream_media(request, raw_id, thumb=True)
+
+
+@app.get("/api/v1/album/{album_id}/zip")
+async def download_album_zip(request: Request, album_id: str) -> Response:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    album = await state.repository.get_album(album_id)
+    if album is None or is_expired(album.expires_at):
+        raise HTTPException(status_code=404)
+    archive = await state.uploads.build_album_zip(album_id)
+    filename = f"{album.id}.zip"
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.delete("/api/v1/album/{album_id}")
+async def delete_album(request: Request, album_id: str, delete_token: str | None = None) -> JSONResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    cid = correlation_id(request)
+    album, items = await state.uploads.delete_album(album_id, delete_token, cid)
+    return JSONResponse(
+        {
+            "deleted": True,
+            "album_id": album.id,
+            "item_count": len(items),
+        },
+        headers={"X-Correlation-ID": cid},
+    )
+
+
+@app.get("/api/v1/album/{album_id}/delete")
+async def delete_album_via_get(request: Request, album_id: str, delete_token: str | None = None) -> JSONResponse:
+    return await delete_album(request, album_id, delete_token)
 
 
 @app.get("/health/live")

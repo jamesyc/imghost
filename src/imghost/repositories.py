@@ -76,3 +76,22 @@ class JsonRepository:
         items = await self.list_album_media(album_id)
         return (items[-1].position + 1000) if items else 1000
 
+    async def delete_media(self, media_id: str) -> Media | None:
+        async with self._lock:
+            state = self._load()
+            media = state.media.pop(media_id, None)
+            if media is not None:
+                self._save(state)
+            return media
+
+    async def delete_album(self, album_id: str) -> tuple[Album | None, list[Media]]:
+        async with self._lock:
+            state = self._load()
+            album = state.albums.pop(album_id, None)
+            if album is None:
+                return None, []
+            media_items = [item for item in state.media.values() if item.album_id == album_id]
+            for item in media_items:
+                state.media.pop(item.id, None)
+            self._save(state)
+            return album, sorted(media_items, key=lambda item: item.position)

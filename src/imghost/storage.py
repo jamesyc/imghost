@@ -41,6 +41,9 @@ class LocalFilesystemBackend:
     async def get_size(self, key: str) -> int:
         return self._path_for(key).stat().st_size
 
+    async def get_bytes(self, key: str) -> bytes:
+        return self._path_for(key).read_bytes()
+
     async def health_check(self) -> bool:
         return self.root.exists() and self.root.is_dir()
 
@@ -81,4 +84,3 @@ class LocalFilesystemBackend:
             content_range=content_range,
             body=iterator(),
         )
-

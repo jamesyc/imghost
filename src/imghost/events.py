@@ -33,6 +33,16 @@ class MediaUploaded:
     correlation_id: str
 
 
+@dataclass(slots=True)
+class AlbumDeleted:
+    album_id: str
+    user_id: str | None
+    item_count: int
+    total_size: int
+    source: str
+    correlation_id: str
+
+
 class EventBus:
     def __init__(self) -> None:
         self._listeners: dict[type, list[Listener]] = defaultdict(list)
@@ -52,4 +62,3 @@ class EventBus:
             except Exception:
                 logger.exception("event_listener_failed", extra={"event_type": type(event).__name__})
                 await asyncio.sleep(0)
-
