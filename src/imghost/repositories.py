@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from asyncio import Lock
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,12 @@ class JsonRepository:
 
     async def find_failed_thumbnails(self) -> list[Media]:
         return await self.list_media_by_thumb_status("failed")
+
+    async def list_expired_albums(self, now: datetime) -> list[Album]:
+        async with self._lock:
+            state = self._load()
+            items = [album for album in state.albums.values() if album.expires_at is not None and album.expires_at <= now]
+        return sorted(items, key=lambda album: album.expires_at or now)
 
     async def list_album_media(self, album_id: str) -> list[Media]:
         async with self._lock:

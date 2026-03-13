@@ -5,7 +5,9 @@ from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 
+from imghost.__main__ import main as cli_main
 from imghost.main import app
+from imghost.models import utcnow
 
 PNG_1X1 = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -299,4 +301,103 @@ def test_failed_thumbnail_can_be_reenqueued_for_recovery(tmp_path, monkeypatch) 
         media_path.write_bytes(PNG_1X1)
         reenqueued = client.portal.call(lambda: recovered.recover_thumbnails(include_failed=True))
         assert reenqueued >= 1
+        wait_for_thumbnail(client, media_id)
+
+
+def test_prune_dry_run_preserves_expired_album(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("expired.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        media_id = payload["media_id"]
+        wait_for_thumbnail(client, media_id)
+
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    album = state["albums"][payload["album_id"]]
+    album["expires_at"] = (utcnow().replace(microsecond=0)).isoformat()
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+    exit_code = cli_main(["prune", "--dry-run"])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "prune dry-run: albums=1 items=1" in output
+    assert payload["album_id"] in output
+
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert payload["album_id"] in persisted["albums"]
+    assert payload["media_id"] in persisted["media"]
+    assert next((tmp_path / "originals" / "anon").glob(f"{payload['media_id']}.*")).exists()
+
+
+def test_prune_deletes_expired_album_and_media(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("expired.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        media_id = payload["media_id"]
+        wait_for_thumbnail(client, media_id)
+
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["albums"][payload["album_id"]]["expires_at"] = (utcnow().replace(microsecond=0)).isoformat()
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+    exit_code = cli_main(["prune"])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "prune deleted: albums=1 items=1" in output
+
+    with TestClient(app) as client:
+        assert client.get(f"/api/v1/album/{payload['album_id']}").status_code == 404
+        assert client.get(f"/i/{payload['media_id']}.png").status_code == 404
+
+
+def test_retry_thumbnails_cli_recovers_failed_thumbnail(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        media_id = payload["media_id"]
+        wait_for_thumbnail(client, media_id)
+
+    media_path = next((tmp_path / "originals" / "anon").glob(f"{media_id}.*"))
+    media_path.write_bytes(b"broken")
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    media = state["media"][media_id]
+    media["thumb_status"] = "failed"
+    media["thumb_key"] = None
+    media["thumb_size"] = None
+    media["thumb_is_orig"] = False
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    for existing in (tmp_path / "thumbnails").glob(f"{media_id}.*"):
+        existing.unlink()
+
+    media_path.write_bytes(PNG_1X1)
+    exit_code = cli_main(["retry-thumbnails"])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "re-enqueued thumbnails: 1" in output
+
+    with TestClient(app) as client:
         wait_for_thumbnail(client, media_id)

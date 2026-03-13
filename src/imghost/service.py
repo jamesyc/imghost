@@ -44,6 +44,14 @@ class MediaDeleteResult:
     album_deleted: bool
 
 
+@dataclass
+class PruneResult:
+    dry_run: bool
+    album_ids: list[str]
+    item_count: int
+    bytes_freed: int
+
+
 class UploadService:
     def __init__(
         self,
@@ -409,6 +417,57 @@ class UploadService:
                 archive.writestr(filename, await self.storage.get_bytes(media.storage_key))
         return archive_buffer.getvalue()
 
+    async def prune_expired_albums(self, *, dry_run: bool = False) -> PruneResult:
+        expired_albums = await self.repository.list_expired_albums(utcnow())
+        album_ids: list[str] = []
+        item_count = 0
+        bytes_freed = 0
+
+        for album in expired_albums:
+            media_items = await self.repository.list_album_media(album.id)
+            storage_keys = self._storage_keys_for_media(media_items)
+            album_ids.append(album.id)
+            item_count += len(media_items)
+            bytes_freed += self._storage_bytes_for_media(media_items)
+
+            if dry_run:
+                continue
+
+            storage_ok = True
+            for key in storage_keys:
+                try:
+                    await self.storage.delete(key)
+                except Exception:
+                    storage_ok = False
+                    break
+
+            if not storage_ok:
+                album_ids.pop()
+                item_count -= len(media_items)
+                bytes_freed -= self._storage_bytes_for_media(media_items)
+                continue
+
+            deleted_album, deleted_media = await self.repository.delete_album(album.id)
+            if deleted_album is None:
+                continue
+            await self.event_bus.emit(
+                AlbumDeleted(
+                    album_id=deleted_album.id,
+                    user_id=deleted_album.user_id,
+                    item_count=len(deleted_media),
+                    total_size=self._storage_bytes_for_media(deleted_media),
+                    source="system",
+                    correlation_id=f"prune-{deleted_album.id}",
+                )
+            )
+
+        return PruneResult(
+            dry_run=dry_run,
+            album_ids=album_ids,
+            item_count=item_count,
+            bytes_freed=bytes_freed,
+        )
+
     def _archive_name(self, media: Media, index: int, seen_names: set[str]) -> str:
         candidate = Path(media.filename_orig).name or f"{media.id}.{media.format}"
         if "." not in candidate and media.format:
@@ -452,3 +511,22 @@ class UploadService:
             if current.position - previous.position < 2:
                 return True
         return False
+
+    def _storage_keys_for_media(self, media_items: list[Media]) -> list[str]:
+        keys: list[str] = []
+        seen: set[str] = set()
+        for media in media_items:
+            for key in (media.storage_key, media.thumb_key):
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                keys.append(key)
+        return keys
+
+    def _storage_bytes_for_media(self, media_items: list[Media]) -> int:
+        total = 0
+        for media in media_items:
+            total += media.file_size
+            if media.thumb_key and media.thumb_key != media.storage_key:
+                total += media.thumb_size or 0
+        return total

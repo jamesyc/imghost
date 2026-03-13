@@ -33,6 +33,9 @@ class TaskQueue:
     async def stop(self) -> None:
         return None
 
+    async def join(self) -> None:
+        return None
+
 
 @dataclass(slots=True)
 class QueuedTask:
