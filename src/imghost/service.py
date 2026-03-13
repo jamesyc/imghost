@@ -842,6 +842,39 @@ class UploadService:
             )
         return payload
 
+    async def list_public_albums_for_username(self, username: str) -> tuple[User, list[dict[str, object]]]:
+        user = await self.repository.get_user_by_username(username)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        albums = await self.repository.list_user_albums(user.id)
+        visible = [album for album in albums if album.expires_at is None or album.expires_at > utcnow()]
+        visible.sort(key=lambda album: album.updated_at, reverse=True)
+
+        payload: list[dict[str, object]] = []
+        for album in visible:
+            items = await self.repository.list_album_media(album.id)
+            cover = None
+            if album.cover_media_id:
+                cover = next((item for item in items if item.id == album.cover_media_id), None)
+            if cover is None and items:
+                cover = items[0]
+            payload.append(
+                {
+                    "id": album.id,
+                    "title": album.title,
+                    "item_count": len(items),
+                    "total_size": sum(item.file_size for item in items),
+                    "created_at": album.created_at.isoformat(),
+                    "updated_at": album.updated_at.isoformat(),
+                    "cover_media_id": cover.id if cover else None,
+                    "cover_format": cover.format if cover else None,
+                    "cover_thumb_format": (cover.thumb_key.rsplit(".", 1)[-1].lower() if cover and cover.thumb_key and not cover.thumb_is_orig else cover.format if cover else None),
+                    "cover_thumb_status": cover.thumb_status if cover else None,
+                }
+            )
+        return user, payload
+
     async def admin_update_album(
         self,
         album_id: str,

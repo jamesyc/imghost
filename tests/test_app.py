@@ -157,6 +157,73 @@ def test_index_page_shows_session_upload_state_when_logged_in(tmp_path, monkeypa
         assert 'action="/api/v1/upload"' in page.text
 
 
+def test_public_user_album_list_page_shows_owned_albums_sorted_by_recent_update(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="showcase", email="showcase@example.com")
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("first.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Older Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("second.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Newer Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert second.status_code == 200
+        wait_for_thumbnail(client, first.json()["media_id"])
+        wait_for_thumbnail(client, second.json()["media_id"])
+
+        page = client.get("/u/showcase")
+        assert page.status_code == 200
+        assert "Public user album list." in page.text
+        assert "Older Album" in page.text
+        assert "Newer Album" in page.text
+        assert f'/a/{first.json()["album_id"]}' in page.text
+        assert f'/a/{second.json()["album_id"]}' in page.text
+        assert page.text.index("Newer Album") < page.text.index("Older Album")
+
+
+def test_public_user_album_list_page_hides_expired_albums_and_404s_for_missing_user(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="hidadmin", email="hidadmin@example.com")
+    _, api_key = create_user_and_api_key(capsys, username="hidden", email="hidden@example.com")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("expired.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Expired Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+
+        expired = client.patch(
+            f"/api/v1/admin/albums/{upload.json()['album_id']}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"expires_at": (utcnow() - timedelta(hours=1)).isoformat()},
+        )
+        assert expired.status_code == 200
+
+        page = client.get("/u/hidden")
+        assert page.status_code == 200
+        assert "Expired Album" not in page.text
+        assert "This user has no public albums yet." in page.text
+
+        missing = client.get("/u/does-not-exist")
+        assert missing.status_code == 404
+
+
 def test_multi_file_upload_reuses_album_and_delete_removes_media(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

@@ -27,6 +27,10 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - Multi-file batch upload into a single album
 - Public album JSON endpoint
 - Public album HTML page
+- Public user album list page:
+  - `GET /u/{username}`
+  - sorted by most recently modified albums first
+  - hides expired albums
 - Media serving via `/i/{id}.{ext}`
 - Thumbnail serving via `/t/{id}.{ext}`
 - Range request support for media streaming
@@ -265,10 +269,10 @@ These events exist and are emitted in the service layer. Thumbnail, audit, and c
 
 ### Additional User/Admin Features
 
+- Public user album list UI
 - Admin album rescue/expiry UI beyond API
 - Admin audit browsing UI beyond API
 - Admin configuration panel
-- Per-user rate-limit overrides
 - Dedicated admin password reset semantics beyond generic patching
 
 ## MVP Assessment
@@ -276,6 +280,12 @@ These events exist and are emitted in the service layer. Thumbnail, audit, and c
 ### Anonymous/Public MVP
 
 The anonymous/public media host path is already at a solid prototype-MVP level.
+
+That now includes:
+
+1. public album viewing
+2. album ZIP download
+3. public user album lists
 
 ### Logged-In User MVP
 
@@ -293,17 +303,18 @@ The next best implementation slice depends on the target:
 
 ### If the goal is backend completeness against `DESIGN.md`
 
-Implement per-user override and production limiter semantics next:
+Implement the remaining control-plane and auth semantics next:
 
-- per-user rate-limit override model
 - Redis-backed limiter behavior matching the final design
 - explicit fail-open/fail-closed behavior around Redis availability
+- dedicated admin password reset semantics
 
-That is now the main remaining gap in the rate-limit/control-plane area.
+That is now the main remaining gap in the rate-limit/auth control-plane area.
 
 ## Test Status
 
 Current automated status at the time of writing:
 
-- `uv run pytest -q`
-- passing: `40 passed`
+- focused slices passing:
+  - `uv run pytest -q tests/test_app.py -k 'public_user_album_list or upload_album_and_media_serving or admin_album_management or api_key_upload'`
+  - `uv run pytest -q tests/test_app.py -k 'index_page or album_patch or admin_album_management or admin_user_management or registration'`

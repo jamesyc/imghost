@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import base64
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from html import escape
 import hmac
 import json
 from hashlib import sha256
@@ -438,6 +439,20 @@ def compatibility_warning(item: Any) -> str | None:
     return None
 
 
+def humanize_bytes(byte_count: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(byte_count)
+    unit = units[0]
+    for candidate in units:
+        unit = candidate
+        if size < 1024.0 or candidate == units[-1]:
+            break
+        size /= 1024.0
+    if unit == "B":
+        return f"{int(size)} {unit}"
+    return f"{size:.1f} {unit}"
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> str:
     state = get_state(request)
@@ -819,6 +834,80 @@ async def album_page(request: Request, album_id: str) -> str:
         poll();
       }}
     </script>
+  </body>
+</html>
+"""
+
+
+@app.get("/u/{username}", response_class=HTMLResponse)
+async def user_album_list_page(request: Request, username: str) -> str:
+    state = get_state(request)
+    user, albums = await state.uploads.list_public_albums_for_username(username)
+
+    cards = []
+    for album in albums:
+        if album["cover_media_id"] is not None and album["cover_thumb_format"] is not None:
+            if album["cover_thumb_status"] == "done":
+                preview = (
+                    f'<img src="{thumb_url(state.settings.base_url, album["cover_media_id"], album["cover_thumb_format"])}" '
+                    f'alt="{escape(album["title"] or "Untitled album")}">'
+                )
+            else:
+                preview = '<div class="placeholder">Thumbnail pending</div>'
+        else:
+            preview = '<div class="placeholder">No media</div>'
+        cards.append(
+            f"""
+            <a class="album-card" href="/a/{album["id"]}">
+              {preview}
+              <div class="meta">
+                <h2>{escape(album["title"] or "Untitled album")}</h2>
+                <p>{album["item_count"]} item(s) · {humanize_bytes(int(album["total_size"]))}</p>
+                <p class="hint">Created {escape(str(album["created_at"]))}</p>
+              </div>
+            </a>
+            """
+        )
+
+    empty_state = (
+        '<p class="empty">This user has no public albums yet.</p>'
+        if not cards
+        else "".join(cards)
+    )
+
+    return f"""
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{escape(user.username)} albums</title>
+    <style>
+      body {{ margin: 0; font-family: Georgia, serif; background: #f4f1ea; color: #18212f; }}
+      main {{ max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; }}
+      .hero {{ margin-bottom: 24px; }}
+      .grid {{ display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }}
+      .album-card {{ display: block; text-decoration: none; color: inherit; background: #fffdf8; border: 1px solid #e3d6be; border-radius: 18px; overflow: hidden; box-shadow: 0 10px 24px rgba(24,33,47,.06); }}
+      .album-card img, .placeholder {{ width: 100%; aspect-ratio: 16 / 10; display: block; background: #ebe6dc; object-fit: cover; }}
+      .placeholder {{ display: grid; place-items: center; color: #786b57; font-style: italic; }}
+      .meta {{ padding: 14px; }}
+      h1, h2 {{ margin: 0 0 8px; }}
+      p {{ margin: 0; line-height: 1.5; }}
+      .hint {{ color: #786b57; }}
+      .empty {{ color: #786b57; font-style: italic; }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <p class="hint">Public user album list.</p>
+        <h1>{escape(user.username)}</h1>
+        <p>{len(albums)} public album(s), sorted by most recently modified.</p>
+      </section>
+      <section class="grid">
+        {empty_state}
+      </section>
+    </main>
   </body>
 </html>
 """
