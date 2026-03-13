@@ -13,6 +13,7 @@ from .events import (
     AlbumExpiryChanged,
     AlbumReordered,
     AlbumTitleChanged,
+    ConfigChanged,
     EventBus,
     MediaDeleted,
     MediaUploaded,
@@ -264,6 +265,23 @@ def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> No
             },
         )
 
+    async def write_config_changed(event: ConfigChanged) -> None:
+        await audit_log.write_audit_event(
+            "config_changed",
+            event.actor_id,
+            None,
+            "config",
+            event.key,
+            event.correlation_id,
+            {
+                "key": event.key,
+                "old_value": event.old_value,
+                "new_value": event.new_value,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
     event_bus.subscribe(AlbumCreated, write_album_created)
     event_bus.subscribe(MediaUploaded, write_media_uploaded)
     event_bus.subscribe(AlbumDeleted, write_album_deleted)
@@ -274,3 +292,4 @@ def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> No
     event_bus.subscribe(AlbumExpiryChanged, write_album_expiry_changed)
     event_bus.subscribe(UserDeleted, write_user_deleted)
     event_bus.subscribe(UserSuspended, write_user_suspended)
+    event_bus.subscribe(ConfigChanged, write_config_changed)

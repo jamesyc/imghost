@@ -1,5 +1,6 @@
 import json
 import hashlib
+from datetime import datetime, timedelta
 from io import BytesIO
 from time import monotonic, sleep
 from zipfile import ZipFile
@@ -910,3 +911,110 @@ def test_admin_audit_log_tracks_events_and_supports_filters(tmp_path, monkeypatc
 
         forbidden = client.get("/api/v1/admin/audit", headers={"Authorization": f"Bearer {user_key}"})
         assert forbidden.status_code == 403
+
+
+def test_admin_config_can_be_read_updated_and_audited(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="cfgadmin", email="cfgadmin@example.com")
+
+    with TestClient(app) as client:
+        initial = client.get("/api/v1/admin/config", headers={"Authorization": f"Bearer {admin_key}"})
+        assert initial.status_code == 200
+        initial_payload = initial.json()
+        assert initial_payload["allow_registration"]["value"] is True
+        assert initial_payload["anon_upload_enabled"]["value"] is True
+        assert initial_payload["anon_expiry_hours"]["value"] == 24
+
+        updated = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}", "X-Correlation-ID": "cfg-patch"},
+            json={
+                "allow_registration": False,
+                "anon_upload_enabled": False,
+                "anon_expiry_hours": 72,
+                "rate_limit_user_rpm": 99,
+            },
+        )
+        assert updated.status_code == 200
+        updated_payload = updated.json()
+        assert updated_payload["allow_registration"]["value"] is False
+        assert updated_payload["allow_registration"]["source"] == "runtime"
+        assert updated_payload["anon_upload_enabled"]["value"] is False
+        assert updated_payload["anon_expiry_hours"]["value"] == 72
+        assert updated_payload["rate_limit_user_rpm"]["value"] == 99
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "config_changed", "actor_id": admin_id, "correlation_id": "cfg-patch"},
+        )
+        assert audit.status_code == 200
+        audit_payload = audit.json()
+        changed_keys = {item["metadata"]["key"] for item in audit_payload}
+        assert {"allow_registration", "anon_upload_enabled", "anon_expiry_hours", "rate_limit_user_rpm"} <= changed_keys
+
+
+def test_runtime_config_can_disable_anon_uploads_and_override_expiry(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="cfgadmin2", email="cfgadmin2@example.com")
+
+    with TestClient(app) as client:
+        expiry_config = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"anon_expiry_hours": 48},
+        )
+        assert expiry_config.status_code == 200
+
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert upload.status_code == 200
+        album_id = upload.json()["album_id"]
+
+        album = client.get(f"/api/v1/album/{album_id}")
+        assert album.status_code == 200
+        expires_at = datetime.fromisoformat(album.json()["expires_at"])
+        delta = expires_at - utcnow()
+        assert timedelta(hours=47, minutes=50) <= delta <= timedelta(hours=48, minutes=10)
+
+        disabled = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"anon_upload_enabled": False},
+        )
+        assert disabled.status_code == 200
+
+        blocked = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == "Anonymous uploads are disabled."
+
+
+def test_locked_runtime_config_cannot_be_overridden(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("LOCK_ANON_EXPIRY", "true")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="cfgadmin3", email="cfgadmin3@example.com")
+
+    with TestClient(app) as client:
+        read = client.get("/api/v1/admin/config", headers={"Authorization": f"Bearer {admin_key}"})
+        assert read.status_code == 200
+        assert read.json()["anon_expiry_hours"]["locked"] is True
+        assert read.json()["anon_expiry_hours"]["source"] == "locked"
+
+        update = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"anon_expiry_hours": 99},
+        )
+        assert update.status_code == 403
+        assert update.json()["detail"] == "anon_expiry_hours is locked by environment configuration."

@@ -9,7 +9,7 @@ The prototype is now well past the original anonymous upload proof-of-concept st
 - Background thumbnail processing and recovery
 - Image, SVG, animated image, and video processing pipelines
 - Cleanup/pruning commands
-- Admin user management, quota enforcement, album management, and audit log API
+- Admin user management, quota enforcement, album management, audit log API, and runtime config API
 
 The codebase remains a FastAPI prototype backed by:
 
@@ -17,7 +17,7 @@ The codebase remains a FastAPI prototype backed by:
 - local filesystem storage
 - in-process async task workers
 
-It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or runtime config abstractions.
+It does **not** yet implement the full production architecture from `DESIGN.md` such as PostgreSQL, Redis, S3-compatible object storage, OAuth/SSO, or the full production runtime config model.
 
 ## Implemented
 
@@ -151,6 +151,10 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - Audit log API:
   - `GET /api/v1/admin/audit`
   - filterable by event type, actor, correlation ID, and date range
+- Runtime config API:
+  - `GET /api/v1/admin/config`
+  - `PATCH /api/v1/admin/config`
+  - env-lock-aware effective values returned to admin clients
 
 ### Audit
 
@@ -165,8 +169,22 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `AlbumCoverSet`
   - `AlbumReordered`
   - `AlbumExpiryChanged`
+  - `ConfigChanged`
   - `UserDeleted`
   - `UserSuspended`
+
+### Runtime Config
+
+- JSON-backed runtime config writer/reader abstraction
+- Effective value resolution with env lock support
+- Persisted overrides for:
+  - `allow_registration`
+  - `anon_upload_enabled`
+  - `anon_expiry_hours`
+  - rate-limit config keys from the design
+- Immediate anonymous upload behavior changes without restart for:
+  - anonymous upload enable/disable
+  - anonymous expiry hours
 
 ### Domain Events Currently Present
 
@@ -178,10 +196,11 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - `AlbumCoverSet`
 - `AlbumReordered`
 - `AlbumExpiryChanged`
+- `ConfigChanged`
 - `UserDeleted`
 - `UserSuspended`
 
-These events exist and are emitted in the service layer. Thumbnail and audit listeners are now implemented; metrics and other future listeners from the design are still pending.
+These events exist and are emitted in the service layer. Thumbnail, audit, and config listeners are now implemented where relevant; metrics and other future listeners from the design are still pending.
 
 ## Not Yet Implemented
 
@@ -193,9 +212,9 @@ These events exist and are emitted in the service layer. Thumbnail and audit lis
 
 ### Audit / Config System
 
-- Runtime config persistence layer
-- `PATCH /api/v1/admin/config`
-- env-lock/runtime-config dual-layer model
+- Config change audit/history UI beyond raw audit log
+- Runtime-config-backed registration flow
+- Runtime-config-backed rate limiting enforcement
 
 ### Storage / Infra from Final Design
 
@@ -237,17 +256,17 @@ The next best implementation slice depends on the target:
 
 ### If the goal is backend completeness against `DESIGN.md`
 
-Implement runtime config next:
+Implement registration and config consumption next:
 
-- config writer/reader abstraction
-- persisted config values with env-lock behavior
-- `PATCH /api/v1/admin/config`
+- registration endpoint gated by `allow_registration`
+- consume runtime config in more places beyond anonymous upload behavior
+- add real rate limiting if/when Redis arrives
 
-That is now the most obvious missing admin/control-plane slice after audit logging landed.
+That is now the most obvious missing path after the config control plane landed.
 
 ## Test Status
 
 Current automated status at the time of writing:
 
 - `uv run pytest -q`
-- passing: `31 passed`
+- passing: `34 passed`

@@ -116,6 +116,16 @@ class UserSuspended:
     correlation_id: str
 
 
+@dataclass(slots=True)
+class ConfigChanged:
+    key: str
+    actor_id: str | None
+    old_value: bool | int | None
+    new_value: bool | int | None
+    source: str
+    correlation_id: str
+
+
 class EventBus:
     def __init__(self) -> None:
         self._listeners: dict[type, list[Listener]] = defaultdict(list)

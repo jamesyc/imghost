@@ -18,11 +18,12 @@ from pydantic import BaseModel
 
 from .audit import JsonAuditLog, register_audit_listeners
 from .config import Settings, load_settings
-from .events import EventBus, MediaUploaded
+from .events import ConfigChanged, EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
 from .repositories import JsonRepository
 from .models import User, utcnow
+from .runtime_config import JsonRuntimeConfig
 from .service import (
     AdminAlbumUpdateInput,
     CurrentActor,
@@ -43,13 +44,21 @@ class AppState:
         self.event_bus = EventBus()
         self.repository = JsonRepository(settings.data_dir / "state.json")
         self.audit = JsonAuditLog(settings.data_dir / "audit.json")
+        self.runtime_config = JsonRuntimeConfig(settings.data_dir / "config.json")
         self.storage = LocalFilesystemBackend(settings.data_dir)
         self.processors = build_processor_registry(
             settings.max_pixel_megapixels * 1_000_000,
             settings.video_thumb_frames,
         )
         self.tasks = self._build_task_queue()
-        self.uploads = UploadService(settings, self.repository, self.storage, self.event_bus, self.processors)
+        self.uploads = UploadService(
+            settings,
+            self.repository,
+            self.storage,
+            self.event_bus,
+            self.processors,
+            self.runtime_config,
+        )
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
         register_audit_listeners(self.event_bus, self.audit)
@@ -148,6 +157,18 @@ class LoginRequest(BaseModel):
 
 class AdminAlbumPatchRequest(BaseModel):
     expires_at: datetime | None = None
+
+
+class AdminConfigPatchRequest(BaseModel):
+    allow_registration: bool | None = None
+    anon_upload_enabled: bool | None = None
+    anon_expiry_hours: int | None = None
+    rate_limit_anon_rpm: int | None = None
+    rate_limit_anon_bph: int | None = None
+    rate_limit_global_anon_rpm: int | None = None
+    rate_limit_global_anon_bph: int | None = None
+    rate_limit_user_rpm: int | None = None
+    rate_limit_user_bph: int | None = None
 
 
 def get_state(request: Request) -> AppState:
@@ -436,6 +457,8 @@ async def upload(
     state = get_state(request)
     cid = correlation_id(request)
     user = await authenticated_user(request, required=False)
+    if user is None and not await state.runtime_config.get_value("anon_upload_enabled"):
+        raise HTTPException(status_code=403, detail="Anonymous uploads are disabled.")
     actor = CurrentActor(user=user, source="api" if user else "web")
     if user is not None:
         if len(file) != 1:
@@ -812,6 +835,36 @@ async def admin_list_audit(
         offset=offset,
     )
     return JSONResponse([event.to_dict() for event in events], headers={"X-Correlation-ID": correlation_id(request)})
+
+
+@app.get("/api/v1/admin/config")
+async def admin_get_config(request: Request) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    payload = await state.runtime_config.list_effective()
+    return JSONResponse({key: value.to_dict() for key, value in payload.items()}, headers={"X-Correlation-ID": correlation_id(request)})
+
+
+@app.patch("/api/v1/admin/config")
+async def admin_patch_config(request: Request, payload: AdminConfigPatchRequest) -> JSONResponse:
+    state = get_state(request)
+    cid = correlation_id(request)
+    admin = await require_admin_user(request)
+    updates = payload.model_dump(exclude_unset=True)
+    changes = await state.runtime_config.update_values(updates)
+    for change in changes:
+        await state.event_bus.emit(
+            ConfigChanged(
+                key=change["key"],
+                actor_id=admin.id,
+                old_value=change["old_value"],
+                new_value=change["new_value"],
+                source="api",
+                correlation_id=cid,
+            )
+        )
+    resolved = await state.runtime_config.list_effective()
+    return JSONResponse({key: value.to_dict() for key, value in resolved.items()}, headers={"X-Correlation-ID": cid})
 
 
 @app.post("/api/v1/admin/users")

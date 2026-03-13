@@ -29,6 +29,7 @@ from .ids import generate_album_id, generate_media_id
 from .models import Album, ApiKey, Media, User, utcnow
 from .processors import ProcessorRegistry
 from .repositories import JsonRepository
+from .runtime_config import JsonRuntimeConfig
 from .storage import LocalFilesystemBackend
 
 MAX_ALBUM_ITEMS = 1000
@@ -111,12 +112,14 @@ class UploadService:
         storage: LocalFilesystemBackend,
         event_bus: EventBus,
         processors: ProcessorRegistry,
+        runtime_config: JsonRuntimeConfig,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.storage = storage
         self.event_bus = event_bus
         self.processors = processors
+        self.runtime_config = runtime_config
 
     async def upload(
         self,
@@ -175,7 +178,9 @@ class UploadService:
             delete_token=None if actor.user else secrets.token_urlsafe(24),
             created_at=now,
             updated_at=now,
-            expires_at=None if actor.user else now + timedelta(hours=self.settings.anon_expiry_hours),
+            expires_at=None
+            if actor.user
+            else now + timedelta(hours=int(await self.runtime_config.get_value("anon_expiry_hours"))),
         )
         await self.repository.create_album(album)
         await self.event_bus.emit(
