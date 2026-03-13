@@ -125,6 +125,13 @@ class UserPasswordReset:
 
 
 @dataclass(slots=True)
+class AdminLoggedIn:
+    admin_id: str
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
 class UserRegistered:
     user_id: str
     actor_id: str | None

@@ -189,7 +189,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - generic admin user patch no longer mutates passwords
 - Audit log API:
   - `GET /api/v1/admin/audit`
-  - filterable by event type, actor, correlation ID, and date range
+  - filterable by event type, actor, affected user, correlation ID, and date range
 - Runtime config API:
   - `GET /api/v1/admin/config`
   - `PATCH /api/v1/admin/config`
@@ -213,6 +213,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `UserDeleted`
   - `UserSuspended`
   - `UserPasswordReset`
+  - `AdminLoggedIn`
 
 ### Runtime Config
 
@@ -248,6 +249,8 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - `UserRegistered`
 - `UserDeleted`
 - `UserSuspended`
+- `UserPasswordReset`
+- `AdminLoggedIn`
 
 These events exist and are emitted in the service layer. Thumbnail, audit, and config listeners are now implemented where relevant; metrics and other future listeners from the design are still pending.
 
@@ -273,7 +276,6 @@ These events exist and are emitted in the service layer. Thumbnail, audit, and c
 
 ### Additional User/Admin Features
 
-- Public user album list UI
 - Admin album rescue/expiry UI beyond API
 - Admin audit browsing UI beyond API
 - Admin configuration panel
@@ -321,3 +323,5 @@ Current automated status at the time of writing:
   - `uv run pytest -q tests/test_app.py -k 'public_user_album_list or upload_album_and_media_serving or admin_album_management or api_key_upload'`
   - `uv run pytest -q tests/test_app.py -k 'index_page or album_patch or admin_album_management or admin_user_management or registration'`
   - `uv run pytest -q tests/test_app.py -k 'admin_password_reset or admin_user_management or admin_audit_log or user_can_change_password'`
+  - `uv run pytest -q tests/test_app.py -k 'admin_audit_log or admin_login'`
+  - `uv run pytest -q tests/test_app.py -k 'admin_user_management or admin_password_reset or local_login or registration_creates_user_session_and_audit_entry'`

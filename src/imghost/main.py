@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from .audit import JsonAuditLog, register_audit_listeners
 from .config import Settings, load_settings
-from .events import ConfigChanged, EventBus, MediaUploaded
+from .events import AdminLoggedIn, ConfigChanged, EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
 from .rate_limits import InMemoryRateLimiter, hash_anon_identity
@@ -695,6 +695,14 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
     user = await state.uploads.authenticate_local_user(
         LocalLoginInput(login=payload.login, password=payload.password)
     )
+    if user.is_admin:
+        await state.event_bus.emit(
+            AdminLoggedIn(
+                admin_id=user.id,
+                source="web",
+                correlation_id=cid,
+            )
+        )
     token, expires_at = create_session_token(state.settings, user, remember_me=payload.remember_me)
     summary = await state.uploads.get_current_user_summary(user)
     response = JSONResponse({"authenticated": True, "user": summary}, headers={"X-Correlation-ID": cid})
@@ -1105,6 +1113,7 @@ async def admin_list_audit(
     request: Request,
     event_type: str | None = None,
     actor_id: str | None = None,
+    user_id: str | None = None,
     correlation_id_filter: str | None = Query(default=None, alias="correlation_id"),
     after: datetime | None = None,
     before: datetime | None = None,
@@ -1120,6 +1129,7 @@ async def admin_list_audit(
     events = await state.audit.query_audit_log(
         event_type=event_type,
         actor_id=actor_id,
+        user_id=user_id,
         correlation_id=correlation_id_filter,
         after=after,
         before=before,

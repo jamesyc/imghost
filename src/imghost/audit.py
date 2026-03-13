@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .events import (
+    AdminLoggedIn,
     AlbumCoverSet,
     AlbumCreated,
     AlbumDeleted,
@@ -75,6 +76,7 @@ class JsonAuditLog:
         *,
         event_type: str | None = None,
         actor_id: str | None = None,
+        user_id: str | None = None,
         correlation_id: str | None = None,
         after: datetime | None = None,
         before: datetime | None = None,
@@ -89,6 +91,8 @@ class JsonAuditLog:
             if event_type is not None and event.event_type != event_type:
                 continue
             if actor_id is not None and event.actor_id != actor_id:
+                continue
+            if user_id is not None and event.actor_id != user_id and event.target_id != user_id:
                 continue
             if correlation_id is not None and event.correlation_id != correlation_id:
                 continue
@@ -298,6 +302,20 @@ def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> No
             },
         )
 
+    async def write_admin_logged_in(event: AdminLoggedIn) -> None:
+        await audit_log.write_audit_event(
+            "admin_login",
+            event.admin_id,
+            None,
+            "user",
+            event.admin_id,
+            event.correlation_id,
+            {
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
     async def write_config_changed(event: ConfigChanged) -> None:
         await audit_log.write_audit_event(
             "config_changed",
@@ -327,4 +345,5 @@ def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> No
     event_bus.subscribe(UserRegistered, write_user_registered)
     event_bus.subscribe(UserSuspended, write_user_suspended)
     event_bus.subscribe(UserPasswordReset, write_user_password_reset)
+    event_bus.subscribe(AdminLoggedIn, write_admin_logged_in)
     event_bus.subscribe(ConfigChanged, write_config_changed)

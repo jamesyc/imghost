@@ -1077,6 +1077,65 @@ def test_local_login_supports_username_session_cookie_and_sharex_requires_api_ke
         assert sharex.json()["detail"] == "ShareX config download requires API key authentication."
 
 
+def test_admin_local_login_writes_admin_login_audit_event(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="auditloginadmin", email="auditloginadmin@example.com")
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["users"][admin_id]["password_hash"] = hashlib.sha256(b"admin-pass").hexdigest()
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            headers={"X-Correlation-ID": "admin-login-flow"},
+            json={"login": "auditloginadmin", "password": "admin-pass"},
+        )
+        assert login.status_code == 200
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "admin_login", "actor_id": admin_id, "correlation_id": "admin-login-flow"},
+        )
+        assert audit.status_code == 200
+        payload = audit.json()
+        assert len(payload) == 1
+        assert payload[0]["target_type"] == "user"
+        assert payload[0]["target_id"] == admin_id
+        assert payload[0]["metadata"]["source"] == "web"
+
+
+def test_non_admin_local_login_does_not_write_admin_login_audit_event(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="watcheradmin", email="watcheradmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="plainuser", email="plainuser@example.com")
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["users"][user_id]["password_hash"] = hashlib.sha256(b"user-pass").hexdigest()
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+    with TestClient(app) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            headers={"X-Correlation-ID": "plain-login-flow"},
+            json={"login": "plainuser", "password": "user-pass"},
+        )
+        assert login.status_code == 200
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "admin_login", "correlation_id": "plain-login-flow"},
+        )
+        assert audit.status_code == 200
+        assert audit.json() == []
+
+
 def test_registration_creates_user_session_and_audit_entry(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -1264,6 +1323,21 @@ def test_admin_audit_log_tracks_events_and_supports_filters(tmp_path, monkeypatc
         assert password_reset_payload[0]["target_type"] == "user"
         assert password_reset_payload[0]["target_id"] == user_id
         assert password_reset_payload[0]["metadata"]["target_user_id"] == user_id
+
+        user_filtered = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"user_id": user_id},
+        )
+        assert user_filtered.status_code == 200
+        user_filtered_payload = user_filtered.json()
+        assert {item["event_type"] for item in user_filtered_payload} >= {
+            "album_created",
+            "media_uploaded",
+            "user_suspended",
+            "user_password_reset",
+        }
+        assert all(item["actor_id"] == user_id or item["target_id"] == user_id for item in user_filtered_payload)
 
         ranged = client.get(
             "/api/v1/admin/audit",
