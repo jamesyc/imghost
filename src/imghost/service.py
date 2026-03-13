@@ -21,6 +21,8 @@ from .events import (
     EventBus,
     MediaDeleted,
     MediaUploaded,
+    UserDeleted,
+    UserSuspended,
 )
 from .ids import generate_album_id, generate_media_id
 from .models import Album, ApiKey, Media, User, utcnow
@@ -67,6 +69,22 @@ class ApiKeyIssueResult:
     raw_key: str
 
 
+@dataclass
+class UserCreateInput:
+    username: str
+    email: str
+    password: str | None
+    is_admin: bool
+    quota_bytes: int | None
+
+
+@dataclass
+class UserUpdateInput:
+    suspended: bool | None = None
+    quota_bytes: int | None | object = UNSET
+    password: str | None = None
+
+
 class UploadService:
     def __init__(
         self,
@@ -98,6 +116,7 @@ class UploadService:
             raise HTTPException(status_code=413, detail="Upload exceeds V1 size limit.")
 
         actor = actor or CurrentActor(user=None, source="web")
+        await self._enforce_storage_quotas(actor.user, incoming_bytes=len(payload))
         album = await self._get_or_create_album(
             album_id=album_id,
             title=title,
@@ -594,11 +613,12 @@ class UploadService:
         items = await self.repository.list_user_media(user.id)
         usage = self._storage_bytes_for_media(items)
         api_key = await self.repository.get_api_key_for_user(user.id)
+        effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
         return {
             "id": user.id,
             "username": user.username,
             "email": user.email,
-            "quota_bytes": user.quota_bytes,
+            "quota_bytes": effective_quota,
             "storage_used_bytes": usage,
             "has_api_key": api_key is not None,
             "api_key_last_used_at": api_key.last_used_at.isoformat() if api_key and api_key.last_used_at else None,
@@ -615,3 +635,141 @@ class UploadService:
         )
         await self.repository.upsert_api_key(api_key)
         return ApiKeyIssueResult(api_key=api_key, raw_key=raw_key)
+
+    async def list_users_with_usage(self) -> list[dict[str, object]]:
+        users = await self.repository.list_users()
+        all_media = await self.repository.list_all_media()
+        usage_by_user: dict[str, int] = {}
+        count_by_user: dict[str, int] = {}
+        for media in all_media:
+            if media.user_id is None:
+                continue
+            usage_by_user[media.user_id] = usage_by_user.get(media.user_id, 0) + media.file_size
+            if media.thumb_key and media.thumb_key != media.storage_key:
+                usage_by_user[media.user_id] += media.thumb_size or 0
+            count_by_user[media.user_id] = count_by_user.get(media.user_id, 0) + 1
+
+        return [
+            {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "is_admin": user.is_admin,
+                "suspended": user.suspended,
+                "quota_bytes": user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes,
+                "storage_used_bytes": usage_by_user.get(user.id, 0),
+                "media_count": count_by_user.get(user.id, 0),
+                "created_at": user.created_at.isoformat(),
+            }
+            for user in users
+        ]
+
+    async def create_user(self, payload: UserCreateInput) -> User:
+        username = payload.username.strip()
+        email = payload.email.strip().lower()
+        if not username:
+            raise HTTPException(status_code=400, detail="Username is required.")
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required.")
+        if await self.repository.get_user_by_email(email):
+            raise HTTPException(status_code=409, detail="Email already exists.")
+
+        now = utcnow()
+        user = User(
+            id=str(uuid4()),
+            username=username,
+            email=email,
+            password_hash=self._hash_password(payload.password) if payload.password else None,
+            is_admin=payload.is_admin,
+            suspended=False,
+            quota_bytes=payload.quota_bytes,
+            created_at=now,
+            updated_at=now,
+        )
+        await self.repository.create_user(user)
+        return user
+
+    async def update_user(self, user_id: str, payload: UserUpdateInput, correlation_id: str) -> User:
+        user = await self.repository.get_user(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        if payload.suspended is not None and payload.suspended != user.suspended:
+            user.suspended = payload.suspended
+            await self.event_bus.emit(
+                UserSuspended(
+                    user_id=user.id,
+                    suspended=user.suspended,
+                    source="api",
+                    correlation_id=correlation_id,
+                )
+            )
+        if payload.quota_bytes is not UNSET:
+            user.quota_bytes = payload.quota_bytes if payload.quota_bytes is None or isinstance(payload.quota_bytes, int) else None
+        if payload.password is not None:
+            user.password_hash = self._hash_password(payload.password)
+        user.updated_at = utcnow()
+        await self.repository.update_user(user)
+        return user
+
+    async def global_storage_stats(self) -> dict[str, object]:
+        all_media = await self.repository.list_all_media()
+        total_storage = self._storage_bytes_for_media(all_media)
+        anonymous_storage = self._storage_bytes_for_media([item for item in all_media if item.user_id is None])
+        return {
+            "server_quota_bytes": self.settings.server_quota_bytes,
+            "total_storage_used_bytes": total_storage,
+            "anonymous_storage_used_bytes": anonymous_storage,
+            "user_count": len(await self.repository.list_users()),
+            "users": await self.list_users_with_usage(),
+        }
+
+    async def delete_user_account(self, user: User, correlation_id: str) -> dict[str, int]:
+        return await self.delete_user_by_id(user.id, correlation_id, deleted_by="self")
+
+    async def delete_user_by_id(self, user_id: str, correlation_id: str, *, deleted_by: str) -> dict[str, int]:
+        user = await self.repository.get_user(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        albums = await self.repository.list_user_albums(user.id)
+        media_items = await self.repository.list_user_media(user.id)
+
+        for key in self._storage_keys_for_media(media_items):
+            await self.storage.delete(key)
+
+        deleted_user, deleted_albums, deleted_media = await self.repository.delete_user(user.id)
+        if deleted_user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        await self.event_bus.emit(
+            UserDeleted(
+                user_id=deleted_user.id,
+                deleted_by=deleted_by,
+                album_count=len(deleted_albums),
+                media_count=len(deleted_media),
+                source="api",
+                correlation_id=correlation_id,
+            )
+        )
+        return {
+            "album_count": len(albums),
+            "media_count": len(media_items),
+        }
+
+    async def _enforce_storage_quotas(self, user: User | None, *, incoming_bytes: int) -> None:
+        all_media = await self.repository.list_all_media()
+        total_storage = self._storage_bytes_for_media(all_media)
+        if self.settings.server_quota_bytes > 0 and total_storage + incoming_bytes > self.settings.server_quota_bytes:
+            raise HTTPException(status_code=507, detail="Server storage quota reached.")
+        if user is None:
+            return
+
+        user_media = [media for media in all_media if media.user_id == user.id]
+        user_storage = self._storage_bytes_for_media(user_media)
+        effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        if effective_quota > 0 and user_storage + incoming_bytes > effective_quota:
+            raise HTTPException(status_code=413, detail="User storage quota reached.")
+
+    def _hash_password(self, password: str) -> str:
+        return sha256(password.encode("utf-8")).hexdigest()

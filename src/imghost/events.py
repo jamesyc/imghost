@@ -80,6 +80,24 @@ class AlbumReordered:
     correlation_id: str
 
 
+@dataclass(slots=True)
+class UserDeleted:
+    user_id: str
+    deleted_by: str
+    album_count: int
+    media_count: int
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class UserSuspended:
+    user_id: str
+    suspended: bool
+    source: str
+    correlation_id: str
+
+
 class EventBus:
     def __init__(self) -> None:
         self._listeners: dict[type, list[Listener]] = defaultdict(list)

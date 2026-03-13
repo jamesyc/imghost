@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from math import ceil
@@ -18,7 +19,7 @@ from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
 from .repositories import JsonRepository
 from .models import User, utcnow
-from .service import CurrentActor, UNSET, UploadService
+from .service import CurrentActor, UNSET, UploadService, UserCreateInput, UserUpdateInput
 from .storage import LocalFilesystemBackend
 from .tasks import AsyncTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 
@@ -103,6 +104,20 @@ class AlbumPatchRequest(BaseModel):
 class AlbumOrderItem(BaseModel):
     media_id: str
     position: int
+
+
+class AdminUserCreateRequest(BaseModel):
+    username: str
+    email: str
+    password: str | None = None
+    is_admin: bool = False
+    quota_bytes: int | None = None
+
+
+class AdminUserPatchRequest(BaseModel):
+    suspended: bool | None = None
+    quota_bytes: int | None = None
+    password: str | None = None
 
 
 def get_state(request: Request) -> AppState:
@@ -213,7 +228,13 @@ def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[
     }
 
 
-async def authenticated_user(request: Request, *, required: bool = False) -> User | None:
+@dataclass
+class ResolvedPrincipal:
+    user: User
+    raw_api_key: str
+
+
+async def authenticated_principal(request: Request, *, required: bool = False) -> ResolvedPrincipal | None:
     state = get_state(request)
     header = request.headers.get("Authorization", "")
     scheme, _, token = header.partition(" ")
@@ -230,6 +251,18 @@ async def authenticated_user(request: Request, *, required: bool = False) -> Use
         raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
     api_key.last_used_at = utcnow()
     await state.repository.update_api_key(api_key)
+    return ResolvedPrincipal(user=user, raw_api_key=token)
+
+
+async def authenticated_user(request: Request, *, required: bool = False) -> User | None:
+    principal = await authenticated_principal(request, required=required)
+    return principal.user if principal else None
+
+
+async def require_admin_user(request: Request) -> User:
+    user = await authenticated_user(request, required=True)
+    if user is None or not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required.")
     return user
 
 
@@ -540,6 +573,139 @@ async def regenerate_api_key(request: Request) -> JSONResponse:
         },
         headers={"X-Correlation-ID": correlation_id(request)},
     )
+
+
+@app.get("/api/v1/user/me/sharex-config")
+async def download_sharex_config(request: Request) -> Response:
+    principal = await authenticated_principal(request, required=True)
+    state = get_state(request)
+    payload = {
+        "Version": "14.1.0",
+        "Name": "imghost",
+        "DestinationType": "ImageUploader, FileUploader",
+        "RequestMethod": "POST",
+        "RequestURL": f"{state.settings.base_url}/api/v1/upload",
+        "Headers": {
+            "Authorization": f"Bearer {principal.raw_api_key}",
+        },
+        "Body": "MultipartFormData",
+        "FileFormName": "file",
+        "URL": "$json:media_url$",
+        "ThumbnailURL": "$json:thumb_url$",
+        "DeletionURL": "$json:delete_url$",
+    }
+    return Response(
+        content=JSONResponse(payload).body,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": 'attachment; filename="imghost.sxcu"',
+            "X-Correlation-ID": correlation_id(request),
+        },
+    )
+
+
+@app.delete("/api/v1/user/me")
+async def delete_current_user(request: Request) -> JSONResponse:
+    state = get_state(request)
+    user = await authenticated_user(request, required=True)
+    cid = correlation_id(request)
+    deleted = await state.uploads.delete_user_account(user, cid)
+    return JSONResponse(
+        {
+            "deleted": True,
+            "user_id": user.id,
+            "album_count": deleted["album_count"],
+            "media_count": deleted["media_count"],
+        },
+        headers={"X-Correlation-ID": cid},
+    )
+
+
+@app.get("/api/v1/admin/users")
+async def admin_list_users(request: Request) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    payload = await state.uploads.list_users_with_usage()
+    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
+
+
+@app.post("/api/v1/admin/users")
+async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    created = await state.uploads.create_user(
+        payload=UserCreateInput(
+            username=payload.username,
+            email=payload.email,
+            password=payload.password,
+            is_admin=payload.is_admin,
+            quota_bytes=payload.quota_bytes,
+        )
+    )
+    return JSONResponse(
+        {
+            "id": created.id,
+            "username": created.username,
+            "email": created.email,
+            "is_admin": created.is_admin,
+            "suspended": created.suspended,
+            "quota_bytes": created.quota_bytes if created.quota_bytes is not None else state.settings.default_user_quota_bytes,
+        },
+        status_code=201,
+        headers={"X-Correlation-ID": correlation_id(request)},
+    )
+
+
+@app.patch("/api/v1/admin/users/{user_id}")
+async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPatchRequest) -> JSONResponse:
+    state = get_state(request)
+    cid = correlation_id(request)
+    await require_admin_user(request)
+    updated = await state.uploads.update_user(
+        user_id,
+        payload=UserUpdateInput(
+            suspended=payload.suspended if "suspended" in payload.model_fields_set else None,
+            quota_bytes=payload.quota_bytes if "quota_bytes" in payload.model_fields_set else UNSET,
+            password=payload.password if "password" in payload.model_fields_set else None,
+        ),
+        correlation_id=cid,
+    )
+    return JSONResponse(
+        {
+            "id": updated.id,
+            "username": updated.username,
+            "email": updated.email,
+            "is_admin": updated.is_admin,
+            "suspended": updated.suspended,
+            "quota_bytes": updated.quota_bytes if updated.quota_bytes is not None else state.settings.default_user_quota_bytes,
+        },
+        headers={"X-Correlation-ID": cid},
+    )
+
+
+@app.delete("/api/v1/admin/users/{user_id}")
+async def admin_delete_user(request: Request, user_id: str) -> JSONResponse:
+    state = get_state(request)
+    cid = correlation_id(request)
+    await require_admin_user(request)
+    deleted = await state.uploads.delete_user_by_id(user_id, cid, deleted_by="admin")
+    return JSONResponse(
+        {
+            "deleted": True,
+            "user_id": user_id,
+            "album_count": deleted["album_count"],
+            "media_count": deleted["media_count"],
+        },
+        headers={"X-Correlation-ID": cid},
+    )
+
+
+@app.get("/api/v1/admin/stats")
+async def admin_stats(request: Request) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    payload = await state.uploads.global_storage_stats()
+    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
 @app.patch("/api/v1/album/{album_id}")

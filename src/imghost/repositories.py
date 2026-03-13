@@ -109,6 +109,46 @@ class JsonRepository:
             items = [item for item in state.media.values() if item.user_id == user_id]
         return sorted(items, key=lambda item: item.created_at)
 
+    async def list_user_albums(self, user_id: str) -> list[Album]:
+        async with self._lock:
+            state = self._load()
+            items = [album for album in state.albums.values() if album.user_id == user_id]
+        return sorted(items, key=lambda album: album.created_at)
+
+    async def list_users(self) -> list[User]:
+        async with self._lock:
+            state = self._load()
+            items = list(state.users.values())
+        return sorted(items, key=lambda user: user.created_at)
+
+    async def list_all_media(self) -> list[Media]:
+        async with self._lock:
+            state = self._load()
+            items = list(state.media.values())
+        return sorted(items, key=lambda media: media.created_at)
+
+    async def delete_user(self, user_id: str) -> tuple[User | None, list[Album], list[Media]]:
+        async with self._lock:
+            state = self._load()
+            user = state.users.pop(user_id, None)
+            if user is None:
+                return None, [], []
+
+            albums = [album for album in state.albums.values() if album.user_id == user_id]
+            album_ids = {album.id for album in albums}
+            media_items = [media for media in state.media.values() if media.album_id in album_ids or media.user_id == user_id]
+
+            for album_id in album_ids:
+                state.albums.pop(album_id, None)
+            for media in media_items:
+                state.media.pop(media.id, None)
+            for api_key_id, api_key in list(state.api_keys.items()):
+                if api_key.user_id == user_id:
+                    state.api_keys.pop(api_key_id, None)
+
+            self._save(state)
+            return user, sorted(albums, key=lambda album: album.created_at), sorted(media_items, key=lambda media: media.created_at)
+
     async def create_album(self, album: Album) -> Album:
         async with self._lock:
             state = self._load()
