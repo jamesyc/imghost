@@ -28,6 +28,7 @@ from .storage import LocalFilesystemBackend
 
 MAX_ALBUM_ITEMS = 1000
 UNSET = object()
+VIDEO_FORMATS = {"mp4", "mov", "webm"}
 
 
 @dataclass
@@ -117,24 +118,24 @@ class UploadService:
     async def _create_media(self, album_id: str, file: UploadFile, payload: bytes, correlation_id: str) -> Media:
         media_id = generate_media_id()
         content_type = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
-        media_type = "video" if content_type.startswith("video/") else "image"
         suffix = Path(file.filename or "upload.bin").suffix.lower() or mimetypes.guess_extension(content_type) or ""
         fmt = suffix.lstrip(".") or content_type.split("/")[-1]
+        media_type = "video" if content_type.startswith("video/") or fmt.lower() in VIDEO_FORMATS else "image"
         processor = self.processors.get_processor(fmt)
-        if media_type == "image":
-            if processor is None:
+        if processor is None:
+            if media_type == "image":
                 raise HTTPException(status_code=415, detail="Unsupported image format.")
-            validation = await processor.validate(payload)
-            if not validation.ok:
-                raise HTTPException(status_code=415, detail=validation.rejection_reason)
-            metadata = await processor.extract_metadata(payload, fmt)
-            sanitized = await processor.sanitize(payload, metadata)
-            payload = sanitized.data
-            content_type = sanitized.mime_type
-            fmt = sanitized.format
-            suffix = f".{fmt if fmt != 'jpeg' else 'jpg'}"
-        else:
-            metadata = None
+            raise HTTPException(status_code=415, detail="Unsupported video format.")
+
+        validation = await processor.validate(payload)
+        if not validation.ok:
+            raise HTTPException(status_code=415, detail=validation.rejection_reason)
+        metadata = await processor.extract_metadata(payload, fmt)
+        sanitized = await processor.sanitize(payload, metadata)
+        payload = sanitized.data
+        content_type = sanitized.mime_type
+        fmt = sanitized.format
+        suffix = f".{fmt if fmt != 'jpeg' else 'jpg'}"
         storage_key = f"originals/anon/{media_id}{suffix}"
         await self.storage.put(storage_key, payload)
         position = await self.repository.next_position(album_id)

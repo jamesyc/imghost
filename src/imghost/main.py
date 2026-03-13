@@ -27,7 +27,10 @@ class AppState:
         self.event_bus = EventBus()
         self.repository = JsonRepository(settings.data_dir / "state.json")
         self.storage = LocalFilesystemBackend(settings.data_dir)
-        self.processors = build_processor_registry(settings.max_pixel_megapixels * 1_000_000)
+        self.processors = build_processor_registry(
+            settings.max_pixel_megapixels * 1_000_000,
+            settings.video_thumb_frames,
+        )
         self.tasks = self._build_task_queue()
         self.uploads = UploadService(settings, self.repository, self.storage, self.event_bus, self.processors)
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
@@ -199,10 +202,20 @@ def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[
                 "position": item.position,
                 "file_size": item.file_size,
                 "thumb_status": item.thumb_status,
+                "codec_hint": item.codec_hint,
+                "compat_warning": compatibility_warning(item),
             }
             for item in media_items
         ],
     }
+
+
+def compatibility_warning(item: Any) -> str | None:
+    if item.codec_hint == "hevc":
+        return "This video uses HEVC encoding and may not play in Firefox. Try Chrome or Safari."
+    if item.codec_hint == "vp9" and item.format == "webm":
+        return "This video may not play in older Safari. Try Chrome or Firefox."
+    return None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -308,6 +321,7 @@ async def album_page(request: Request, album_id: str) -> str:
         raise HTTPException(status_code=404)
     items = await state.repository.list_album_media(album_id)
     expiry_hint = humanize_expiry(album.expires_at)
+    compat_warnings = [warning for warning in dict.fromkeys(compatibility_warning(item) for item in items) if warning]
     cards = []
     for item in items:
         preview_url = thumb_url(state.settings.base_url, item.id, item.format)
@@ -359,6 +373,7 @@ async def album_page(request: Request, album_id: str) -> str:
         <h1>{album.title or "Untitled album"}</h1>
         <p>{len(items)} item(s) · Created {album.created_at.isoformat()}</p>
         {f'<p class="banner">{expiry_hint}</p>' if expiry_hint else ''}
+        {''.join(f'<p class="banner">{warning}</p>' for warning in compat_warnings)}
         <p class="actions"><a href="/api/v1/album/{album.id}/zip">Download as ZIP</a></p>
       </section>
       <section class="grid">

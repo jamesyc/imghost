@@ -401,3 +401,39 @@ def test_retry_thumbnails_cli_recovers_failed_thumbnail(tmp_path, monkeypatch, c
 
     with TestClient(app) as client:
         wait_for_thumbnail(client, media_id)
+
+
+def test_album_payload_and_page_show_video_compatibility_warning(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Compat"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+
+        state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        media = state["media"][payload["media_id"]]
+        media["media_type"] = "video"
+        media["format"] = "mov"
+        media["mime_type"] = "video/quicktime"
+        media["codec_hint"] = "hevc"
+        media["thumb_status"] = "done"
+        media["thumb_key"] = None
+        media["thumb_is_orig"] = True
+        (tmp_path / "state.json").write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+        album_response = client.get(f"/api/v1/album/{payload['album_id']}")
+        assert album_response.status_code == 200
+        item = album_response.json()["items"][0]
+        assert item["codec_hint"] == "hevc"
+        assert "HEVC encoding" in item["compat_warning"]
+
+        page_response = client.get(f"/a/{payload['album_id']}")
+        assert page_response.status_code == 200
+        assert "HEVC encoding" in page_response.text
