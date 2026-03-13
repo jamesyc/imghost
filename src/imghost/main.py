@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from .config import Settings, load_settings
 from .events import EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
-from .processors import ProcessorRegistry, PillowImageProcessor
+from .processors import ProcessorRegistry, build_processor_registry
 from .repositories import JsonRepository
 from .service import UNSET, UploadService
 from .storage import LocalFilesystemBackend
@@ -27,8 +27,7 @@ class AppState:
         self.event_bus = EventBus()
         self.repository = JsonRepository(settings.data_dir / "state.json")
         self.storage = LocalFilesystemBackend(settings.data_dir)
-        self.processors = ProcessorRegistry()
-        self.processors.register(PillowImageProcessor(settings.max_pixel_megapixels * 1_000_000))
+        self.processors = build_processor_registry(settings.max_pixel_megapixels * 1_000_000)
         self.tasks = self._build_task_queue()
         self.uploads = UploadService(settings, self.repository, self.storage, self.event_bus, self.processors)
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
