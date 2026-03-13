@@ -12,11 +12,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 from pydantic import BaseModel
 
 from .config import Settings, load_settings
-from .events import EventBus
+from .events import EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
+from .processors import ProcessorRegistry, PillowImageProcessor
 from .repositories import JsonRepository
 from .service import UNSET, UploadService
 from .storage import LocalFilesystemBackend
+from .tasks import AsyncTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 
 
 class AppState:
@@ -25,7 +27,55 @@ class AppState:
         self.event_bus = EventBus()
         self.repository = JsonRepository(settings.data_dir / "state.json")
         self.storage = LocalFilesystemBackend(settings.data_dir)
-        self.uploads = UploadService(settings, self.repository, self.storage, self.event_bus)
+        self.processors = ProcessorRegistry()
+        self.processors.register(PillowImageProcessor(settings.max_pixel_megapixels * 1_000_000))
+        self.tasks = self._build_task_queue()
+        self.uploads = UploadService(settings, self.repository, self.storage, self.event_bus, self.processors)
+        self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
+        self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
+
+    def _build_task_queue(self) -> TaskQueue:
+        context = TaskContext(self.repository, self.storage, self.processors)
+        if self.settings.task_queue_mode == "sync":
+            return SyncTaskQueue(context)
+        return AsyncTaskQueue(context, worker_count=self.settings.thumbnail_worker_count)
+
+    async def start(self) -> None:
+        await self.tasks.start()
+        await self.recover_thumbnails(include_failed=False)
+
+    async def stop(self) -> None:
+        await self.tasks.stop()
+
+    async def _enqueue_thumbnail(self, event: MediaUploaded) -> None:
+        await self.tasks.enqueue(
+            "generate_thumbnail",
+            queue="thumbnails",
+            media_id=event.media_id,
+            correlation_id=event.correlation_id,
+        )
+
+    async def recover_thumbnails(self, *, include_failed: bool) -> int:
+        recoverable = await self.repository.find_pending_thumbnails()
+        if include_failed:
+            recoverable.extend(await self.repository.find_failed_thumbnails())
+        seen: set[str] = set()
+        enqueued = 0
+        for media in recoverable:
+            if media.id in seen:
+                continue
+            seen.add(media.id)
+            if include_failed and media.thumb_status == "failed":
+                media.thumb_status = "pending"
+                await self.repository.update_media(media)
+            await self.tasks.enqueue(
+                "generate_thumbnail",
+                queue="thumbnails",
+                media_id=media.id,
+                correlation_id=f"recovery-{media.id}",
+            )
+            enqueued += 1
+        return enqueued
 
 
 @asynccontextmanager
@@ -33,7 +83,9 @@ async def lifespan(app: FastAPI):
     settings = load_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     app.state.imghost = AppState(settings)
+    await app.state.imghost.start()
     yield
+    await app.state.imghost.stop()
 
 
 app = FastAPI(title="imghost V1", lifespan=lifespan)
@@ -65,6 +117,25 @@ def media_url(base_url: str, media_id: str, fmt: str) -> str:
 def thumb_url(base_url: str, media_id: str, fmt: str) -> str:
     ext = f".{fmt}" if fmt else ""
     return f"{base_url}/t/{media_id}{ext}"
+
+
+def thumb_format(item: Any) -> str:
+    if item.thumb_is_orig or not item.thumb_key:
+        return item.format
+    suffix = item.thumb_key.rsplit(".", 1)[-1].lower()
+    return suffix
+
+
+def thumb_media_type(item: Any) -> str:
+    fmt = thumb_format(item)
+    return {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "webp": "image/webp",
+        "png": "image/png",
+        "gif": "image/gif",
+        "bmp": "image/bmp",
+    }.get(fmt, item.mime_type)
 
 
 def extract_media_id(raw_id: str) -> str:
@@ -125,7 +196,7 @@ def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[
                 "media_type": item.media_type,
                 "mime_type": item.mime_type,
                 "media_url": media_url(base_url, item.id, item.format),
-                "thumb_url": thumb_url(base_url, item.id, item.format),
+                "thumb_url": thumb_url(base_url, item.id, thumb_format(item)),
                 "position": item.position,
                 "file_size": item.file_size,
                 "thumb_status": item.thumb_status,
@@ -206,7 +277,7 @@ async def upload(
             {
                 "media_id": result.media.id,
                 "media_url": media_url(state.settings.base_url, result.media.id, result.media.format),
-                "thumb_url": thumb_url(state.settings.base_url, result.media.id, result.media.format),
+                "thumb_url": thumb_url(state.settings.base_url, result.media.id, thumb_format(result.media)),
                 "thumb_status": result.media.thumb_status,
             }
             for result in results
@@ -241,14 +312,17 @@ async def album_page(request: Request, album_id: str) -> str:
     cards = []
     for item in items:
         preview_url = thumb_url(state.settings.base_url, item.id, item.format)
+        preview_url = thumb_url(state.settings.base_url, item.id, thumb_format(item))
         if item.media_type == "video":
             poster_attr = f' poster="{preview_url}"' if item.thumb_status == "done" else ""
             media_tag = f'<video controls preload="metadata" src="{media_url(state.settings.base_url, item.id, item.format)}"{poster_attr}></video>'
         else:
             if item.thumb_status == "done":
                 media_tag = f'<img src="{preview_url}" alt="{item.filename_orig}">'
+            elif item.thumb_status == "failed":
+                media_tag = '<div class="placeholder">Thumbnail failed</div>'
             else:
-                media_tag = '<div class="placeholder">Thumbnail pending</div>'
+                media_tag = f'<img data-thumb-src="{preview_url}" data-media-id="{item.id}" data-thumb-status="{item.thumb_status}" alt="{item.filename_orig}">'
         cards.append(
             f"""
             <article class="item">
@@ -292,6 +366,29 @@ async def album_page(request: Request, album_id: str) -> str:
         {''.join(cards)}
       </section>
     </main>
+    <script>
+      const pending = document.querySelectorAll('img[data-thumb-status="pending"], img[data-thumb-status="processing"]');
+      for (const img of pending) {{
+        const poll = async () => {{
+          try {{
+            const response = await fetch(img.dataset.thumbSrc, {{ method: 'GET', cache: 'no-store' }});
+            if (response.status === 200) {{
+              img.removeAttribute('data-thumb-status');
+              img.src = img.dataset.thumbSrc;
+              return;
+            }}
+            if (response.status === 202) {{
+              setTimeout(poll, 1000);
+              return;
+            }}
+            img.outerHTML = '<div class="placeholder">Thumbnail failed</div>';
+          }} catch {{
+            setTimeout(poll, 1500);
+          }}
+        }};
+        poll();
+      }}
+    </script>
   </body>
 </html>
 """
@@ -308,8 +405,10 @@ async def stream_media(request: Request, raw_id: str, thumb: bool) -> StreamingR
     album = await state.repository.get_album(media.album_id)
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
-    if thumb and media.thumb_status != "done":
+    if thumb and media.thumb_status in {"pending", "processing"}:
         return StreamingResponse(iter(()), status_code=202)
+    if thumb and media.thumb_status == "failed":
+        raise HTTPException(status_code=404)
     key = media.storage_key if (not thumb or media.thumb_is_orig or not media.thumb_key) else media.thumb_key
     stream = await state.storage.get_stream(key, request.headers.get("Range"))
     headers = {
@@ -322,7 +421,7 @@ async def stream_media(request: Request, raw_id: str, thumb: bool) -> StreamingR
     return StreamingResponse(
         stream.body,
         status_code=stream.status_code,
-        media_type=media.mime_type,
+        media_type=thumb_media_type(media) if thumb else media.mime_type,
         headers=headers,
     )
 

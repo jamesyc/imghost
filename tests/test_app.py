@@ -1,9 +1,28 @@
+import json
 from io import BytesIO
+from time import monotonic, sleep
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 
 from imghost.main import app
+
+PNG_1X1 = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDAT\x08\x99c\xf8\xcf"
+    b"\xc0\x00\x00\x03\x01\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+def wait_for_thumbnail(client: TestClient, media_id: str, *, suffix: str = "jpg", timeout: float = 2.0) -> None:
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        response = client.get(f"/t/{media_id}.{suffix}")
+        if response.status_code == 200:
+            return
+        assert response.status_code == 202
+        sleep(0.02)
+    raise AssertionError(f"thumbnail for {media_id} was not ready within {timeout} seconds")
 
 
 def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
@@ -13,7 +32,7 @@ def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/upload",
-            files=[("file", ("sample.png", BytesIO(b"fake-image-bytes"), "image/png"))],
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
             data={"title": "V1 Album"},
         )
 
@@ -22,6 +41,7 @@ def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
         album_id = payload["album_id"]
         media_id = payload["items"][0]["media_id"]
         delete_url = payload["delete_url"]
+        assert payload["items"][0]["thumb_status"] in {"pending", "processing", "done"}
 
         album_response = client.get(f"/api/v1/album/{album_id}")
         assert album_response.status_code == 200
@@ -30,18 +50,26 @@ def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
 
         media_response = client.get(f"/i/{media_id}.png")
         assert media_response.status_code == 200
-        assert media_response.content == b"fake-image-bytes"
+        assert media_response.headers["content-type"] == "image/png"
+
+        stored_bytes = media_response.content
 
         range_response = client.get(f"/i/{media_id}.png", headers={"Range": "bytes=0-3"})
         assert range_response.status_code == 206
-        assert range_response.headers["content-range"] == f"bytes 0-3/{len(b'fake-image-bytes')}"
-        assert range_response.content == b"fake"
+        assert range_response.headers["content-range"] == f"bytes 0-3/{len(stored_bytes)}"
+        assert range_response.content == stored_bytes[:4]
+
+        wait_for_thumbnail(client, media_id)
+        thumb_response = client.get(f"/t/{media_id}.jpg")
+        assert thumb_response.status_code == 200
+        assert thumb_response.headers["content-type"] == "image/jpeg"
+        assert thumb_response.content.startswith(b"\xff\xd8")
 
         zip_response = client.get(f"/api/v1/album/{album_id}/zip")
         assert zip_response.status_code == 200
         with ZipFile(BytesIO(zip_response.content)) as archive:
             assert archive.namelist() == ["sample.png"]
-            assert archive.read("sample.png") == b"fake-image-bytes"
+            assert archive.read("sample.png") == stored_bytes
 
         forbidden_delete = client.delete(f"/api/v1/album/{album_id}")
         assert forbidden_delete.status_code == 403
@@ -62,8 +90,8 @@ def test_multi_file_upload_reuses_album_and_delete_removes_media(tmp_path, monke
         response = client.post(
             "/api/v1/upload",
             files=[
-                ("file", ("one.png", BytesIO(b"one"), "image/png")),
-                ("file", ("two.png", BytesIO(b"two"), "image/png")),
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
             ],
             data={"title": "Batch"},
         )
@@ -97,9 +125,9 @@ def test_album_patch_reorder_and_media_delete_require_token(tmp_path, monkeypatc
         response = client.post(
             "/api/v1/upload",
             files=[
-                ("file", ("one.png", BytesIO(b"one"), "image/png")),
-                ("file", ("two.png", BytesIO(b"two"), "image/png")),
-                ("file", ("three.png", BytesIO(b"three"), "image/png")),
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("three.png", BytesIO(PNG_1X1), "image/png")),
             ],
             data={"title": "Batch"},
         )
@@ -164,7 +192,7 @@ def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/upload",
-            files=[("file", ("solo.png", BytesIO(b"solo"), "image/png"))],
+            files=[("file", ("solo.png", BytesIO(PNG_1X1), "image/png"))],
         )
 
         assert response.status_code == 200
@@ -181,3 +209,94 @@ def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
         assert delete_response.json()["album_deleted"] is True
 
         assert client.get(f"/api/v1/album/{album_id}").status_code == 404
+
+
+def test_invalid_image_upload_is_rejected(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("bad.png", BytesIO(b"not-an-image"), "image/png"))],
+        )
+
+        assert response.status_code == 415
+        assert response.json()["detail"] == "Unsupported or invalid image file."
+
+
+def test_async_thumbnail_worker_recovers_pending_items_on_startup(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        media_id = payload["media_id"]
+        wait_for_thumbnail(client, media_id)
+
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+    state_path = tmp_path / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    media = state["media"][media_id]
+    media["thumb_status"] = "processing"
+    media["thumb_key"] = None
+    media["thumb_size"] = None
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+    thumb_path = tmp_path / "thumbnails"
+    for existing in thumb_path.glob(f"{media_id}.*"):
+        existing.unlink()
+
+    with TestClient(app) as client:
+        wait_for_thumbnail(client, media_id)
+        album = client.get(f"/api/v1/album/{payload['album_id']}").json()
+        assert album["items"][0]["thumb_status"] == "done"
+
+
+def test_failed_thumbnail_can_be_reenqueued_for_recovery(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        media_id = payload["media_id"]
+        wait_for_thumbnail(client, media_id)
+
+        media_path = next((tmp_path / "originals" / "anon").glob(f"{media_id}.*"))
+        media_path.write_bytes(b"broken")
+
+        recovered = client.app.state.imghost
+        media = client.portal.call(recovered.repository.get_media, media_id)
+        assert media is not None
+        media.thumb_status = "pending"
+        media.thumb_key = None
+        media.thumb_size = None
+        media.thumb_is_orig = False
+        client.portal.call(recovered.repository.update_media, media)
+        for existing in (tmp_path / "thumbnails").glob(f"{media_id}.*"):
+            existing.unlink()
+
+        client.portal.call(recovered.uploads.generate_thumbnail, media_id, "test-failure")
+        failed_response = client.get(f"/t/{media_id}.jpg")
+        assert failed_response.status_code == 404
+
+        media = client.portal.call(recovered.repository.get_media, media_id)
+        assert media is not None
+        assert media.thumb_status == "failed"
+
+        media_path.write_bytes(PNG_1X1)
+        reenqueued = client.portal.call(lambda: recovered.recover_thumbnails(include_failed=True))
+        assert reenqueued >= 1
+        wait_for_thumbnail(client, media_id)

@@ -66,6 +66,26 @@ class JsonRepository:
         async with self._lock:
             return self._load().media.get(media_id)
 
+    async def update_media(self, media: Media) -> Media:
+        async with self._lock:
+            state = self._load()
+            state.media[media.id] = media
+            self._save(state)
+        return media
+
+    async def list_media_by_thumb_status(self, *statuses: str) -> list[Media]:
+        status_set = set(statuses)
+        async with self._lock:
+            state = self._load()
+            items = [item for item in state.media.values() if item.thumb_status in status_set]
+        return sorted(items, key=lambda item: item.created_at)
+
+    async def find_pending_thumbnails(self) -> list[Media]:
+        return await self.list_media_by_thumb_status("pending", "processing")
+
+    async def find_failed_thumbnails(self) -> list[Media]:
+        return await self.list_media_by_thumb_status("failed")
+
     async def list_album_media(self, album_id: str) -> list[Media]:
         async with self._lock:
             state = self._load()

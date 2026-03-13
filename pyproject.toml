@@ -9,6 +9,7 @@ description = "V1 of a self-hosted image host prototype"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115,<1",
+  "pillow>=11,<12",
   "python-multipart>=0.0.9,<1",
   "uvicorn[standard]>=0.30,<1",
 ]

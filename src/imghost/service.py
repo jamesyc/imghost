@@ -22,6 +22,7 @@ from .events import (
 )
 from .ids import generate_album_id, generate_media_id
 from .models import Album, Media, utcnow
+from .processors import ProcessorRegistry
 from .repositories import JsonRepository
 from .storage import LocalFilesystemBackend
 
@@ -50,11 +51,13 @@ class UploadService:
         repository: JsonRepository,
         storage: LocalFilesystemBackend,
         event_bus: EventBus,
+        processors: ProcessorRegistry,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.storage = storage
         self.event_bus = event_bus
+        self.processors = processors
 
     async def upload(self, file: UploadFile, album_id: str | None, title: str | None, correlation_id: str) -> UploadResult:
         payload = await file.read()
@@ -109,6 +112,21 @@ class UploadService:
         media_type = "video" if content_type.startswith("video/") else "image"
         suffix = Path(file.filename or "upload.bin").suffix.lower() or mimetypes.guess_extension(content_type) or ""
         fmt = suffix.lstrip(".") or content_type.split("/")[-1]
+        processor = self.processors.get_processor(fmt)
+        if media_type == "image":
+            if processor is None:
+                raise HTTPException(status_code=415, detail="Unsupported image format.")
+            validation = await processor.validate(payload)
+            if not validation.ok:
+                raise HTTPException(status_code=415, detail=validation.rejection_reason)
+            metadata = await processor.extract_metadata(payload, fmt)
+            sanitized = await processor.sanitize(payload, metadata)
+            payload = sanitized.data
+            content_type = sanitized.mime_type
+            fmt = sanitized.format
+            suffix = f".{fmt if fmt != 'jpeg' else 'jpg'}"
+        else:
+            metadata = None
         storage_key = f"originals/anon/{media_id}{suffix}"
         await self.storage.put(storage_key, payload)
         position = await self.repository.next_position(album_id)
@@ -123,15 +141,15 @@ class UploadService:
             mime_type=content_type,
             storage_key=storage_key,
             thumb_key=None,
-            thumb_is_orig=True,
-            thumb_status="done",
+            thumb_is_orig=False,
+            thumb_status="pending",
             file_size=len(payload),
-            thumb_size=len(payload),
-            width=None,
-            height=None,
-            duration_secs=None,
-            is_animated=False,
-            codec_hint=None,
+            thumb_size=None,
+            width=metadata.width if metadata else None,
+            height=metadata.height if metadata else None,
+            duration_secs=metadata.duration_secs if metadata else None,
+            is_animated=metadata.is_animated if metadata else False,
+            codec_hint=metadata.codec_hint if metadata else None,
             position=position,
             created_at=utcnow(),
         )
@@ -148,7 +166,42 @@ class UploadService:
                 correlation_id=correlation_id,
             )
         )
-        return media
+        refreshed_media = await self.repository.get_media(media.id)
+        return refreshed_media or media
+
+    async def generate_thumbnail(self, media_id: str, correlation_id: str) -> None:
+        media = await self.repository.get_media(media_id)
+        if media is None or media.thumb_status == "done":
+            return
+
+        media.thumb_status = "processing"
+        await self.repository.update_media(media)
+
+        try:
+            processor = self.processors.get_processor(media.format)
+            if processor is None:
+                raise ValueError(f"No processor for format {media.format}")
+            payload = await self.storage.get_bytes(media.storage_key)
+            metadata = await processor.extract_metadata(payload, media.format)
+            thumbnail = await processor.generate_thumbnail(payload, metadata)
+            if thumbnail.thumb_is_orig:
+                media.thumb_is_orig = True
+                media.thumb_key = None
+                media.thumb_size = media.file_size
+            else:
+                thumb_ext = thumbnail.format if thumbnail.format != "jpeg" else "jpg"
+                thumb_key = f"thumbnails/{media.id}.{thumb_ext}"
+                await self.storage.put(thumb_key, thumbnail.data or b"")
+                media.thumb_is_orig = False
+                media.thumb_key = thumb_key
+                media.thumb_size = thumbnail.size
+            media.thumb_status = "done"
+        except Exception:
+            media.thumb_status = "failed"
+            media.thumb_key = None
+            media.thumb_size = None
+            media.thumb_is_orig = False
+        await self.repository.update_media(media)
 
     async def delete_album(self, album_id: str, delete_token: str | None, correlation_id: str) -> tuple[Album, list[Media]]:
         album = await self.repository.get_album(album_id)
