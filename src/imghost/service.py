@@ -23,6 +23,7 @@ from .events import (
     MediaDeleted,
     MediaUploaded,
     UserDeleted,
+    UserPasswordReset,
     UserRegistered,
     UserSuspended,
 )
@@ -790,6 +791,26 @@ class UploadService:
             user.password_hash = self._hash_password(payload.password)
         user.updated_at = utcnow()
         await self.repository.update_user(user)
+        return user
+
+    async def reset_user_password(self, user_id: str, new_password: str, correlation_id: str, *, actor_id: str | None = None) -> User:
+        user = await self.repository.get_user(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if not new_password.strip():
+            raise HTTPException(status_code=400, detail="New password is required.")
+
+        user.password_hash = self._hash_password(new_password)
+        user.updated_at = utcnow()
+        await self.repository.update_user(user)
+        await self.event_bus.emit(
+            UserPasswordReset(
+                user_id=user.id,
+                actor_id=actor_id,
+                source="api",
+                correlation_id=correlation_id,
+            )
+        )
         return user
 
     async def change_password(self, user: User, payload: PasswordChangeInput) -> User:

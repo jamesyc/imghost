@@ -938,6 +938,38 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
         assert forbidden.status_code == 403
 
 
+def test_admin_password_reset_requires_dedicated_endpoint_and_allows_new_login(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="pwadmin", email="pwadmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="resetme", email="resetme@example.com")
+
+    with TestClient(app) as client:
+        rejected = client.patch(
+            f"/api/v1/admin/users/{user_id}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"password": "new-admin-pass"},
+        )
+        assert rejected.status_code == 400
+        assert "dedicated admin password reset endpoint" in rejected.json()["detail"]
+
+        reset = client.post(
+            f"/api/v1/admin/users/{user_id}/reset-password",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"new_password": "new-admin-pass"},
+        )
+        assert reset.status_code == 200
+        assert reset.json() == {"reset": True, "user_id": user_id}
+
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "resetme", "password": "new-admin-pass"},
+        )
+        assert login.status_code == 200
+        assert login.json()["authenticated"] is True
+
+
 def test_user_can_change_password_with_current_password(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -1184,6 +1216,12 @@ def test_admin_audit_log_tracks_events_and_supports_filters(tmp_path, monkeypatc
             json={"suspended": True},
         )
         assert suspend.status_code == 200
+        password_reset = client.post(
+            f"/api/v1/admin/users/{user_id}/reset-password",
+            headers={"Authorization": f"Bearer {admin_key}", "X-Correlation-ID": "audit-password-reset"},
+            json={"new_password": "audit-pass"},
+        )
+        assert password_reset.status_code == 200
 
         expiry = client.patch(
             f"/api/v1/admin/albums/{album_id}",
@@ -1214,6 +1252,18 @@ def test_admin_audit_log_tracks_events_and_supports_filters(tmp_path, monkeypatc
         assert suspended_payload[0]["target_type"] == "user"
         assert suspended_payload[0]["target_id"] == user_id
         assert suspended_payload[0]["metadata"]["suspended"] is True
+
+        password_reset_events = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "user_password_reset", "actor_id": admin_id, "correlation_id": "audit-password-reset"},
+        )
+        assert password_reset_events.status_code == 200
+        password_reset_payload = password_reset_events.json()
+        assert len(password_reset_payload) == 1
+        assert password_reset_payload[0]["target_type"] == "user"
+        assert password_reset_payload[0]["target_id"] == user_id
+        assert password_reset_payload[0]["metadata"]["target_user_id"] == user_id
 
         ranged = client.get(
             "/api/v1/admin/audit",

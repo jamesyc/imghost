@@ -152,6 +152,10 @@ class AdminUserPatchRequest(BaseModel):
     password: str | None = None
 
 
+class AdminUserPasswordResetRequest(BaseModel):
+    new_password: str
+
+
 class UserPasswordPatchRequest(BaseModel):
     current_password: str
     new_password: str
@@ -1196,6 +1200,11 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
     state = get_state(request)
     cid = correlation_id(request)
     admin = await require_admin_user(request)
+    if "password" in payload.model_fields_set:
+        raise HTTPException(
+            status_code=400,
+            detail="Use the dedicated admin password reset endpoint for password changes.",
+        )
     updated = await state.uploads.update_user(
         user_id,
         payload=UserUpdateInput(
@@ -1203,7 +1212,6 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
             quota_bytes=payload.quota_bytes if "quota_bytes" in payload.model_fields_set else UNSET,
             rate_limit_rpm=payload.rate_limit_rpm if "rate_limit_rpm" in payload.model_fields_set else UNSET,
             rate_limit_bph=payload.rate_limit_bph if "rate_limit_bph" in payload.model_fields_set else UNSET,
-            password=payload.password if "password" in payload.model_fields_set else None,
         ),
         correlation_id=cid,
         actor_id=admin.id,
@@ -1218,6 +1226,28 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
             "quota_bytes": updated.quota_bytes if updated.quota_bytes is not None else state.settings.default_user_quota_bytes,
             "rate_limit_rpm": updated.rate_limit_rpm,
             "rate_limit_bph": updated.rate_limit_bph,
+        },
+        headers={"X-Correlation-ID": cid},
+    )
+
+
+@app.post("/api/v1/admin/users/{user_id}/reset-password")
+async def admin_reset_user_password(
+    request: Request, user_id: str, payload: AdminUserPasswordResetRequest
+) -> JSONResponse:
+    state = get_state(request)
+    cid = correlation_id(request)
+    admin = await require_admin_user(request)
+    updated = await state.uploads.reset_user_password(
+        user_id,
+        payload.new_password,
+        cid,
+        actor_id=admin.id,
+    )
+    return JSONResponse(
+        {
+            "reset": True,
+            "user_id": updated.id,
         },
         headers={"X-Correlation-ID": cid},
     )

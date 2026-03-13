@@ -184,6 +184,9 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 - Admin album expiry set/clear
 - Admin user suspend/quota/password updates
 - Admin user create/patch/list payloads include per-user upload rate-limit overrides
+- Dedicated admin password reset endpoint:
+  - `POST /api/v1/admin/users/{userId}/reset-password`
+  - generic admin user patch no longer mutates passwords
 - Audit log API:
   - `GET /api/v1/admin/audit`
   - filterable by event type, actor, correlation ID, and date range
@@ -209,6 +212,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - `UserRegistered`
   - `UserDeleted`
   - `UserSuspended`
+  - `UserPasswordReset`
 
 ### Runtime Config
 
@@ -273,7 +277,6 @@ These events exist and are emitted in the service layer. Thumbnail, audit, and c
 - Admin album rescue/expiry UI beyond API
 - Admin audit browsing UI beyond API
 - Admin configuration panel
-- Dedicated admin password reset semantics beyond generic patching
 
 ## MVP Assessment
 
@@ -307,7 +310,6 @@ Implement the remaining control-plane and auth semantics next:
 
 - Redis-backed limiter behavior matching the final design
 - explicit fail-open/fail-closed behavior around Redis availability
-- dedicated admin password reset semantics
 
 That is now the main remaining gap in the rate-limit/auth control-plane area.
 
@@ -318,3 +320,4 @@ Current automated status at the time of writing:
 - focused slices passing:
   - `uv run pytest -q tests/test_app.py -k 'public_user_album_list or upload_album_and_media_serving or admin_album_management or api_key_upload'`
   - `uv run pytest -q tests/test_app.py -k 'index_page or album_patch or admin_album_management or admin_user_management or registration'`
+  - `uv run pytest -q tests/test_app.py -k 'admin_password_reset or admin_user_management or admin_audit_log or user_can_change_password'`

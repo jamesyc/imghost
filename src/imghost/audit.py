@@ -18,6 +18,7 @@ from .events import (
     MediaDeleted,
     MediaUploaded,
     UserDeleted,
+    UserPasswordReset,
     UserRegistered,
     UserSuspended,
 )
@@ -282,6 +283,21 @@ def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> No
             },
         )
 
+    async def write_user_password_reset(event: UserPasswordReset) -> None:
+        await audit_log.write_audit_event(
+            "user_password_reset",
+            event.actor_id,
+            None,
+            "user",
+            event.user_id,
+            event.correlation_id,
+            {
+                "target_user_id": event.user_id,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
     async def write_config_changed(event: ConfigChanged) -> None:
         await audit_log.write_audit_event(
             "config_changed",
@@ -310,4 +326,5 @@ def register_audit_listeners(event_bus: EventBus, audit_log: JsonAuditLog) -> No
     event_bus.subscribe(UserDeleted, write_user_deleted)
     event_bus.subscribe(UserRegistered, write_user_registered)
     event_bus.subscribe(UserSuspended, write_user_suspended)
+    event_bus.subscribe(UserPasswordReset, write_user_password_reset)
     event_bus.subscribe(ConfigChanged, write_config_changed)
