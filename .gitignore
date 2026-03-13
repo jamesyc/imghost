@@ -11,3 +11,10 @@ Thumbs.db
 *.log
 *.tmp
 *.swp
+
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
