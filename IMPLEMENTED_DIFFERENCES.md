@@ -1,90 +1,102 @@
-# Implemented But Different From `DESIGN.md`
+# Implemented But Still Different From `DESIGN.md`
 
-This file captures features that are present in the codebase but materially differ from the behavior described in [`DESIGN.md`](/home/james/imghost/DESIGN.md). It excludes items that are simply not implemented yet, such as Redis-backed sessions/rate limits and OAuth/SSO.
+This file lists material differences that still exist between the current codebase and the original [`DESIGN.md`](/home/james/imghost/DESIGN.md).
 
-## 1. Authenticated Album Management Is Narrower Than Designed
+It intentionally excludes differences that have already been closed, such as:
 
-The design says logged-in owners can add items to existing albums and manage their own albums by ownership.
+- bcrypt password hashing
+- owner/admin album mutation auth
+- authenticated multi-file and append-to-owned-album uploads
+- request-origin-based absolute URL generation
 
-Current code differs:
+## 1. Sessions Are Still Signed Cookies, Not Redis-Backed
 
-- Authenticated uploads are forced to exactly one file and always create a new album.
-  - [`src/imghost/main.py:639`](/home/james/imghost/src/imghost/main.py#L639)
-- Album edits, cover changes, reordering, and per-media deletion currently authorize via `delete_token`, not owner session/admin identity.
-  - [`src/imghost/main.py:1331`](/home/james/imghost/src/imghost/main.py#L1331)
-  - [`src/imghost/main.py:1352`](/home/james/imghost/src/imghost/main.py#L1352)
-  - [`src/imghost/main.py:1372`](/home/james/imghost/src/imghost/main.py#L1372)
-  - [`src/imghost/service.py:355`](/home/james/imghost/src/imghost/service.py#L355)
-  - [`src/imghost/service.py:412`](/home/james/imghost/src/imghost/service.py#L412)
-  - [`src/imghost/service.py:454`](/home/james/imghost/src/imghost/service.py#L454)
+The app uses signed cookie payloads for browser sessions.
 
-## 2. Password Hashing Does Not Match The Design
+What the original design expected:
 
-The design specifies bcrypt-hashed passwords.
+- Redis-backed session storage
+- more production-oriented session invalidation semantics
 
-Current code uses plain SHA-256 for password hashing:
+Current state:
 
-- [`src/imghost/service.py:998`](/home/james/imghost/src/imghost/service.py#L998)
+- browser sessions are stateless signed cookies
+- cookie `Secure` behavior is configurable and defaults from `BASE_URL`
+- no Redis dependency exists yet
 
-## 3. Session Cookies Are Not `Secure`
+## 2. Rate Limiting Is In-Process
 
-The design specifies cookie flags `httponly; secure; samesite=lax`.
+The original design expected Redis-backed rate limiting, including behavior differences when Redis is unavailable.
 
-Current code sets cookies with `secure=False`:
+Current state:
 
-- [`src/imghost/main.py:380`](/home/james/imghost/src/imghost/main.py#L380)
-- [`src/imghost/main.py:394`](/home/james/imghost/src/imghost/main.py#L394)
+- upload rate limiting is always in-process memory
+- limits are still runtime-config-backed and per-user overrides exist
+- this is fine for a prototype or single-process deployment, but not a horizontally scaled one
 
-## 4. Rate Limiting Behavior Differs From The Design
+## 3. ZIP Downloads Are Buffered In Memory
 
-The design says rate limiting should use Redis when available, and be disabled entirely without Redis.
+The design calls for streaming ZIP generation.
 
-Current code always wires in an in-process limiter and enforces limits in memory:
+Current state:
 
-- [`src/imghost/main.py:52`](/home/james/imghost/src/imghost/main.py#L52)
-- [`src/imghost/rate_limits.py:38`](/home/james/imghost/src/imghost/rate_limits.py#L38)
+- album ZIP downloads work
+- the full ZIP archive is assembled in memory before the response is returned
 
-## 5. Upload Size Limits Are Simplified
+## 4. ShareX Config Download Still Requires API-Key Authentication
 
-The design calls for separate maximum sizes for images and videos, with videos allowed up to 500 MB.
+The design treats ShareX config as a settings action for a signed-in user.
 
-Current code exposes one global `MAX_UPLOAD_BYTES` limit and applies it to every upload:
+Current state:
 
-- [`src/imghost/config.py:47`](/home/james/imghost/src/imghost/config.py#L47)
-- [`src/imghost/service.py:146`](/home/james/imghost/src/imghost/service.py#L146)
+- `GET /api/v1/user/me/sharex-config` rejects ordinary session-authenticated requests
+- the request itself must be authenticated with the API key being embedded
 
-## 6. Album ZIP Download Is Buffered, Not Streamed
+## 5. Upload Size Policy Is Still Simplified
 
-The design says ZIP download should be streamed on the fly.
+The original design separated image and video size limits.
 
-Current code builds the full archive in memory before returning it:
+Current state:
 
-- [`src/imghost/main.py:973`](/home/james/imghost/src/imghost/main.py#L973)
-- [`src/imghost/service.py:522`](/home/james/imghost/src/imghost/service.py#L522)
+- one global `MAX_UPLOAD_BYTES` cap applies to all uploads
+- there is no distinct image-vs-video size policy yet
 
-## 7. ShareX Config Download Requires API-Key Authentication
+## 6. Admin Bootstrap CLI Is Simpler Than Designed
 
-The design describes ShareX config download as a Settings action for a signed-in user.
+The original design suggested a richer admin bootstrap flow.
 
-Current code rejects normal session-authenticated requests unless the request itself is authenticated with the API key:
+Current state:
 
-- [`src/imghost/main.py:1050`](/home/james/imghost/src/imghost/main.py#L1050)
+- CLI commands are:
+  - `create-user`
+  - `issue-api-key`
+  - `prune`
+  - `retry-thumbnails`
+  - `init-storage`
+- `create-user --admin` exists, but there is no dedicated interactive `create-admin` command
+- CLI-created users still start with `password_hash=None` unless a password is set later through the app/admin flow
 
-## 8. Admin Bootstrap CLI Differs From The Design
+## 7. Media Responses Still Do Not Explicitly Set `Content-Length`
 
-The design calls for a `create-admin` command that prompts interactively for a password.
+The design expected explicit forwarding of media response length.
 
-Current code instead provides `create-user --admin`, and that path creates a user with `password_hash=None`:
+Current state:
 
-- [`src/imghost/__main__.py:22`](/home/james/imghost/src/imghost/__main__.py#L22)
-- [`src/imghost/__main__.py:67`](/home/james/imghost/src/imghost/__main__.py#L67)
+- range handling and `Content-Range` work
+- the storage layer computes stream length
+- the response path does not explicitly set `Content-Length`
 
-## 9. Media Responses Do Not Explicitly Forward `Content-Length`
+## 8. The Browser UI Is Utility-Focused, Not Product-Focused
 
-The design says media responses should include `Content-Length`.
+The current UI is intentionally basic and mostly exists to exercise the backend.
 
-The storage layer computes it, but the response path does not forward it explicitly:
+This differs from the original design, which assumed a more fully designed end-user and admin interface.
 
-- [`src/imghost/storage.py:15`](/home/james/imghost/src/imghost/storage.py#L15)
-- [`src/imghost/storage.py:105`](/home/james/imghost/src/imghost/storage.py#L105)
-- [`src/imghost/main.py:947`](/home/james/imghost/src/imghost/main.py#L947)
+## 9. There Is Still No Trusted Public-Origin Allowlist
+
+The app now generates public URLs from request origin first, with `BASE_URL` fallback.
+
+That closes the single-domain limitation, but the production hardening piece is still missing:
+
+- no `ALLOWED_HOSTS` / trusted public origin validation exists yet
+- deployments should rely on a trusted reverse proxy in front of the app

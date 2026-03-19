@@ -1,53 +1,128 @@
 # imghost
 
-Self-hosted image and video hosting prototype built with FastAPI and PostgreSQL.
+`imghost` is a self-hosted image and video hosting prototype built with FastAPI, PostgreSQL, and either local filesystem storage or Garage/S3-compatible object storage.
 
-## Storage Modes
+## What It Currently Does
 
-The app supports two storage backends selected with `STORAGE_BACKEND`:
+- Anonymous uploads into public albums
+- Authenticated users with:
+  - browser session login
+  - API keys
+  - registration
+  - password change
+  - account deletion
+- Public album pages and JSON payloads
+- Public per-user album listing
+- Album editing:
+  - title
+  - cover image
+  - item reorder
+  - per-media deletion
+  - album deletion
+- Admin APIs and a basic browser admin UI
+- Async thumbnail generation and recovery
+- Image, animated image, SVG, and video processing
+- Storage backends:
+  - `filesystem`
+  - `garage`
 
-- `filesystem`: store originals and thumbnails under `IMGHOST_DATA_DIR`
-- `garage`: store originals and thumbnails in a Garage S3-compatible bucket
+## Basic Browser UI
 
-`filesystem` is the simplest choice for local development. `garage` is the intended Docker Compose deployment path.
+The current UI is intentionally simple and exists mainly to exercise the backend:
 
-## First-Run Setup
+- `/`:
+  - sign in
+  - register
+  - anonymous upload
+- `/dashboard`:
+  - account summary
+  - password change
+  - API key generation
+  - ShareX export
+  - authenticated upload
+  - owned album management
+- `/admin`:
+  - user management
+  - album management
+  - runtime config
+  - audit log
+- `/album-tools`:
+  - token-based management for anonymous/public albums
 
-1. Copy `.env.example` to `.env`
-2. Copy `docker/.env.example` to `docker/.env`
-3. Replace all placeholder secrets in both files
-4. Start the stack:
+## Docker Setup
+
+The Docker setup lives under [`docker/`](/home/james/imghost/docker).
+
+Main files:
+
+- [`docker/docker-compose.yml`](/home/james/imghost/docker/docker-compose.yml)
+- [`docker/.env.example`](/home/james/imghost/docker/.env.example)
+- [`docker/.env`](/home/james/imghost/docker/.env)
+
+The Compose project name is `imghost`, so containers come up as:
+
+- `imghost-app-1`
+- `imghost-postgres-1`
+- `imghost-garage-1`
+- `imghost-garage-init-1`
+
+Start the stack with:
 
 ```bash
-docker compose -f docker/docker-compose.yml --env-file docker/.env up --build
+docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d
 ```
 
-On the default Garage-backed setup:
-
-- `postgres` initializes from `db/init/001-init.sql`
-- `garage` starts with config generated from environment variables
-- `garage-init` performs one-time idempotent bootstrap:
-  - assigns single-node layout if needed
-  - imports the S3 key from the app env file
-  - creates the bucket if missing
-  - grants the key access to the bucket
-- `app` waits for `garage-init`, runs `python -m imghost init-storage`, then starts
-
-Environment file split:
-
-- `.env`: application/runtime settings passed into the Python app
-- `docker/.env`: Docker/Compose infrastructure settings such as Postgres ports/passwords and Garage cluster bootstrap tokens
-
-## Switching to Filesystem Storage
-
-To run without Garage:
+Current default public base URL in the Docker env file:
 
 ```env
-STORAGE_BACKEND=filesystem
-IMGHOST_DATA_DIR=./data
+BASE_URL=https://imghost.jamesyc.com
 ```
 
-You can then start only the app and Postgres services, or leave Garage in the Compose file unused.
+## One-Machine vs Multi-Machine Docker
+
+The same Compose file supports both:
+
+- single-machine defaults:
+  - `POSTGRES_HOST=postgres`
+  - `POSTGRES_CONNECT_PORT=5432`
+  - `S3_ENDPOINT_URL=http://garage:3900`
+- remote service overrides:
+  - set `POSTGRES_HOST` to a reachable hostname/IP
+  - set `POSTGRES_CONNECT_PORT` if needed
+  - set `S3_ENDPOINT_URL` to the remote Garage/S3 endpoint
+
+This makes the app container portable, but `garage-init` still assumes Garage is part of the local Compose stack. If Garage lives elsewhere, initialize/manage it separately.
+
+## Environment Files
+
+Application/runtime defaults:
+
+- [`.env.example`](/home/james/imghost/.env.example)
+
+Docker/infra defaults:
+
+- [`docker/.env.example`](/home/james/imghost/docker/.env.example)
+
+`docker/.env` is ignored by git and is the file Compose should use locally.
+
+## Auth And Session Notes
+
+- Passwords are hashed with bcrypt.
+- Session cookies are `HttpOnly` and `SameSite=Lax`.
+- `Secure` is enabled automatically when `BASE_URL` is HTTPS, and can be overridden with `SESSION_COOKIE_SECURE=true|false`.
+- ShareX config download still requires API-key-authenticated requests, even if the user has a valid browser session.
+
+## URL Generation
+
+Absolute URLs now prefer the request's public origin:
+
+- `X-Forwarded-Proto`
+- `X-Forwarded-Host`
+- request host/scheme
+
+If no usable request origin is available, the app falls back to `BASE_URL`.
+
+This means one deployment can serve multiple public domains correctly for normal request-driven responses.
 
 ## Development
 
@@ -57,10 +132,17 @@ Run tests with:
 uv run pytest -q
 ```
 
-The test suite uses PostgreSQL and truncates tables between tests.
+Current full suite status at the time these docs were updated:
 
-## Notes
+- `63 passed`
 
-- PostgreSQL is the source of truth for application state.
-- Redis is not currently part of the prototype Compose file.
-- Garage bootstrap is intended to be idempotent, but the Docker/Garage startup path should be validated in a real container run before production use.
+The test suite uses PostgreSQL and truncates tables between tests. Run it only against a dedicated test database.
+
+## Related Docs
+
+- [STATUS.md](/home/james/imghost/STATUS.md)
+- [IMPLEMENTED_DIFFERENCES.md](/home/james/imghost/IMPLEMENTED_DIFFERENCES.md)
+- [DB.md](/home/james/imghost/DB.md)
+- [COULDIMPROVE.md](/home/james/imghost/COULDIMPROVE.md)
+- [DESIGN.md](/home/james/imghost/DESIGN.md)
+- [DESIGN2.md](/home/james/imghost/DESIGN2.md)
