@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import mimetypes
 import secrets
-from hashlib import sha256
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
+import bcrypt
 from fastapi import HTTPException, UploadFile
 
 from .config import Settings
@@ -33,7 +33,7 @@ from .processors import ProcessorRegistry
 from .rate_limits import InMemoryRateLimiter
 from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
-from .storage import LocalFilesystemBackend
+from .storage import StorageBackend
 
 MAX_ALBUM_ITEMS = 1000
 UNSET = object()
@@ -116,7 +116,7 @@ class UploadService:
         self,
         settings: Settings,
         repository: PostgresRepository,
-        storage: LocalFilesystemBackend,
+        storage: StorageBackend,
         event_bus: EventBus,
         processors: ProcessorRegistry,
         runtime_config: PostgresRuntimeConfig,
@@ -358,13 +358,14 @@ class UploadService:
         delete_token: str | None,
         correlation_id: str,
         *,
+        actor_user: User | None = None,
         title: str | None | object = UNSET,
         cover_media_id: str | None | object = UNSET,
     ) -> tuple[Album, list[Media]]:
         album = await self.repository.get_album(album_id)
         if album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
-        self._require_delete_token(album, delete_token)
+        self._require_album_access(album, delete_token, actor_user)
 
         items = await self.repository.list_album_media(album_id)
         media_by_id = {item.id: item for item in items}
@@ -380,10 +381,10 @@ class UploadService:
                     AlbumTitleChanged(
                         album_id=album.id,
                         user_id=album.user_id,
-                        actor_id=None,
+                        actor_id=actor_user.id if actor_user else None,
                         old_title=old_title,
                         new_title=normalized_title,
-                        source="web",
+                        source="api" if actor_user else "web",
                         correlation_id=correlation_id,
                     )
                 )
@@ -397,9 +398,9 @@ class UploadService:
                     AlbumCoverSet(
                         album_id=album.id,
                         user_id=album.user_id,
-                        actor_id=None,
+                        actor_id=actor_user.id if actor_user else None,
                         media_id=next_cover,
-                        source="web",
+                        source="api" if actor_user else "web",
                         correlation_id=correlation_id,
                     )
                 )
@@ -415,11 +416,13 @@ class UploadService:
         delete_token: str | None,
         order: list[tuple[str, int]],
         correlation_id: str,
+        *,
+        actor_user: User | None = None,
     ) -> tuple[Album, list[Media]]:
         album = await self.repository.get_album(album_id)
         if album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
-        self._require_delete_token(album, delete_token)
+        self._require_album_access(album, delete_token, actor_user)
 
         items = await self.repository.list_album_media(album_id)
         media_by_id = {item.id: item for item in items}
@@ -444,8 +447,8 @@ class UploadService:
             AlbumReordered(
                 album_id=album.id,
                 user_id=album.user_id,
-                actor_id=None,
-                source="web",
+                actor_id=actor_user.id if actor_user else None,
+                source="api" if actor_user else "web",
                 correlation_id=correlation_id,
             )
         )
@@ -456,6 +459,8 @@ class UploadService:
         media_id: str,
         delete_token: str | None,
         correlation_id: str,
+        *,
+        actor_user: User | None = None,
     ) -> MediaDeleteResult:
         media = await self.repository.get_media(media_id)
         if media is None:
@@ -464,7 +469,7 @@ class UploadService:
         album = await self.repository.get_album(media.album_id)
         if album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
-        self._require_delete_token(album, delete_token)
+        self._require_album_access(album, delete_token, actor_user)
 
         await self.storage.delete(media.storage_key)
         if media.thumb_key and media.thumb_key != media.storage_key:
@@ -479,9 +484,9 @@ class UploadService:
                 media_id=deleted_media.id,
                 album_id=deleted_media.album_id,
                 user_id=deleted_media.user_id,
-                actor_id=None,
+                actor_id=actor_user.id if actor_user else None,
                 file_size=deleted_media.file_size + (deleted_media.thumb_size or 0),
-                source="web",
+                source="api" if actor_user else "web",
                 correlation_id=correlation_id,
             )
         )
@@ -494,10 +499,10 @@ class UploadService:
                     AlbumDeleted(
                         album_id=deleted_album.id,
                         user_id=deleted_album.user_id,
-                        actor_id=None,
+                        actor_id=actor_user.id if actor_user else None,
                         item_count=0,
                         total_size=0,
-                        source="web",
+                        source="api" if actor_user else "web",
                         correlation_id=correlation_id,
                     )
                 )
@@ -611,6 +616,8 @@ class UploadService:
     def _require_album_access(self, album: Album, delete_token: str | None, actor_user: User | None) -> None:
         if actor_user is not None and (actor_user.is_admin or album.user_id == actor_user.id):
             return
+        if album.delete_token is None:
+            raise HTTPException(status_code=403, detail="Album access denied.")
         self._require_delete_token(album, delete_token)
 
     def _normalize_title(self, title: str | None | object) -> str | None:
@@ -664,6 +671,7 @@ class UploadService:
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "is_admin": user.is_admin,
             "quota_bytes": effective_quota,
             "storage_used_bytes": usage,
             "has_api_key": api_key is not None,
@@ -675,7 +683,7 @@ class UploadService:
         api_key = ApiKey(
             id=str(uuid4()),
             user_id=user.id,
-            key_hash=sha256(raw_key.encode("utf-8")).hexdigest(),
+            key_hash=self._hash_api_key(raw_key),
             created_at=utcnow(),
             last_used_at=None,
         )
@@ -816,7 +824,7 @@ class UploadService:
     async def change_password(self, user: User, payload: PasswordChangeInput) -> User:
         if user.password_hash is None:
             raise HTTPException(status_code=400, detail="Password login is not configured for this user.")
-        if self._hash_password(payload.current_password) != user.password_hash:
+        if not self._verify_password(payload.current_password, user.password_hash):
             raise HTTPException(status_code=403, detail="Current password is incorrect.")
         if not payload.new_password.strip():
             raise HTTPException(status_code=400, detail="New password is required.")
@@ -837,7 +845,7 @@ class UploadService:
             raise HTTPException(status_code=401, detail="Invalid credentials.")
         if user.suspended:
             raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
-        if self._hash_password(payload.password) != user.password_hash:
+        if not self._verify_password(payload.password, user.password_hash):
             raise HTTPException(status_code=401, detail="Invalid credentials.")
         return user
 
@@ -996,4 +1004,15 @@ class UploadService:
             raise HTTPException(status_code=413, detail="User storage quota reached.")
 
     def _hash_password(self, password: str) -> str:
-        return sha256(password.encode("utf-8")).hexdigest()
+        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    def _verify_password(self, password: str, password_hash: str) -> bool:
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        except ValueError:
+            return False
+
+    def _hash_api_key(self, raw_key: str) -> str:
+        from hashlib import sha256
+
+        return sha256(raw_key.encode("utf-8")).hexdigest()

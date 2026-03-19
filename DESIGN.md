@@ -2194,3 +2194,12 @@ These changes are pure configuration — no application code modifications requi
 - **Email integration:** Requires SMTP config, password reset token table, and expiry warning jobs.
 - **Garage → S3 migration:** `rclone sync garage://imghost/ s3://your-bucket/` migrates all objects; update config; zero application code changes.
 - **Orphan storage scan:** Periodic job that lists all keys in the storage bucket, compares against `storage_key` and `thumb_key` columns in the DB, and deletes keys with no matching row. Safety net for partial upload failures. Low priority but good hygiene.
+
+### Request-Origin URL Generation
+
+Absolute URLs returned by the app should prefer the request's public origin when one is available, and only fall back to `BASE_URL` when there is no usable request context.
+
+- Primary source: request-derived origin from trusted proxy headers such as `X-Forwarded-Proto` and `X-Forwarded-Host`, or the direct request host when not behind a proxy.
+- Fallback: `BASE_URL`, used for CLI flows, background jobs, and any code path without a live HTTP request.
+- Effect: one deployment can serve multiple public domains such as `imghost.a.com` and `imghost.b.com` while still emitting correct `album_url`, `media_url`, `thumb_url`, `delete_url`, and ShareX `RequestURL` values for the domain the user actually used.
+- Operational note: reverse proxies must preserve or set the forwarded host/proto headers correctly. If they are absent or invalid, the app will fall back to `BASE_URL`.

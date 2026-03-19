@@ -4,6 +4,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+!docker/.env.example
+docker/.env
 
 .vscode/
 .idea/

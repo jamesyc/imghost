@@ -14,11 +14,17 @@ The prototype is now well past the original anonymous upload proof-of-concept st
 The codebase remains a FastAPI prototype backed by:
 
 - PostgreSQL-backed repository, audit log, and runtime config storage
-- Docker Compose PostgreSQL service with bind-mounted local data directory
-- local filesystem storage
+- selectable storage backend:
+  - local filesystem
+  - Garage / S3-compatible object storage
+- Docker Compose stack under `docker/` for:
+  - PostgreSQL
+  - Garage
+  - Garage bootstrap/init
+  - app container
 - in-process async task workers
 
-It does **not** yet implement the full production architecture from `DESIGN.md` such as Redis, S3-compatible object storage, OAuth/SSO, or the full production Redis-backed runtime/session model.
+It does **not** yet implement the full production architecture from `DESIGN.md` such as Redis, OAuth/SSO, or the full production Redis-backed runtime/session model.
 
 ## Implemented
 
@@ -94,7 +100,7 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
 ### Database / Persistence
 
 - Docker Compose Postgres service:
-  - `docker-compose.yml`
+  - `docker/docker-compose.yml`
   - bind-mounted data directory at `./postgres-data`
 - Schema bootstrap SQL loaded via `db/init/001-init.sql`
 - Postgres-backed app adapters for:
@@ -103,13 +109,36 @@ It does **not** yet implement the full production architecture from `DESIGN.md` 
   - runtime config
 - `DATABASE_URL` runtime configuration
 - `asyncpg` added via `uv`
-- Verified smoke path against live Postgres container:
-  - schema initialization
-  - CLI user creation
-  - CLI API key issuance
+- Test harness bootstraps schema automatically if the database or tables are missing
 - Current caveat:
-  - this is an initial DB cut, not a full finished migration
-  - legacy tests still assume the old JSON-state test harness and have not been rewritten yet
+  - this is still a prototype persistence stack, not the full final infra model
+  - tests will truncate whatever database `DATABASE_URL` points at, so they must only be run against a dedicated test database
+
+### Storage / Infra
+
+- Configurable storage backend selection via runtime env:
+  - `STORAGE_BACKEND=filesystem`
+  - `STORAGE_BACKEND=garage`
+- Local filesystem storage backend remains supported for local/dev/test usage
+- S3-compatible storage backend implemented using `boto3`
+- `python -m imghost init-storage` now initializes the selected storage backend:
+  - filesystem: ensures the local directory exists
+  - garage: ensures the configured bucket exists
+- Docker Compose Garage stack implemented under `docker/`:
+  - Garage service
+  - one-shot `garage-init`
+  - `.env` split between app/runtime config and Docker/infra config
+- Current repo-shape goal:
+  - the `docker/` folder is intended to become more self-contained over time
+  - future cleanup should minimize dependencies from `docker/` back into the repo root so infra assets can be copied or deployed more independently
+  - current remaining coupling still exists around the app image build context and some shared project assets
+- Verified clean-start smoke path against live Docker stack:
+  - blank Postgres data directory
+  - Garage bootstrap/init
+  - app startup
+  - homepage reachable
+  - anonymous image upload succeeds
+  - uploaded media and thumbnail URLs are served correctly
 
 ### Users / Authentication
 
@@ -290,7 +319,6 @@ These events exist and are emitted in the service layer. Thumbnail, audit, and c
 ### Storage / Infra from Final Design
 
 - Redis-backed task queue / sessions / rate limits
-- S3-compatible object storage backend
 - multi-service worker deployment
 - correlation-aware structured logging/metrics stack
 
@@ -339,15 +367,12 @@ That is now the main remaining gap in the rate-limit/auth control-plane area.
 
 Current automated status at the time of writing:
 
-- focused slices passing:
-  - `uv run pytest -q tests/test_app.py -k 'public_user_album_list or upload_album_and_media_serving or admin_album_management or api_key_upload'`
-  - `uv run pytest -q tests/test_app.py -k 'index_page or album_patch or admin_album_management or admin_user_management or registration'`
-  - `uv run pytest -q tests/test_app.py -k 'admin_password_reset or admin_user_management or admin_audit_log or user_can_change_password'`
-  - `uv run pytest -q tests/test_app.py -k 'admin_audit_log or admin_login'`
-  - `uv run pytest -q tests/test_app.py -k 'admin_user_management or admin_password_reset or local_login or registration_creates_user_session_and_audit_entry'`
-- additional DB smoke checks passing:
-  - `docker compose up -d`
-  - `docker compose exec -T postgres psql -U imghost -d imghost -c "\\dt"`
-  - `DATABASE_URL=postgresql://imghost:imghost@localhost:5432/imghost uv run python -m imghost create-user --username pgadmin --email pgadmin@example.com`
-  - `DATABASE_URL=postgresql://imghost:imghost@localhost:5432/imghost uv run python -m imghost issue-api-key --user-id 72a00f56-54d2-4da5-aff7-8b8b095fbc53`
-  - `uv run python -m compileall src`
+- full Python test suite passing:
+  - `uv run pytest -q`
+- Docker/Garage smoke path passing:
+  - `docker compose -f docker/docker-compose.yml --env-file docker/.env up -d`
+  - `curl http://localhost:8000/`
+  - anonymous upload via `POST /api/v1/upload`
+  - uploaded album page reachable
+  - uploaded media URL reachable
+  - generated thumbnail URL reachable

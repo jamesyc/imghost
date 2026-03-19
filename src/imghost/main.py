@@ -37,7 +37,7 @@ from .service import (
     UserCreateInput,
     UserUpdateInput,
 )
-from .storage import LocalFilesystemBackend
+from .storage import build_storage_backend
 from .tasks import AsyncTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 
 
@@ -50,7 +50,7 @@ class AppState:
         self.audit = PostgresAuditLog(self.database)
         self.runtime_config = PostgresRuntimeConfig(self.database)
         self.rate_limiter = InMemoryRateLimiter(self.runtime_config)
-        self.storage = LocalFilesystemBackend(settings.data_dir)
+        self.storage = build_storage_backend(settings)
         self.processors = build_processor_registry(
             settings.max_pixel_megapixels * 1_000_000,
             settings.video_thumb_frames,
@@ -118,7 +118,6 @@ class AppState:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = load_settings()
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
     app.state.imghost = AppState(settings)
     await app.state.imghost.start()
     yield
@@ -219,6 +218,18 @@ def upload_rate_limit_key(request: Request, user: User | None) -> str:
     if user is not None:
         return user.id
     return hash_anon_identity(client_ip(request), request.headers.get("User-Agent", ""))
+
+
+def public_base_url(request: Request, settings: Settings) -> str:
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower()
+    forwarded_host = request.headers.get("X-Forwarded-Host", "").split(",", 1)[0].strip()
+    host = forwarded_host or request.headers.get("Host", "").strip()
+    scheme = forwarded_proto or request.url.scheme
+    if not host and request.url.netloc:
+        host = request.url.netloc
+    if scheme in {"http", "https"} and host and all(char not in host for char in "/?#@"):
+        return f"{scheme}://{host}"
+    return settings.base_url
 
 
 def media_url(base_url: str, media_id: str, fmt: str) -> str:
@@ -387,13 +398,18 @@ def apply_session_cookie(response: Response, settings: Settings, token: str, *, 
         value=token,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.session_cookie_secure,
         max_age=max_age,
     )
 
 
 def clear_session_cookie(response: Response, settings: Settings) -> None:
-    response.delete_cookie(key=settings.session_cookie_name, httponly=True, samesite="lax", secure=False)
+    response.delete_cookie(
+        key=settings.session_cookie_name,
+        httponly=True,
+        samesite="lax",
+        secure=settings.session_cookie_secure,
+    )
 
 
 async def authenticated_principal(request: Request, *, required: bool = False) -> ResolvedPrincipal | None:
@@ -461,9 +477,78 @@ def humanize_bytes(byte_count: int) -> str:
     return f"{size:.1f} {unit}"
 
 
+def nav_links(user: User | None) -> str:
+    links = [
+        ("/", "Home"),
+        ("/dashboard", "Dashboard"),
+        ("/album-tools", "Album Tools"),
+    ]
+    if user is not None and user.is_admin:
+        links.append(("/admin", "Admin"))
+    return "".join(f'<a class="nav-link" href="{href}">{escape(label)}</a>' for href, label in links)
+
+
+def page_shell(title: str, body: str, *, user: User | None = None, script: str = "") -> str:
+    nav = nav_links(user)
+    return f"""
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{escape(title)}</title>
+    <style>
+      :root {{ color-scheme: light; --bg: #f5efe4; --fg: #14213d; --card: #fffaf2; --accent: #d97706; --line: #eadcc2; }}
+      * {{ box-sizing: border-box; }}
+      body {{ margin: 0; font-family: Georgia, serif; background: radial-gradient(circle at top, #fff8eb, var(--bg)); color: var(--fg); }}
+      main {{ max-width: 1100px; margin: 0 auto; padding: 28px 20px 64px; }}
+      nav {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }}
+      .nav-link {{ text-decoration: none; color: var(--fg); background: #fff3dc; border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px; }}
+      .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 24px; box-shadow: 0 12px 30px rgba(20,33,61,.08); }}
+      .stack {{ display: grid; gap: 16px; }}
+      .grid {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }}
+      h1 {{ font-size: 2.6rem; margin: 0 0 12px; }}
+      h2, h3 {{ margin: 0 0 12px; }}
+      p {{ line-height: 1.5; }}
+      form {{ display: grid; gap: 12px; margin-top: 16px; }}
+      input, button, textarea, select {{ font: inherit; }}
+      input[type="text"], input[type="email"], input[type="password"], input[type="datetime-local"], input[type="number"], input[type="file"], textarea, select {{
+        width: 100%; padding: 12px; background: white; border: 1px solid #d4c5a8; border-radius: 12px;
+      }}
+      textarea {{ min-height: 120px; resize: vertical; }}
+      button {{ padding: 12px 16px; border: 0; border-radius: 999px; background: var(--accent); color: white; cursor: pointer; }}
+      button.secondary {{ background: #375a7f; }}
+      button.danger {{ background: #b42318; }}
+      button.ghost {{ background: #8b6b3f; }}
+      .row {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
+      .row > * {{ flex: 1 1 180px; }}
+      .hint {{ color: #6b7280; font-size: .95rem; }}
+      .flash {{ min-height: 1.4rem; color: #7c5414; }}
+      .hidden {{ display: none !important; }}
+      .check {{ display: flex; gap: 8px; align-items: center; font-size: .95rem; color: #6b7280; }}
+      .result, pre {{ background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px; overflow: auto; }}
+      .album-card, .user-card, .admin-card {{ border: 1px solid var(--line); border-radius: 16px; padding: 16px; background: #fffdf8; }}
+      .item-list {{ display: grid; gap: 10px; margin-top: 12px; }}
+      .item {{ border-top: 1px solid var(--line); padding-top: 10px; }}
+      .muted {{ color: #786b57; }}
+      a.inline-link {{ color: #9a4d00; }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav>{nav}</nav>
+      {body}
+    </main>
+    {script}
+  </body>
+</html>
+"""
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> str:
     state = get_state(request)
+    base_url = public_base_url(request, state.settings)
     user = await authenticated_user(request, required=False)
     allow_registration = bool(await state.runtime_config.get_value("allow_registration"))
     anon_upload_enabled = bool(await state.runtime_config.get_value("anon_upload_enabled"))
@@ -475,7 +560,7 @@ async def index(request: Request) -> str:
             """
         <section class="card auth-card">
           <h2>Create Account</h2>
-          <form id="register-form" class="auth-form">
+          <form id="register-form" class="auth-form" action="/api/v1/auth/register" method="post">
             <input type="text" name="username" placeholder="Username" required>
             <input type="email" name="email" placeholder="Email" required>
             <input type="password" name="password" placeholder="Password" required>
@@ -493,10 +578,10 @@ async def index(request: Request) -> str:
             """
         )
         auth_panel = f"""
-      <section class="auth-grid">
+      <section class="grid">
         <section class="card auth-card">
           <h2>Sign In</h2>
-          <form id="login-form" class="auth-form">
+          <form id="login-form" class="auth-form" action="/api/v1/auth/login" method="post">
             <input type="text" name="login" placeholder="Username or email" required>
             <input type="password" name="password" placeholder="Password" required>
             <label class="check"><input type="checkbox" name="remember_me" checked> Remember me</label>
@@ -511,7 +596,8 @@ async def index(request: Request) -> str:
       <section class="card auth-card">
         <h2>Signed In</h2>
         <p>Logged in as <strong>{user.username}</strong>.</p>
-        <form id="logout-form" class="auth-form">
+        <p class="hint">Continue in the dashboard for album management, account actions, and ShareX export.</p>
+        <form id="logout-form" class="auth-form" action="/api/v1/auth/logout" method="post">
           <button type="submit">Log Out</button>
         </form>
       </section>
@@ -520,14 +606,17 @@ async def index(request: Request) -> str:
         f"""
       <section class="card">
         <h1>imghost</h1>
-        <p>{'Upload with your session-backed account.' if user else 'Paste or pick one or more files to create an anonymous album with clean media URLs.'}</p>
-        <form action="/api/v1/upload" method="post" enctype="multipart/form-data">
+        <p>{'Upload with your session-backed account. You can optionally target an existing owned album by ID.' if user else 'Paste or pick one or more files to create an anonymous album with clean media URLs.'}</p>
+        <form id="upload-form" action="/api/v1/upload" method="post" enctype="multipart/form-data">
           <input type="text" name="title" placeholder="Album title (optional)">
+          {('<input type="text" name="album_id" placeholder="Existing owned album ID (optional)">' if user else '')}
           <input type="file" name="file" required multiple>
           <button type="submit">Upload</button>
         </form>
-        <p class="hint">Base URL: {state.settings.base_url}</p>
+        <p class="hint">Base URL: {base_url}</p>
         {f'<p class="hint">Anonymous uploads currently expire after {anon_expiry_hours} hour(s).</p>' if user is None else '<p class="hint">Authenticated uploads do not expire by default.</p>'}
+        <p class="hint">For account tools, owned albums, admin APIs, and manual token-based album actions, use the pages in the nav above.</p>
+        <pre id="upload-result" class="result hidden"></pre>
       </section>
         """
         if upload_enabled
@@ -535,106 +624,1001 @@ async def index(request: Request) -> str:
       <section class="card">
         <h1>imghost</h1>
         <p>Anonymous uploads are currently disabled. Sign in to upload.</p>
-        <p class="hint">Base URL: {state.settings.base_url}</p>
+        <p class="hint">Base URL: {base_url}</p>
+        <p class="hint">If you already have an API key, the dashboard page can still use it for authenticated testing.</p>
       </section>
         """
     )
-    return f"""
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>imghost</title>
-    <style>
-      :root {{ color-scheme: light; --bg: #f5efe4; --fg: #14213d; --card: #fffaf2; --accent: #d97706; }}
-      body {{ margin: 0; font-family: Georgia, serif; background: radial-gradient(circle at top, #fff8eb, var(--bg)); color: var(--fg); }}
-      main {{ max-width: 760px; margin: 0 auto; padding: 48px 20px 64px; }}
-      .card {{ background: var(--card); border: 1px solid #eadcc2; border-radius: 20px; padding: 24px; box-shadow: 0 12px 30px rgba(20,33,61,.08); }}
-      h1 {{ font-size: 3rem; margin: 0 0 12px; }}
-      h2 {{ margin: 0 0 12px; }}
-      p {{ line-height: 1.5; }}
-      form {{ display: grid; gap: 12px; margin-top: 24px; }}
-      input, button {{ font: inherit; }}
-      input[type="text"], input[type="email"], input[type="password"], input[type="file"] {{ padding: 12px; background: white; border: 1px solid #d4c5a8; border-radius: 12px; }}
-      button {{ padding: 14px 18px; border: 0; border-radius: 999px; background: var(--accent); color: white; cursor: pointer; }}
-      .hint {{ color: #6b7280; font-size: .95rem; }}
-      .auth-grid {{ display: grid; gap: 16px; margin-bottom: 18px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }}
-      .auth-card {{ margin-bottom: 18px; }}
-      .auth-form {{ margin-top: 12px; }}
-      .check {{ display: flex; gap: 8px; align-items: center; font-size: .95rem; color: #6b7280; }}
-      .flash {{ min-height: 1.4rem; color: #7c5414; }}
-    </style>
-  </head>
-  <body>
-    <main>
+    body = f"""
       <p id="flash" class="flash"></p>
-      {auth_panel}
-      {upload_block}
-    </main>
+      <section class="stack">
+        {auth_panel}
+        {upload_block}
+      </section>
+    """
+    script = """
     <script>
       const flash = document.getElementById("flash");
-      const showMessage = (message) => {{
-        if (flash) {{
+      const uploadResult = document.getElementById("upload-result");
+      const showMessage = (message) => {
+        if (flash) {
           flash.textContent = message;
-        }}
-      }};
-      const submitJson = async (form, url) => {{
+        }
+      };
+      const submitJson = async (form, url) => {
         const formData = new FormData(form);
         const payload = Object.fromEntries(formData.entries());
-        if ("remember_me" in payload) {{
+        if ("remember_me" in payload) {
           payload.remember_me = formData.get("remember_me") === "on";
-        }}
-        const response = await fetch(url, {{
+        }
+        const response = await fetch(url, {
           method: "POST",
-          headers: {{ "Content-Type": "application/json" }},
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-        }});
-        const data = await response.json().catch(() => ({{}}));
-        if (!response.ok) {{
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
           throw new Error(data.detail || "Request failed.");
-        }}
-      }};
+        }
+      };
       const loginForm = document.getElementById("login-form");
-      if (loginForm) {{
-        loginForm.addEventListener("submit", async (event) => {{
+      if (loginForm) {
+        loginForm.addEventListener("submit", async (event) => {
           event.preventDefault();
-          try {{
+          try {
             await submitJson(loginForm, "/api/v1/auth/login");
             window.location.reload();
-          }} catch (error) {{
+          } catch (error) {
             showMessage(error.message);
-          }}
-        }});
-      }}
+          }
+        });
+      }
       const registerForm = document.getElementById("register-form");
-      if (registerForm) {{
-        registerForm.addEventListener("submit", async (event) => {{
+      if (registerForm) {
+        registerForm.addEventListener("submit", async (event) => {
           event.preventDefault();
-          try {{
+          try {
             await submitJson(registerForm, "/api/v1/auth/register");
             window.location.reload();
-          }} catch (error) {{
+          } catch (error) {
             showMessage(error.message);
-          }}
-        }});
-      }}
+          }
+        });
+      }
       const logoutForm = document.getElementById("logout-form");
-      if (logoutForm) {{
-        logoutForm.addEventListener("submit", async (event) => {{
+      if (logoutForm) {
+        logoutForm.addEventListener("submit", async (event) => {
           event.preventDefault();
-          try {{
-            await fetch("/api/v1/auth/logout", {{ method: "POST" }});
+          try {
+            await fetch("/api/v1/auth/logout", { method: "POST" });
             window.location.reload();
-          }} catch {{
+          } catch {
             showMessage("Logout failed.");
-          }}
-        }});
-      }}
+          }
+        });
+      }
+      const uploadForm = document.getElementById("upload-form");
+      if (uploadForm) {
+        uploadForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          try {
+            const response = await fetch("/api/v1/upload", {
+              method: "POST",
+              body: new FormData(uploadForm),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(data.detail || "Upload failed.");
+            }
+            if (uploadResult) {
+              uploadResult.classList.remove("hidden");
+              uploadResult.textContent = JSON.stringify(data, null, 2);
+            }
+            showMessage("Upload succeeded.");
+          } catch (error) {
+            showMessage(error.message);
+          }
+        });
+      }
     </script>
-  </body>
-</html>
-"""
+    """
+    return page_shell("imghost", body, user=user, script=script)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request) -> str:
+    state = get_state(request)
+    base_url = public_base_url(request, state.settings)
+    user = await authenticated_user(request, required=False)
+    session_user = await state.uploads.get_current_user_summary(user) if user else None
+    bootstrap = json.dumps({"session_user": session_user, "base_url": base_url})
+    body = """
+      <p id="flash" class="flash"></p>
+      <section class="grid">
+        <section class="card">
+          <h1>User Dashboard</h1>
+          <p>Use this page to test authenticated account features, owned album management, ShareX export, and authenticated uploads. Session auth or a pasted API key both work.</p>
+        </section>
+        <section class="card">
+          <h2>API Key Mode</h2>
+          <form id="api-key-form">
+            <input id="api-key-input" type="text" name="api_key" placeholder="Paste API key to drive the dashboard without a browser session">
+            <div class="row">
+              <button type="submit">Use API Key</button>
+              <button id="clear-api-key" type="button" class="secondary">Clear API Key</button>
+            </div>
+          </form>
+          <p class="hint">This is useful for testing on plain HTTP when secure session cookies are unavailable.</p>
+        </section>
+      </section>
+      <section id="dashboard-unauth" class="card">
+        <h2>Authentication Needed</h2>
+        <p>Sign in on the home page or paste an API key here to unlock the dashboard.</p>
+      </section>
+      <section id="dashboard-auth" class="stack hidden">
+        <section class="grid">
+          <section class="card">
+            <h2>Account</h2>
+            <pre id="account-summary" class="result"></pre>
+            <div class="row">
+              <button id="refresh-account" type="button">Refresh Account</button>
+              <button id="generate-api-key" type="button" class="secondary">Generate API Key</button>
+              <button id="download-sharex" type="button" class="ghost">Download ShareX Config</button>
+            </div>
+            <pre id="api-key-output" class="result hidden"></pre>
+          </section>
+          <section class="card">
+            <h2>Account Actions</h2>
+            <form id="change-password-form">
+              <input type="password" name="current_password" placeholder="Current password" required>
+              <input type="password" name="new_password" placeholder="New password" required>
+              <button type="submit">Change Password</button>
+            </form>
+            <form id="delete-account-form">
+              <button type="submit" class="danger">Delete My Account</button>
+            </form>
+          </section>
+        </section>
+        <section class="card">
+          <h2>Authenticated Upload</h2>
+          <form id="dashboard-upload-form" enctype="multipart/form-data">
+            <input type="text" name="title" placeholder="Album title (optional)">
+            <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
+            <input type="file" name="file" required multiple>
+            <button type="submit">Upload</button>
+          </form>
+          <pre id="dashboard-upload-result" class="result hidden"></pre>
+        </section>
+        <section class="card">
+          <div class="row">
+            <h2>Owned Albums</h2>
+            <button id="refresh-albums" type="button">Refresh Albums</button>
+          </div>
+          <p id="owned-albums-link" class="hint"></p>
+          <div id="owned-albums" class="stack"></div>
+        </section>
+      </section>
+    """
+    script = f"""
+    <script>
+      const boot = {bootstrap};
+      const state = {{
+        apiKey: window.localStorage.getItem("imghost_api_key") || "",
+        latestApiKey: null,
+        user: boot.session_user,
+      }};
+      const flash = document.getElementById("flash");
+      const apiKeyInput = document.getElementById("api-key-input");
+      const unauth = document.getElementById("dashboard-unauth");
+      const auth = document.getElementById("dashboard-auth");
+      const accountSummary = document.getElementById("account-summary");
+      const apiKeyOutput = document.getElementById("api-key-output");
+      const albumsRoot = document.getElementById("owned-albums");
+      const albumsLink = document.getElementById("owned-albums-link");
+      const uploadResult = document.getElementById("dashboard-upload-result");
+      apiKeyInput.value = state.apiKey;
+
+      const showMessage = (message) => {{
+        flash.textContent = message || "";
+      }};
+      const escapeHtml = (value) => String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+      const authHeaders = (headers = {{}}) => {{
+        const resolved = new Headers(headers);
+        const apiKey = state.apiKey || state.latestApiKey;
+        if (apiKey) {{
+          resolved.set("Authorization", `Bearer ${{apiKey}}`);
+        }}
+        return resolved;
+      }};
+      const requestJson = async (url, options = {{}}) => {{
+        const response = await fetch(url, {{ ...options, headers: authHeaders(options.headers || {{}}) }});
+        const data = await response.json().catch(() => ({{}}));
+        if (!response.ok) {{
+          throw new Error(data.detail || `Request failed (${{response.status}}).`);
+        }}
+        return data;
+      }};
+      const formToObject = (form) => Object.fromEntries(new FormData(form).entries());
+      const parseOptionalNumber = (value) => value === "" ? null : Number(value);
+      const renderState = () => {{
+        const isAuthed = !!state.user;
+        unauth.classList.toggle("hidden", isAuthed);
+        auth.classList.toggle("hidden", !isAuthed);
+        if (!isAuthed) {{
+          accountSummary.textContent = "";
+          albumsRoot.innerHTML = "";
+          albumsLink.textContent = "";
+          return;
+        }}
+        accountSummary.textContent = JSON.stringify(state.user, null, 2);
+        albumsLink.innerHTML = `Public album list: <a class="inline-link" href="/u/${{encodeURIComponent(state.user.username)}}" target="_blank">/u/${{escapeHtml(state.user.username)}}</a>`;
+      }};
+      const refreshUser = async () => {{
+        try {{
+          state.user = await requestJson("/api/v1/user/me");
+        }} catch {{
+          state.user = null;
+        }}
+        renderState();
+        if (state.user) {{
+          await refreshAlbums();
+        }}
+      }};
+      const renderAlbum = (album) => {{
+        const orderValue = album.items.map((item) => `${{item.id}}:${{item.position}}`).join("\\n");
+        const items = album.items.map((item) => `
+          <div class="item">
+            <p><strong>${{escapeHtml(item.filename)}}</strong> · ${{escapeHtml(item.id)}} · ${{escapeHtml(item.media_type)}} · thumb=${{escapeHtml(item.thumb_status)}}</p>
+            <p class="hint"><a class="inline-link" href="${{item.media_url}}" target="_blank">media</a> · <a class="inline-link" href="${{item.thumb_url}}" target="_blank">thumb</a>${{item.compat_warning ? ` · ${{escapeHtml(item.compat_warning)}}` : ""}}</p>
+            <button type="button" class="danger media-delete" data-media-id="${{item.id}}">Delete Media</button>
+          </div>
+        `).join("");
+        return `
+          <section class="album-card" data-album-id="${{album.id}}">
+            <h3>${{escapeHtml(album.title || "Untitled album")}}</h3>
+            <p class="hint">Album ${{escapeHtml(album.id)}} · ${{album.item_count}} item(s) · <a class="inline-link" href="/a/${{album.id}}" target="_blank">public page</a> · <a class="inline-link" href="/api/v1/album/${{album.id}}/zip" target="_blank">zip</a></p>
+            <form class="album-edit-form">
+              <input type="text" name="title" placeholder="Album title" value="${{escapeHtml(album.title || "")}}">
+              <input type="text" name="cover_media_id" placeholder="Cover media ID (blank to clear)" value="${{escapeHtml(album.cover_media_id || "")}}">
+              <button type="submit">Save Album Metadata</button>
+            </form>
+            <form class="album-append-form" enctype="multipart/form-data">
+              <input type="file" name="file" required multiple>
+              <button type="submit" class="secondary">Append Files To Album</button>
+            </form>
+            <form class="album-order-form">
+              <textarea name="order" placeholder="media_id:position per line">${{escapeHtml(orderValue)}}</textarea>
+              <button type="submit" class="ghost">Reorder</button>
+            </form>
+            <div class="item-list">${{items || '<p class="muted">No items.</p>'}}</div>
+            <button type="button" class="danger album-delete">Delete Album</button>
+          </section>
+        `;
+      }};
+      const refreshAlbums = async () => {{
+        if (!state.user) {{
+          albumsRoot.innerHTML = "";
+          return;
+        }}
+        const albums = await requestJson("/api/v1/user/me/albums");
+        albumsRoot.innerHTML = albums.length ? albums.map(renderAlbum).join("") : '<p class="muted">No owned albums yet.</p>';
+      }};
+
+      document.getElementById("api-key-form").addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        state.apiKey = apiKeyInput.value.trim();
+        state.latestApiKey = null;
+        if (state.apiKey) {{
+          window.localStorage.setItem("imghost_api_key", state.apiKey);
+        }} else {{
+          window.localStorage.removeItem("imghost_api_key");
+        }}
+        await refreshUser();
+        showMessage(state.user ? "API key accepted." : "Unable to authenticate with that API key.");
+      }});
+      document.getElementById("clear-api-key").addEventListener("click", async () => {{
+        state.apiKey = "";
+        state.latestApiKey = null;
+        apiKeyInput.value = "";
+        window.localStorage.removeItem("imghost_api_key");
+        await refreshUser();
+        showMessage("API key cleared.");
+      }});
+      document.getElementById("refresh-account").addEventListener("click", refreshUser);
+      document.getElementById("generate-api-key").addEventListener("click", async () => {{
+        try {{
+          const data = await requestJson("/api/v1/user/me/api-key", {{ method: "POST" }});
+          state.latestApiKey = data.api_key;
+          state.apiKey = data.api_key;
+          apiKeyInput.value = data.api_key;
+          window.localStorage.setItem("imghost_api_key", data.api_key);
+          apiKeyOutput.classList.remove("hidden");
+          apiKeyOutput.textContent = JSON.stringify(data, null, 2);
+          await refreshUser();
+          showMessage("API key generated and stored in the dashboard.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      document.getElementById("download-sharex").addEventListener("click", async () => {{
+        const apiKey = state.apiKey || state.latestApiKey;
+        if (!apiKey) {{
+          showMessage("Generate or paste an API key first.");
+          return;
+        }}
+        try {{
+          const response = await fetch("/api/v1/user/me/sharex-config", {{
+            headers: {{ Authorization: `Bearer ${{apiKey}}` }},
+          }});
+          const data = await response.json().catch(() => ({{}}));
+          if (!response.ok) {{
+            throw new Error(data.detail || "ShareX export failed.");
+          }}
+          const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: "application/json" }});
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = "imghost.sxcu";
+          anchor.click();
+          URL.revokeObjectURL(url);
+          showMessage("ShareX config downloaded.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      document.getElementById("change-password-form").addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        try {{
+          const payload = formToObject(event.currentTarget);
+          await requestJson("/api/v1/user/me/password", {{
+            method: "PATCH",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify(payload),
+          }});
+          event.currentTarget.reset();
+          showMessage("Password updated.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      document.getElementById("delete-account-form").addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        if (!window.confirm("Delete this account and all owned content?")) {{
+          return;
+        }}
+        try {{
+          await requestJson("/api/v1/user/me", {{ method: "DELETE" }});
+          state.user = null;
+          renderState();
+          showMessage("Account deleted.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      document.getElementById("dashboard-upload-form").addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        try {{
+          const response = await fetch("/api/v1/upload", {{
+            method: "POST",
+            headers: authHeaders(),
+            body: new FormData(event.currentTarget),
+          }});
+          const data = await response.json().catch(() => ({{}}));
+          if (!response.ok) {{
+            throw new Error(data.detail || "Upload failed.");
+          }}
+          uploadResult.classList.remove("hidden");
+          uploadResult.textContent = JSON.stringify(data, null, 2);
+          event.currentTarget.reset();
+          await refreshAlbums();
+          showMessage("Upload succeeded.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      document.getElementById("refresh-albums").addEventListener("click", refreshAlbums);
+      albumsRoot.addEventListener("submit", async (event) => {{
+        const card = event.target.closest("[data-album-id]");
+        if (!card) return;
+        const albumId = card.dataset.albumId;
+        event.preventDefault();
+        try {{
+          if (event.target.matches(".album-edit-form")) {{
+            const form = new FormData(event.target);
+            await requestJson(`/api/v1/album/${{albumId}}`, {{
+              method: "PATCH",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{
+                title: form.get("title") || null,
+                cover_media_id: form.get("cover_media_id") || null,
+              }}),
+            }});
+            showMessage("Album metadata updated.");
+          }} else if (event.target.matches(".album-append-form")) {{
+            const form = new FormData(event.target);
+            form.append("album_id", albumId);
+            const response = await fetch("/api/v1/upload", {{
+              method: "POST",
+              headers: authHeaders(),
+              body: form,
+            }});
+            const data = await response.json().catch(() => ({{}}));
+            if (!response.ok) {{
+              throw new Error(data.detail || "Append upload failed.");
+            }}
+            showMessage("Files appended to album.");
+          }} else if (event.target.matches(".album-order-form")) {{
+            const raw = new FormData(event.target).get("order");
+            const payload = String(raw || "").split("\\n").map((line) => line.trim()).filter(Boolean).map((line) => {{
+              const [media_id, position] = line.split(":");
+              return {{ media_id: media_id.trim(), position: Number(position.trim()) }};
+            }});
+            await requestJson(`/api/v1/album/${{albumId}}/order`, {{
+              method: "PATCH",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify(payload),
+            }});
+            showMessage("Album order updated.");
+          }}
+          await refreshAlbums();
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      albumsRoot.addEventListener("click", async (event) => {{
+        const card = event.target.closest("[data-album-id]");
+        if (!card) return;
+        const albumId = card.dataset.albumId;
+        try {{
+          if (event.target.matches(".album-delete")) {{
+            if (!window.confirm(`Delete album ${{albumId}}?`)) return;
+            await requestJson(`/api/v1/album/${{albumId}}`, {{ method: "DELETE" }});
+            showMessage("Album deleted.");
+            await refreshAlbums();
+          }} else if (event.target.matches(".media-delete")) {{
+            const mediaId = event.target.dataset.mediaId;
+            if (!window.confirm(`Delete media ${{mediaId}}?`)) return;
+            await requestJson(`/api/v1/media/${{mediaId}}`, {{ method: "DELETE" }});
+            showMessage("Media deleted.");
+            await refreshAlbums();
+          }}
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+
+      refreshUser();
+    </script>
+    """
+    return page_shell("Dashboard", body, user=user, script=script)
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request) -> str:
+    state = get_state(request)
+    user = await authenticated_user(request, required=False)
+    session_user = await state.uploads.get_current_user_summary(user) if user else None
+    bootstrap = json.dumps({"session_user": session_user})
+    body = """
+      <p id="flash" class="flash"></p>
+      <section class="grid">
+        <section class="card">
+          <h1>Admin Dashboard</h1>
+          <p>Basic browser UI over the admin APIs: users, albums, runtime config, stats, and audit log.</p>
+        </section>
+        <section class="card">
+          <h2>API Key Mode</h2>
+          <form id="admin-api-key-form">
+            <input id="admin-api-key-input" type="text" placeholder="Admin API key">
+            <div class="row">
+              <button type="submit">Use Admin API Key</button>
+              <button id="admin-clear-api-key" type="button" class="secondary">Clear</button>
+            </div>
+          </form>
+        </section>
+      </section>
+      <section id="admin-locked" class="card">
+        <h2>Admin Access Needed</h2>
+        <p>Sign in as an admin or provide an admin API key.</p>
+      </section>
+      <section id="admin-panel" class="stack hidden">
+        <section class="grid">
+          <section class="card">
+            <h2>Create User</h2>
+            <form id="admin-create-user-form">
+              <input type="text" name="username" placeholder="Username" required>
+              <input type="email" name="email" placeholder="Email" required>
+              <input type="password" name="password" placeholder="Password (optional)">
+              <div class="row">
+                <label class="check"><input type="checkbox" name="is_admin"> Admin</label>
+                <input type="number" name="quota_bytes" placeholder="Quota bytes">
+                <input type="number" name="rate_limit_rpm" placeholder="RPM override">
+                <input type="number" name="rate_limit_bph" placeholder="BPH override">
+              </div>
+              <button type="submit">Create User</button>
+            </form>
+          </section>
+          <section class="card">
+            <div class="row">
+              <h2>Stats</h2>
+              <button id="refresh-admin-stats" type="button">Refresh Stats</button>
+            </div>
+            <pre id="admin-stats" class="result"></pre>
+          </section>
+        </section>
+        <section class="card">
+          <div class="row">
+            <h2>Runtime Config</h2>
+            <button id="refresh-admin-config" type="button">Refresh Config</button>
+          </div>
+          <form id="admin-config-form"></form>
+          <pre id="admin-config-json" class="result"></pre>
+        </section>
+        <section class="card">
+          <div class="row">
+            <h2>Users</h2>
+            <button id="refresh-admin-users" type="button">Refresh Users</button>
+          </div>
+          <div id="admin-users" class="stack"></div>
+        </section>
+        <section class="card">
+          <div class="row">
+            <h2>Albums</h2>
+            <button id="refresh-admin-albums" type="button">Refresh Albums</button>
+          </div>
+          <div id="admin-albums" class="stack"></div>
+        </section>
+        <section class="card">
+          <h2>Audit Log</h2>
+          <form id="admin-audit-form">
+            <div class="row">
+              <input type="text" name="event_type" placeholder="event_type">
+              <input type="text" name="actor_id" placeholder="actor_id">
+              <input type="text" name="user_id" placeholder="user_id">
+              <input type="text" name="correlation_id" placeholder="correlation_id">
+            </div>
+            <div class="row">
+              <input type="datetime-local" name="after">
+              <input type="datetime-local" name="before">
+              <input type="number" name="limit" placeholder="limit" value="100">
+              <input type="number" name="offset" placeholder="offset" value="0">
+            </div>
+            <button type="submit">Query Audit</button>
+          </form>
+          <pre id="admin-audit" class="result"></pre>
+        </section>
+      </section>
+    """
+    script = f"""
+    <script>
+      const boot = {bootstrap};
+      const state = {{
+        apiKey: window.localStorage.getItem("imghost_admin_api_key") || "",
+        user: boot.session_user,
+        config: null,
+      }};
+      const flash = document.getElementById("flash");
+      const lockPanel = document.getElementById("admin-locked");
+      const adminPanel = document.getElementById("admin-panel");
+      const usersRoot = document.getElementById("admin-users");
+      const albumsRoot = document.getElementById("admin-albums");
+      const statsRoot = document.getElementById("admin-stats");
+      const auditRoot = document.getElementById("admin-audit");
+      const configForm = document.getElementById("admin-config-form");
+      const configJson = document.getElementById("admin-config-json");
+      const apiKeyInput = document.getElementById("admin-api-key-input");
+      apiKeyInput.value = state.apiKey;
+
+      const showMessage = (message) => {{ flash.textContent = message || ""; }};
+      const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+      const authHeaders = (headers = {{}}) => {{
+        const resolved = new Headers(headers);
+        if (state.apiKey) resolved.set("Authorization", `Bearer ${{state.apiKey}}`);
+        return resolved;
+      }};
+      const requestJson = async (url, options = {{}}) => {{
+        const response = await fetch(url, {{ ...options, headers: authHeaders(options.headers || {{}}) }});
+        const data = await response.json().catch(() => ({{}}));
+        if (!response.ok) throw new Error(data.detail || `Request failed (${{response.status}}).`);
+        return data;
+      }};
+      const parseOptionalNumber = (value) => value === "" ? null : Number(value);
+      const parseOptionalDate = (value) => value === "" ? null : new Date(value).toISOString();
+      const renderAccess = () => {{
+        const isAdmin = !!(state.user && state.user.is_admin);
+        lockPanel.classList.toggle("hidden", isAdmin);
+        adminPanel.classList.toggle("hidden", !isAdmin);
+      }};
+      const refreshContext = async () => {{
+        try {{
+          state.user = await requestJson("/api/v1/user/me");
+        }} catch {{
+          state.user = null;
+        }}
+        renderAccess();
+        if (state.user && state.user.is_admin) {{
+          await Promise.all([refreshUsers(), refreshAlbums(), refreshStats(), refreshConfig(), refreshAudit()]);
+        }}
+      }};
+      const refreshUsers = async () => {{
+        const users = await requestJson("/api/v1/admin/users");
+        usersRoot.innerHTML = users.map((user) => `
+          <section class="user-card" data-user-id="${{user.id}}">
+            <h3>${{escapeHtml(user.username)}}${{user.is_admin ? " (admin)" : ""}}</h3>
+            <p class="hint">${{escapeHtml(user.email)}} · suspended=${{user.suspended}} · storage=${{user.storage_used_bytes}} · media=${{user.media_count}}</p>
+            <form class="admin-user-patch-form">
+              <div class="row">
+                <label class="check"><input type="checkbox" name="suspended" ${{user.suspended ? "checked" : ""}}> Suspended</label>
+                <input type="number" name="quota_bytes" placeholder="Quota bytes" value="${{user.quota_bytes ?? ""}}">
+                <input type="number" name="rate_limit_rpm" placeholder="RPM override" value="${{user.rate_limit_rpm ?? ""}}">
+                <input type="number" name="rate_limit_bph" placeholder="BPH override" value="${{user.rate_limit_bph ?? ""}}">
+              </div>
+              <button type="submit">Patch User</button>
+            </form>
+            <form class="admin-user-reset-form">
+              <input type="password" name="new_password" placeholder="New password" required>
+              <button type="submit" class="secondary">Reset Password</button>
+            </form>
+            <button type="button" class="danger admin-user-delete">Delete User</button>
+          </section>
+        `).join("");
+      }};
+      const refreshAlbums = async () => {{
+        const albums = await requestJson("/api/v1/admin/albums");
+        albumsRoot.innerHTML = albums.map((album) => `
+          <section class="admin-card" data-album-id="${{album.id}}">
+            <h3>${{escapeHtml(album.title || "Untitled album")}}</h3>
+            <p class="hint">album=${{album.id}} · owner=${{escapeHtml(album.owner_username || "anonymous")}} · items=${{album.item_count}}</p>
+            <form class="admin-album-patch-form">
+              <input type="datetime-local" name="expires_at" value="${{album.expires_at ? album.expires_at.slice(0, 16) : ""}}">
+              <button type="submit">Set/Clear Expiry</button>
+            </form>
+            <button type="button" class="danger admin-album-delete">Delete Album</button>
+          </section>
+        `).join("");
+      }};
+      const refreshStats = async () => {{
+        statsRoot.textContent = JSON.stringify(await requestJson("/api/v1/admin/stats"), null, 2);
+      }};
+      const renderConfigForm = (config) => {{
+        configForm.innerHTML = Object.values(config).map((entry) => {{
+          const isBool = typeof entry.value === "boolean";
+          return `
+            <label>
+              <strong>${{escapeHtml(entry.key)}}</strong> <span class="hint">source=${{escapeHtml(entry.source)}}${{entry.locked ? " · locked" : ""}}</span>
+              ${{
+                isBool
+                  ? `<select name="${{entry.key}}" ${{entry.locked ? "disabled" : ""}}>
+                       <option value="true" ${{entry.value ? "selected" : ""}}>true</option>
+                       <option value="false" ${{!entry.value ? "selected" : ""}}>false</option>
+                     </select>`
+                  : `<input type="number" name="${{entry.key}}" value="${{entry.value}}" ${{entry.locked ? "disabled" : ""}}>`
+              }}
+            </label>
+          `;
+        }}).join("") + '<button type="submit">Save Config</button>';
+      }};
+      const refreshConfig = async () => {{
+        state.config = await requestJson("/api/v1/admin/config");
+        renderConfigForm(state.config);
+        configJson.textContent = JSON.stringify(state.config, null, 2);
+      }};
+      const refreshAudit = async () => {{
+        const params = new URLSearchParams();
+        params.set("limit", "100");
+        auditRoot.textContent = JSON.stringify(await requestJson(`/api/v1/admin/audit?${{params.toString()}}`), null, 2);
+      }};
+
+      document.getElementById("admin-api-key-form").addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        state.apiKey = apiKeyInput.value.trim();
+        if (state.apiKey) window.localStorage.setItem("imghost_admin_api_key", state.apiKey);
+        else window.localStorage.removeItem("imghost_admin_api_key");
+        await refreshContext();
+        showMessage(state.user && state.user.is_admin ? "Admin authentication active." : "Admin authentication failed.");
+      }});
+      document.getElementById("admin-clear-api-key").addEventListener("click", async () => {{
+        state.apiKey = "";
+        apiKeyInput.value = "";
+        window.localStorage.removeItem("imghost_admin_api_key");
+        await refreshContext();
+        showMessage("Admin API key cleared.");
+      }});
+      document.getElementById("admin-create-user-form").addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        try {{
+          const form = new FormData(event.currentTarget);
+          await requestJson("/api/v1/admin/users", {{
+            method: "POST",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{
+              username: form.get("username"),
+              email: form.get("email"),
+              password: form.get("password") || null,
+              is_admin: form.get("is_admin") === "on",
+              quota_bytes: parseOptionalNumber(form.get("quota_bytes")),
+              rate_limit_rpm: parseOptionalNumber(form.get("rate_limit_rpm")),
+              rate_limit_bph: parseOptionalNumber(form.get("rate_limit_bph")),
+            }}),
+          }});
+          event.currentTarget.reset();
+          await refreshUsers();
+          showMessage("Admin user created.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      document.getElementById("refresh-admin-users").addEventListener("click", refreshUsers);
+      document.getElementById("refresh-admin-albums").addEventListener("click", refreshAlbums);
+      document.getElementById("refresh-admin-stats").addEventListener("click", refreshStats);
+      document.getElementById("refresh-admin-config").addEventListener("click", refreshConfig);
+      configForm.addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        try {{
+          const form = new FormData(event.currentTarget);
+          const payload = {{}};
+          for (const [key, value] of form.entries()) {{
+            const current = state.config[key];
+            payload[key] = typeof current.value === "boolean" ? value === "true" : Number(value);
+          }}
+          await requestJson("/api/v1/admin/config", {{
+            method: "PATCH",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify(payload),
+          }});
+          await refreshConfig();
+          showMessage("Runtime config updated.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      usersRoot.addEventListener("submit", async (event) => {{
+        const card = event.target.closest("[data-user-id]");
+        if (!card) return;
+        event.preventDefault();
+        const userId = card.dataset.userId;
+        try {{
+          if (event.target.matches(".admin-user-patch-form")) {{
+            const form = new FormData(event.target);
+            await requestJson(`/api/v1/admin/users/${{userId}}`, {{
+              method: "PATCH",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{
+                suspended: form.get("suspended") === "on",
+                quota_bytes: parseOptionalNumber(form.get("quota_bytes")),
+                rate_limit_rpm: parseOptionalNumber(form.get("rate_limit_rpm")),
+                rate_limit_bph: parseOptionalNumber(form.get("rate_limit_bph")),
+              }}),
+            }});
+            showMessage("User updated.");
+          }} else if (event.target.matches(".admin-user-reset-form")) {{
+            const form = new FormData(event.target);
+            await requestJson(`/api/v1/admin/users/${{userId}}/reset-password`, {{
+              method: "POST",
+              headers: {{ "Content-Type": "application/json" }},
+              body: JSON.stringify({{ new_password: form.get("new_password") }}),
+            }});
+            showMessage("Password reset.");
+          }}
+          await refreshUsers();
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      usersRoot.addEventListener("click", async (event) => {{
+        const card = event.target.closest("[data-user-id]");
+        if (!card || !event.target.matches(".admin-user-delete")) return;
+        const userId = card.dataset.userId;
+        if (!window.confirm(`Delete user ${{userId}}?`)) return;
+        try {{
+          await requestJson(`/api/v1/admin/users/${{userId}}`, {{ method: "DELETE" }});
+          await refreshUsers();
+          showMessage("User deleted.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      albumsRoot.addEventListener("submit", async (event) => {{
+        const card = event.target.closest("[data-album-id]");
+        if (!card) return;
+        event.preventDefault();
+        const albumId = card.dataset.albumId;
+        try {{
+          const form = new FormData(event.target);
+          await requestJson(`/api/v1/admin/albums/${{albumId}}`, {{
+            method: "PATCH",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify({{ expires_at: parseOptionalDate(form.get("expires_at")) }}),
+          }});
+          await refreshAlbums();
+          showMessage("Album admin metadata updated.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      albumsRoot.addEventListener("click", async (event) => {{
+        const card = event.target.closest("[data-album-id]");
+        if (!card || !event.target.matches(".admin-album-delete")) return;
+        const albumId = card.dataset.albumId;
+        if (!window.confirm(`Delete album ${{albumId}}?`)) return;
+        try {{
+          await requestJson(`/api/v1/admin/albums/${{albumId}}`, {{ method: "DELETE" }});
+          await refreshAlbums();
+          showMessage("Album deleted.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+      document.getElementById("admin-audit-form").addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        try {{
+          const form = new FormData(event.currentTarget);
+          const params = new URLSearchParams();
+          for (const [key, value] of form.entries()) {{
+            if (value !== "") params.set(key, value);
+          }}
+          auditRoot.textContent = JSON.stringify(await requestJson(`/api/v1/admin/audit?${{params.toString()}}`), null, 2);
+          showMessage("Audit log refreshed.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+
+      refreshContext();
+    </script>
+    """
+    return page_shell("Admin", body, user=user, script=script)
+
+
+@app.get("/album-tools", response_class=HTMLResponse)
+async def album_tools_page(request: Request) -> str:
+    user = await authenticated_user(request, required=False)
+    body = """
+      <p id="flash" class="flash"></p>
+      <section class="grid">
+        <section class="card">
+          <h1>Album Tools</h1>
+          <p>Manual tester for anonymous and public album operations. Load any album by ID, optionally provide a delete token, then edit metadata, reorder items, delete media, download the zip, or delete the album.</p>
+        </section>
+        <section class="card">
+          <h2>Load Album</h2>
+          <form id="album-tools-load-form">
+            <input type="text" name="album_id" placeholder="Album ID" required>
+            <input type="text" name="delete_token" placeholder="Delete token (optional, required for anonymous mutations)">
+            <button type="submit">Load Album</button>
+          </form>
+        </section>
+      </section>
+      <section class="card">
+        <div id="album-tools-result" class="stack"></div>
+      </section>
+    """
+    script = """
+    <script>
+      const flash = document.getElementById("flash");
+      const root = document.getElementById("album-tools-result");
+      let currentAccess = { albumId: null, deleteToken: "" };
+      const showMessage = (message) => { flash.textContent = message || ""; };
+      const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+      const requestJson = async (url, options = {}) => {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || `Request failed (${response.status}).`);
+        return data;
+      };
+      const withToken = (path) => {
+        if (!currentAccess.deleteToken) return path;
+        const glue = path.includes("?") ? "&" : "?";
+        return `${path}${glue}delete_token=${encodeURIComponent(currentAccess.deleteToken)}`;
+      };
+      const renderAlbum = (album) => {
+        const orderValue = album.items.map((item) => `${item.id}:${item.position}`).join("\\n");
+        root.innerHTML = `
+          <section class="album-card" data-album-id="${album.id}">
+            <h2>${escapeHtml(album.title || "Untitled album")}</h2>
+            <p class="hint">album=${escapeHtml(album.id)} · <a class="inline-link" href="/a/${album.id}" target="_blank">public page</a> · <a class="inline-link" href="/api/v1/album/${album.id}/zip" target="_blank">zip</a></p>
+            <form class="album-edit-form">
+              <input type="text" name="title" placeholder="Album title" value="${escapeHtml(album.title || "")}">
+              <input type="text" name="cover_media_id" placeholder="Cover media ID (blank to clear)" value="${escapeHtml(album.cover_media_id || "")}">
+              <button type="submit">Save Album Metadata</button>
+            </form>
+            <form class="album-order-form">
+              <textarea name="order">${escapeHtml(orderValue)}</textarea>
+              <button type="submit" class="secondary">Reorder Album</button>
+            </form>
+            <div class="item-list">
+              ${album.items.map((item) => `
+                <div class="item">
+                  <p><strong>${escapeHtml(item.filename)}</strong> · ${escapeHtml(item.id)}</p>
+                  <p class="hint"><a class="inline-link" href="${item.media_url}" target="_blank">media</a> · <a class="inline-link" href="${item.thumb_url}" target="_blank">thumb</a></p>
+                  <button type="button" class="danger media-delete" data-media-id="${item.id}">Delete Media</button>
+                </div>
+              `).join("")}
+            </div>
+            <button type="button" class="danger album-delete">Delete Album</button>
+          </section>
+        `;
+      };
+      const loadAlbum = async () => {
+        const album = await requestJson(`/api/v1/album/${currentAccess.albumId}`);
+        renderAlbum(album);
+      };
+      document.getElementById("album-tools-load-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        currentAccess = {
+          albumId: String(form.get("album_id")).trim(),
+          deleteToken: String(form.get("delete_token") || "").trim(),
+        };
+        try {
+          await loadAlbum();
+          showMessage("Album loaded.");
+        } catch (error) {
+          root.innerHTML = "";
+          showMessage(error.message);
+        }
+      });
+      root.addEventListener("submit", async (event) => {
+        const albumId = currentAccess.albumId;
+        if (!albumId) return;
+        event.preventDefault();
+        try {
+          if (event.target.matches(".album-edit-form")) {
+            const form = new FormData(event.target);
+            await requestJson(withToken(`/api/v1/album/${albumId}`), {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                title: form.get("title") || null,
+                cover_media_id: form.get("cover_media_id") || null,
+              }),
+            });
+            showMessage("Album metadata updated.");
+          } else if (event.target.matches(".album-order-form")) {
+            const raw = new FormData(event.target).get("order");
+            const payload = String(raw || "").split("\\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+              const [media_id, position] = line.split(":");
+              return { media_id: media_id.trim(), position: Number(position.trim()) };
+            });
+            await requestJson(withToken(`/api/v1/album/${albumId}/order`), {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            showMessage("Album order updated.");
+          }
+          await loadAlbum();
+        } catch (error) {
+          showMessage(error.message);
+        }
+      });
+      root.addEventListener("click", async (event) => {
+        const albumId = currentAccess.albumId;
+        if (!albumId) return;
+        try {
+          if (event.target.matches(".album-delete")) {
+            if (!window.confirm(`Delete album ${albumId}?`)) return;
+            await requestJson(withToken(`/api/v1/album/${albumId}`), { method: "DELETE" });
+            root.innerHTML = "";
+            showMessage("Album deleted.");
+          } else if (event.target.matches(".media-delete")) {
+            const mediaId = event.target.dataset.mediaId;
+            if (!window.confirm(`Delete media ${mediaId}?`)) return;
+            await requestJson(withToken(`/api/v1/media/${mediaId}`), { method: "DELETE" });
+            await loadAlbum();
+            showMessage("Media deleted.");
+          }
+        } catch (error) {
+          showMessage(error.message);
+        }
+      });
+    </script>
+    """
+    return page_shell("Album Tools", body, user=user, script=script)
 
 
 @app.post("/api/v1/upload")
@@ -645,16 +1629,12 @@ async def upload(
     title: str | None = Form(default=None),
 ) -> JSONResponse:
     state = get_state(request)
+    base_url = public_base_url(request, state.settings)
     cid = correlation_id(request)
     user = await authenticated_user(request, required=False)
     if user is None and not await state.runtime_config.get_value("anon_upload_enabled"):
         raise HTTPException(status_code=403, detail="Anonymous uploads are disabled.")
     actor = CurrentActor(user=user, source="api" if user else "web")
-    if user is not None:
-        if len(file) != 1:
-            raise HTTPException(status_code=400, detail="API key uploads must contain exactly one file.")
-        if album_id is not None:
-            raise HTTPException(status_code=400, detail="API key uploads always create a new album.")
     results = []
     active_album_id = album_id
     for item in file:
@@ -672,17 +1652,17 @@ async def upload(
     primary = results[0]
     payload = {
         "album_id": primary.album.id,
-        "album_url": f"{state.settings.base_url}/a/{primary.album.id}",
+        "album_url": f"{base_url}/a/{primary.album.id}",
         "media_id": primary.media.id,
-        "media_url": media_url(state.settings.base_url, primary.media.id, primary.media.format),
-        "thumb_url": thumb_url(state.settings.base_url, primary.media.id, primary.media.format),
-        "delete_url": album_delete_url(state.settings.base_url, primary.album),
+        "media_url": media_url(base_url, primary.media.id, primary.media.format),
+        "thumb_url": thumb_url(base_url, primary.media.id, primary.media.format),
+        "delete_url": album_delete_url(base_url, primary.album),
         "expires_at": primary.album.expires_at.isoformat() if primary.album.expires_at else None,
         "items": [
             {
                 "media_id": result.media.id,
-                "media_url": media_url(state.settings.base_url, result.media.id, result.media.format),
-                "thumb_url": thumb_url(state.settings.base_url, result.media.id, thumb_format(result.media)),
+                "media_url": media_url(base_url, result.media.id, result.media.format),
+                "thumb_url": thumb_url(base_url, result.media.id, thumb_format(result.media)),
                 "thumb_status": result.media.thumb_status,
             }
             for result in results
@@ -755,7 +1735,7 @@ async def get_album(request: Request, album_id: str) -> JSONResponse:
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
     items = await state.repository.list_album_media(album_id)
-    return JSONResponse(album_to_payload(state.settings.base_url, album, items))
+    return JSONResponse(album_to_payload(public_base_url(request, state.settings), album, items))
 
 
 @app.get("/a/{album_id}", response_class=HTMLResponse)
@@ -763,6 +1743,7 @@ async def album_page(request: Request, album_id: str) -> str:
     if not is_valid_id(album_id, ALBUM_ID_LENGTH):
         raise HTTPException(status_code=404)
     state = get_state(request)
+    base_url = public_base_url(request, state.settings)
     album = await state.repository.get_album(album_id)
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
@@ -771,11 +1752,11 @@ async def album_page(request: Request, album_id: str) -> str:
     compat_warnings = [warning for warning in dict.fromkeys(compatibility_warning(item) for item in items) if warning]
     cards = []
     for item in items:
-        preview_url = thumb_url(state.settings.base_url, item.id, item.format)
-        preview_url = thumb_url(state.settings.base_url, item.id, thumb_format(item))
+        preview_url = thumb_url(base_url, item.id, item.format)
+        preview_url = thumb_url(base_url, item.id, thumb_format(item))
         if item.media_type == "video":
             poster_attr = f' poster="{preview_url}"' if item.thumb_status == "done" else ""
-            media_tag = f'<video controls preload="metadata" src="{media_url(state.settings.base_url, item.id, item.format)}"{poster_attr}></video>'
+            media_tag = f'<video controls preload="metadata" src="{media_url(base_url, item.id, item.format)}"{poster_attr}></video>'
         else:
             if item.thumb_status == "done":
                 media_tag = f'<img src="{preview_url}" alt="{item.filename_orig}">'
@@ -787,7 +1768,7 @@ async def album_page(request: Request, album_id: str) -> str:
             f"""
             <article class="item">
               {media_tag}
-              <input type="text" readonly value="{media_url(state.settings.base_url, item.id, item.format)}">
+              <input type="text" readonly value="{media_url(base_url, item.id, item.format)}">
             </article>
             """
         )
@@ -858,6 +1839,7 @@ async def album_page(request: Request, album_id: str) -> str:
 @app.get("/u/{username}", response_class=HTMLResponse)
 async def user_album_list_page(request: Request, username: str) -> str:
     state = get_state(request)
+    base_url = public_base_url(request, state.settings)
     user, albums = await state.uploads.list_public_albums_for_username(username)
 
     cards = []
@@ -865,7 +1847,7 @@ async def user_album_list_page(request: Request, username: str) -> str:
         if album["cover_media_id"] is not None and album["cover_thumb_format"] is not None:
             if album["cover_thumb_status"] == "done":
                 preview = (
-                    f'<img src="{thumb_url(state.settings.base_url, album["cover_media_id"], album["cover_thumb_format"])}" '
+                    f'<img src="{thumb_url(base_url, album["cover_media_id"], album["cover_thumb_format"])}" '
                     f'alt="{escape(album["title"] or "Untitled album")}">'
                 )
             else:
@@ -1019,6 +2001,20 @@ async def get_current_user(request: Request) -> JSONResponse:
     return JSONResponse(summary, headers={"X-Correlation-ID": correlation_id(request)})
 
 
+@app.get("/api/v1/user/me/albums")
+async def get_current_user_albums(request: Request) -> JSONResponse:
+    state = get_state(request)
+    base_url = public_base_url(request, state.settings)
+    user = await authenticated_user(request, required=True)
+    albums = await state.repository.list_user_albums(user.id)
+    albums.sort(key=lambda album: album.updated_at, reverse=True)
+    payload = []
+    for album in albums:
+        items = await state.repository.list_album_media(album.id)
+        payload.append(album_to_payload(base_url, album, items))
+    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
+
+
 @app.post("/api/v1/user/me/api-key")
 async def regenerate_api_key(request: Request) -> JSONResponse:
     state = get_state(request)
@@ -1054,12 +2050,13 @@ async def download_sharex_config(request: Request) -> Response:
     if principal.raw_api_key is None:
         raise HTTPException(status_code=400, detail="ShareX config download requires API key authentication.")
     state = get_state(request)
+    base_url = public_base_url(request, state.settings)
     payload = {
         "Version": "14.1.0",
         "Name": "imghost",
         "DestinationType": "ImageUploader, FileUploader",
         "RequestMethod": "POST",
-        "RequestURL": f"{state.settings.base_url}/api/v1/upload",
+        "RequestURL": f"{base_url}/api/v1/upload",
         "Headers": {
             "Authorization": f"Bearer {principal.raw_api_key}",
         },
@@ -1300,7 +2297,10 @@ async def admin_patch_album(request: Request, album_id: str, payload: AdminAlbum
         actor_id=admin.id,
     )
     items = await state.repository.list_album_media(album_id)
-    return JSONResponse(album_to_payload(state.settings.base_url, updated, items), headers={"X-Correlation-ID": cid})
+    return JSONResponse(
+        album_to_payload(public_base_url(request, state.settings), updated, items),
+        headers={"X-Correlation-ID": cid},
+    )
 
 
 @app.delete("/api/v1/admin/albums/{album_id}")
@@ -1340,14 +2340,19 @@ async def patch_album(
         raise HTTPException(status_code=404)
     state = get_state(request)
     cid = correlation_id(request)
+    user = await authenticated_user(request, required=False)
     album, items = await state.uploads.update_album(
         album_id,
         delete_token,
         cid,
+        actor_user=user,
         title=payload.title if "title" in payload.model_fields_set else UNSET,
         cover_media_id=payload.cover_media_id if "cover_media_id" in payload.model_fields_set else UNSET,
     )
-    return JSONResponse(album_to_payload(state.settings.base_url, album, items), headers={"X-Correlation-ID": cid})
+    return JSONResponse(
+        album_to_payload(public_base_url(request, state.settings), album, items),
+        headers={"X-Correlation-ID": cid},
+    )
 
 
 @app.patch("/api/v1/album/{album_id}/order")
@@ -1361,13 +2366,18 @@ async def patch_album_order(
         raise HTTPException(status_code=404)
     state = get_state(request)
     cid = correlation_id(request)
+    user = await authenticated_user(request, required=False)
     album, media_items = await state.uploads.reorder_album(
         album_id,
         delete_token,
         [(item.media_id, item.position) for item in items],
         cid,
+        actor_user=user,
     )
-    return JSONResponse(album_to_payload(state.settings.base_url, album, media_items), headers={"X-Correlation-ID": cid})
+    return JSONResponse(
+        album_to_payload(public_base_url(request, state.settings), album, media_items),
+        headers={"X-Correlation-ID": cid},
+    )
 
 
 @app.delete("/api/v1/media/{media_id}")
@@ -1376,7 +2386,8 @@ async def delete_media(request: Request, media_id: str, delete_token: str | None
         raise HTTPException(status_code=404)
     state = get_state(request)
     cid = correlation_id(request)
-    result = await state.uploads.delete_media(media_id, delete_token, cid)
+    user = await authenticated_user(request, required=False)
+    result = await state.uploads.delete_media(media_id, delete_token, cid, actor_user=user)
     return JSONResponse(
         {
             "deleted": True,

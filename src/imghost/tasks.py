@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from .processors import ProcessorRegistry
 from .repositories import PostgresRepository
-from .storage import LocalFilesystemBackend
+from .storage import StorageBackend
 
 TaskHandler = Callable[..., Awaitable[None]]
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class TaskContext:
     repository: PostgresRepository
-    storage: LocalFilesystemBackend
+    storage: StorageBackend
     processors: ProcessorRegistry
 
 

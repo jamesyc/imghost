@@ -2,6 +2,7 @@ import asyncio
 import subprocess
 from io import BytesIO
 import json
+from time import monotonic, sleep
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -25,6 +26,17 @@ def animated_gif_bytes(size: tuple[int, int] = (24, 24), frame_count: int = 2) -
     return output.getvalue()
 
 
+def wait_for_thumbnail(client: TestClient, media_id: str, *, suffix: str = "jpg", timeout: float = 2.0) -> None:
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        response = client.get(f"/t/{media_id}.{suffix}")
+        if response.status_code == 200:
+            return
+        assert response.status_code == 202
+        sleep(0.02)
+    raise AssertionError(f"thumbnail for {media_id} was not ready within {timeout} seconds")
+
+
 def test_svg_upload_sanitizes_original_and_generates_thumbnail(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -46,6 +58,7 @@ def test_svg_upload_sanitizes_original_and_generates_thumbnail(tmp_path, monkeyp
         assert b"onload=" not in original.content
         assert b"https://example.com" not in original.content
 
+        wait_for_thumbnail(client, media_id)
         thumb = client.get(f"/t/{media_id}.jpg")
         assert thumb.status_code == 200
         assert thumb.headers["content-type"] == "image/jpeg"

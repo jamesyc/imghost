@@ -17,6 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     prune_parser.add_argument("--dry-run", action="store_true")
 
     subparsers.add_parser("retry-thumbnails")
+    subparsers.add_parser("init-storage")
 
     create_user = subparsers.add_parser("create-user")
     create_user.add_argument("--username", required=True)
@@ -56,6 +57,11 @@ async def run_cli(argv: list[str] | None = None) -> int:
             finally:
                 await state.tasks.stop()
             print(f"re-enqueued thumbnails: {enqueued}")
+            return 0
+
+        if args.command == "init-storage":
+            await state.storage.init_storage()
+            print("storage initialized")
             return 0
 
         if args.command == "create-user":
