@@ -1919,17 +1919,17 @@ async def thumbnail_media(request: Request, raw_id: str) -> StreamingResponse:
 
 
 @app.get("/api/v1/album/{album_id}/zip")
-async def download_album_zip(request: Request, album_id: str) -> Response:
+async def download_album_zip(request: Request, album_id: str) -> StreamingResponse:
     if not is_valid_id(album_id, ALBUM_ID_LENGTH):
         raise HTTPException(status_code=404)
     state = get_state(request)
     album = await state.repository.get_album(album_id)
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
-    archive = await state.uploads.build_album_zip(album_id)
+    archive = await state.uploads.stream_album_zip(album_id)
     filename = f"{album.id}.zip"
-    return Response(
-        content=archive,
+    return StreamingResponse(
+        archive,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

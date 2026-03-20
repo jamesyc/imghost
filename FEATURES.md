@@ -1,0 +1,62 @@
+# Features
+
+- Anonymous users can upload one or more files from the home page and receive a newly created public album with shareable album, media, thumbnail, and delete URLs in the response.
+- Authenticated users can upload files into a new owned album that does not expire by default and can later manage that album from the dashboard and API.
+- Authenticated users can append additional files to an existing owned album they already control by supplying the target album ID during upload.
+- Browser-based users can register an account with username, email, password, and immediate session login in one flow without needing a separate verification step.
+- Existing users can sign in with either username or email and receive a browser session cookie that respects the configured secure-cookie behavior.
+- Users can log out from the browser UI and the app will clear the session cookie and return the browser to anonymous behavior.
+- Stale or invalid browser session cookies are now cleared automatically so a user who returns with an old cookie is silently logged out instead of seeing an `Invalid session` JSON error on normal pages.
+- Browser session authentication prefers Redis-backed session state when Redis is healthy but gracefully falls back to signed-cookie validation when Redis is unavailable.
+- API clients can authenticate with bearer API keys and use those keys across upload, dashboard-related API calls, and other authenticated endpoints without relying on browser sessions.
+- Users can generate or rotate their API key and immediately use the new key while the previous value stops working once rotated.
+- Users can change their own password through the authenticated user flow and then log in with the new password.
+- Users can delete their own account and the system will remove their associated content and invalidate their API-key-based access.
+- Admin users can sign in through the normal login flow and the system records an admin-login audit event with the request correlation ID.
+- Admin users can create, list, update, suspend, reset passwords for, and otherwise manage ordinary users through the admin APIs and the corresponding admin browser UI.
+- Admin users can inspect and mutate album state, including expiration-related behavior, through the admin-facing endpoints and utility interface.
+- Anonymous albums are protected by delete tokens so token holders can mutate or delete anonymous albums without a full user account.
+- Owned albums are protected by owner-or-admin authorization rules so authenticated owners and admins can manage them without delete tokens.
+- Album mutation authorization is consistent across title changes, cover-image changes, media reorder operations, media deletion, and whole-album deletion.
+- Public album pages are available as HTML and JSON so the same album can be tested both as a rendered page and as raw API data.
+- Public per-user album listing pages show a user’s public album set and allow testing of pagination-like listing behavior at the browser level.
+- Raw media is served from clean public `/i/{id}.{ext}` URLs while keeping the storage implementation hidden behind the application.
+- Thumbnail media is served from `/t/{id}.{ext}` URLs and reflects the thumbnail state machine that transitions through `pending`, `processing`, `done`, and `failed`.
+- Media serving supports HTTP range requests so large files and videos can be partially requested and validated with standard browser or CLI tooling.
+- Media responses use long-lived cache headers so CDN and browser caching behavior can be tested for stable public assets.
+- Public absolute URLs are generated from trusted request-derived origin information when the forwarded or direct origin matches the configured trusted allowlist.
+- The app supports multiple public domains for one deployment by validating request-derived origins against `TRUSTED_PUBLIC_ORIGINS` and falling back to `BASE_URL` when the origin is missing, malformed, or untrusted.
+- Trusted forwarded origin handling supports common reverse-proxy setups using `X-Forwarded-Proto` and `X-Forwarded-Host` so multi-domain HTTPS proxy behavior can be tested end to end.
+- Image processing covers JPEG, PNG, BMP, GIF, animated WebP, and SVG workflows, including sanitization and thumbnail generation where appropriate.
+- Video processing covers MP4, MOV, and WebM uploads with ffmpeg/ffprobe-based inspection and thumbnail extraction so both media metadata and preview behavior can be exercised.
+- Upload validation rejects empty files and oversized files according to the configured maximum upload size so failure paths can be tested explicitly.
+- Anonymous uploads can be globally enabled or disabled via runtime config, which affects both actual upload behavior and the browser UI messaging shown on the home page.
+- Registration can be enabled or disabled via runtime config, which changes both API behavior and the browser UI state presented to anonymous visitors.
+- Per-user storage quotas and a server-wide storage quota are enforced during upload so you can test quota failures from both user-scoped and global perspectives.
+- Runtime-config-backed upload rate limits exist for anonymous users, authenticated users, and global anonymous traffic, with per-user override support layered on top.
+- Upload rate limiting is Redis-backed when Redis is healthy but gracefully degrades to in-process enforcement when Redis is unavailable, allowing both normal and degraded-mode testing.
+- Thumbnail task dispatch is Redis-backed when Redis is healthy and degrades to in-process async execution when Redis is unavailable, allowing both worker-backed and fallback processing paths to be verified.
+- A dedicated worker container can consume Redis-backed thumbnail jobs independently from the web process so multi-process background execution can be tested under Docker.
+- The web app can run with `TASK_WORKER_ENABLED=false` while the worker runs with `TASK_WORKER_ENABLED=true`, which allows explicit testing of app-versus-worker responsibilities in the Compose stack.
+- Startup thumbnail recovery re-enqueues items that were left pending or processing across restarts so interrupted background work can be validated after service restarts.
+- The `retry-thumbnails` CLI command can re-enqueue failed thumbnails so recovery behavior can be tested without manually editing database state.
+- Storage initialization can be run explicitly through the CLI and is also integrated into the app container startup path when Garage-backed storage is enabled.
+- The storage backend is pluggable between local filesystem mode and Garage/S3-compatible mode, allowing the same application behavior to be tested against both local and object-storage-backed binaries.
+- Docker Compose provides a multi-service local deployment that includes the app, worker, Postgres, Redis, Garage, and Garage bootstrap flow, making it possible to test the intended self-hosted topology in one command.
+- The Docker deployment supports overriding Postgres, Redis, and Garage endpoints so split-host or partially remote infrastructure layouts can be exercised without rewriting the application.
+- ShareX configuration export is available for API-key-authenticated requests and can be tested for correct upload URL, header, and delete URL template generation.
+- ShareX config generation respects trusted forwarded origins so reverse-proxied multi-domain request handling can be tested outside the normal browser pages.
+- Album ZIP download now streams the archive on the fly instead of buffering the entire ZIP in memory first, which means large albums can be tested for lower-memory download behavior and correct archive contents.
+- Streamed ZIP downloads preserve stable archive entry naming, deduplicate conflicting filenames, and still return a normal downloadable ZIP file with the expected attachment header.
+- ZIP downloads remain accessible from the album page, dashboard utility links, and direct API URL patterns, so both UI-driven and direct-link download behavior can be checked.
+- Public album delete URLs support ShareX-style GET deletion behavior for anonymous albums so tokenized deletion flows can be tested without a JavaScript client.
+- Album pages include links to raw media, thumbnails, and ZIP downloads so a manual tester can navigate through the full public artifact surface from one place.
+- The dashboard page supports account-level tooling, authenticated upload flows, owned album inspection, mutation actions, and ShareX export in one browser surface.
+- The admin page exposes utility-style controls for user management, album management, runtime config changes, and audit-log inspection so operational admin behaviors can be tested interactively.
+- The album-tools page provides token-based testing helpers for anonymous and public albums so delete-token workflows can be exercised without writing custom HTTP calls.
+- The app records audit log entries for relevant administrative and account actions and exposes filtered audit retrieval so end-to-end action tracing can be validated through the admin API.
+- Correlation IDs can be supplied by clients and are propagated through relevant flows, which allows E2E request tracing to be tested across normal API and admin interactions.
+- Session cookie `Secure` handling automatically follows `BASE_URL` by default but can be overridden explicitly, so both HTTPS and plain-HTTP development scenarios can be tested.
+- When Redis is restarted or unavailable, the app continues serving requests with degraded but functional behavior rather than failing hard, which makes resilience scenarios part of the E2E feature surface.
+- When request-derived public origins do not match the trusted allowlist, the app falls back to `BASE_URL` instead of reflecting untrusted host information into generated links, which can be tested through reverse-proxy and direct-host mismatch scenarios.
+- The test harness itself now forces a dedicated test database and refuses to run against a non-test database name, which is an operational safety feature worth validating in development workflows even though it is not user-facing.

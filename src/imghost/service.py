@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED
+
+from zipstream import ZipStream
 
 import bcrypt
 from fastapi import HTTPException, UploadFile
@@ -34,6 +36,7 @@ from .rate_limits import RateLimiter
 from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
 from .storage import StorageBackend
+from .zip_streaming import AsyncIterableBridge
 
 MAX_ALBUM_ITEMS = 1000
 UNSET = object()
@@ -524,21 +527,25 @@ class UploadService:
             album_deleted=False,
         )
 
-    async def build_album_zip(self, album_id: str) -> bytes:
+    async def stream_album_zip(self, album_id: str) -> ZipStream:
         album = await self.repository.get_album(album_id)
         if album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
         media_items = await self.repository.list_album_media(album_id)
 
-        from io import BytesIO
-
         seen_names: set[str] = set()
-        archive_buffer = BytesIO()
-        with ZipFile(archive_buffer, mode="w", compression=ZIP_DEFLATED) as archive:
-            for index, media in enumerate(media_items, start=1):
-                filename = self._archive_name(media, index, seen_names)
-                archive.writestr(filename, await self.storage.get_bytes(media.storage_key))
-        return archive_buffer.getvalue()
+        archive = ZipStream(compress_type=ZIP_DEFLATED)
+        for index, media in enumerate(media_items, start=1):
+            filename = self._archive_name(media, index, seen_names)
+            archive.add(self._stream_storage_chunks(media.storage_key), filename)
+        return archive
+
+    def _stream_storage_chunks(self, storage_key: str) -> AsyncIterableBridge:
+        async def factory() -> AsyncIterator[bytes]:
+            stream = await self.storage.get_stream(storage_key)
+            return stream.body
+
+        return AsyncIterableBridge(factory)
 
     async def prune_expired_albums(self, *, dry_run: bool = False) -> PruneResult:
         expired_albums = await self.repository.list_expired_albums(utcnow())

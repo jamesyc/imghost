@@ -135,6 +135,7 @@ def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
 
         zip_response = client.get(f"/api/v1/album/{album_id}/zip")
         assert zip_response.status_code == 200
+        assert zip_response.headers["content-disposition"] == f'attachment; filename="{album_id}.zip"'
         with ZipFile(BytesIO(zip_response.content)) as archive:
             assert archive.namelist() == ["sample.png"]
             assert archive.read("sample.png") == stored_bytes

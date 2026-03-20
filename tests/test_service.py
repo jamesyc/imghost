@@ -1,5 +1,7 @@
 import asyncio
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import bcrypt
 import pytest
@@ -7,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 from imghost.config import Settings
 from imghost.models import Album, User, utcnow
+from imghost.storage import StorageStream
 from imghost.service import LocalLoginInput, PasswordChangeInput, UploadService
 
 
@@ -14,6 +17,8 @@ class DummyRepository:
     def __init__(self, user: User | None = None) -> None:
         self.user = user
         self.updated_user: User | None = None
+        self.album: Album | None = None
+        self.album_media: list[object] = []
 
     async def get_user_by_email(self, email: str) -> User | None:
         if self.user and self.user.email == email:
@@ -30,8 +35,45 @@ class DummyRepository:
         self.user = user
         return user
 
+    async def get_album(self, album_id: str) -> Album | None:
+        if self.album and self.album.id == album_id:
+            return self.album
+        return None
 
-def make_service(user: User | None = None) -> tuple[UploadService, DummyRepository]:
+    async def list_album_media(self, album_id: str) -> list[object]:
+        if self.album and self.album.id == album_id:
+            return list(self.album_media)
+        return []
+
+
+class DummyStorage:
+    def __init__(self, payloads: dict[str, bytes]) -> None:
+        self.payloads = payloads
+        self.get_bytes_called = False
+
+    async def get_stream(self, key: str, range_header: str | None = None) -> StorageStream:
+        data = self.payloads[key]
+
+        async def iterator():
+            midpoint = max(1, len(data) // 2)
+            yield data[:midpoint]
+            if midpoint < len(data):
+                yield data[midpoint:]
+
+        return StorageStream(
+            status_code=200,
+            content_type="application/octet-stream",
+            content_length=len(data),
+            content_range=None,
+            body=iterator(),
+        )
+
+    async def get_bytes(self, key: str) -> bytes:
+        self.get_bytes_called = True
+        return self.payloads[key]
+
+
+def make_service(user: User | None = None, *, storage=None) -> tuple[UploadService, DummyRepository]:
     repository = DummyRepository(user)
     settings = Settings(
         base_url="http://testserver",
@@ -64,7 +106,7 @@ def make_service(user: User | None = None) -> tuple[UploadService, DummyReposito
     service = UploadService(
         settings=settings,
         repository=repository,
-        storage=None,  # type: ignore[arg-type]
+        storage=storage,  # type: ignore[arg-type]
         event_bus=None,  # type: ignore[arg-type]
         processors=None,  # type: ignore[arg-type]
         runtime_config=None,  # type: ignore[arg-type]
@@ -181,3 +223,37 @@ def test_require_album_access_allows_owner_admin_or_valid_token() -> None:
     with pytest.raises(HTTPException) as bad_token:
         service._require_album_access(anon_album, "wrong", None)
     assert bad_token.value.status_code == 403
+
+
+def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -> None:
+    storage = DummyStorage({"media/original.png": b"png-data"})
+    service, repository = make_service(storage=storage)
+    repository.album = Album(
+        id="album-1",
+        title="Album",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=utcnow(),
+        updated_at=utcnow(),
+        expires_at=None,
+    )
+    repository.album_media = [
+        type(
+            "MediaStub",
+            (),
+            {
+                "storage_key": "media/original.png",
+                "filename_orig": "sample.png",
+                "format": "png",
+            },
+        )()
+    ]
+
+    archive = asyncio.run(service.stream_album_zip("album-1"))
+    zipped = b"".join(archive)
+
+    with ZipFile(BytesIO(zipped)) as extracted:
+        assert extracted.namelist() == ["sample.png"]
+        assert extracted.read("sample.png") == b"png-data"
+    assert storage.get_bytes_called is False
