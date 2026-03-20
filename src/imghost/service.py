@@ -671,6 +671,7 @@ class UploadService:
 
     async def get_current_user_summary(self, user: User) -> dict[str, object]:
         items = await self.repository.list_user_media(user.id)
+        albums = await self.repository.list_user_albums(user.id)
         usage = self._storage_bytes_for_media(items)
         api_key = await self.repository.get_api_key_for_user(user.id)
         effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
@@ -681,6 +682,8 @@ class UploadService:
             "is_admin": user.is_admin,
             "quota_bytes": effective_quota,
             "storage_used_bytes": usage,
+            "album_count": len(albums),
+            "media_count": len(items),
             "has_api_key": api_key is not None,
             "api_key_created_at": api_key.created_at.isoformat() if api_key else None,
             "api_key_last_used_at": api_key.last_used_at.isoformat() if api_key and api_key.last_used_at else None,
@@ -703,6 +706,11 @@ class UploadService:
         all_media = await self.repository.list_all_media()
         usage_by_user: dict[str, int] = {}
         count_by_user: dict[str, int] = {}
+        album_count_by_user: dict[str, int] = {}
+        for album in await self.repository.list_albums():
+            if album.user_id is None:
+                continue
+            album_count_by_user[album.user_id] = album_count_by_user.get(album.user_id, 0) + 1
         for media in all_media:
             if media.user_id is None:
                 continue
@@ -721,12 +729,53 @@ class UploadService:
                 "quota_bytes": user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes,
                 "rate_limit_rpm": user.rate_limit_rpm,
                 "rate_limit_bph": user.rate_limit_bph,
+                "album_count": album_count_by_user.get(user.id, 0),
                 "storage_used_bytes": usage_by_user.get(user.id, 0),
                 "media_count": count_by_user.get(user.id, 0),
                 "created_at": user.created_at.isoformat(),
             }
             for user in users
         ]
+
+    async def get_user_with_usage_for_admin(self, user_id: str) -> dict[str, object]:
+        user = await self.repository.get_user(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        media_items = await self.repository.list_user_media(user.id)
+        albums = await self.repository.list_user_albums(user.id)
+        effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        return {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "is_admin": user.is_admin,
+            "suspended": user.suspended,
+            "quota_bytes": effective_quota,
+            "rate_limit_rpm": user.rate_limit_rpm,
+            "rate_limit_bph": user.rate_limit_bph,
+            "album_count": len(albums),
+            "storage_used_bytes": self._storage_bytes_for_media(media_items),
+            "media_count": len(media_items),
+            "created_at": user.created_at.isoformat(),
+        }
+
+    async def get_user_storage_stats_for_admin(self, user_id: str) -> dict[str, object]:
+        user = await self.repository.get_user(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        media_items = await self.repository.list_user_media(user.id)
+        albums = await self.repository.list_user_albums(user.id)
+        effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        return {
+            "user_id": user.id,
+            "username": user.username,
+            "quota_bytes": effective_quota,
+            "storage_used_bytes": self._storage_bytes_for_media(media_items),
+            "album_count": len(albums),
+            "media_count": len(media_items),
+        }
 
     async def create_user(
         self,
@@ -870,6 +919,30 @@ class UploadService:
                     "title": album.title,
                     "user_id": album.user_id,
                     "owner_username": owner.username if owner else None,
+                    "item_count": len(items),
+                    "total_size": self._storage_bytes_for_media(items),
+                    "created_at": album.created_at.isoformat(),
+                    "updated_at": album.updated_at.isoformat(),
+                    "expires_at": album.expires_at.isoformat() if album.expires_at else None,
+                }
+            )
+        return payload
+
+    async def list_albums_for_user_admin_view(self, user_id: str) -> list[dict[str, object]]:
+        user = await self.repository.get_user(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        albums = await self.repository.list_user_albums(user.id)
+        payload: list[dict[str, object]] = []
+        for album in albums:
+            items = await self.repository.list_album_media(album.id)
+            payload.append(
+                {
+                    "id": album.id,
+                    "title": album.title,
+                    "user_id": album.user_id,
+                    "owner_username": user.username,
                     "item_count": len(items),
                     "total_size": self._storage_bytes_for_media(items),
                     "created_at": album.created_at.isoformat(),

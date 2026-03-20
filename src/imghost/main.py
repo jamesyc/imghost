@@ -2215,6 +2215,30 @@ async def admin_list_users(request: Request) -> JSONResponse:
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
+@app.get("/api/v1/admin/users/{user_id}")
+async def admin_get_user(request: Request, user_id: str) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    payload = await state.uploads.get_user_with_usage_for_admin(user_id)
+    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
+
+
+@app.get("/api/v1/admin/users/{user_id}/stats")
+async def admin_get_user_stats(request: Request, user_id: str) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    payload = await state.uploads.get_user_storage_stats_for_admin(user_id)
+    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
+
+
+@app.get("/api/v1/admin/users/{user_id}/albums")
+async def admin_list_user_albums(request: Request, user_id: str) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    payload = await state.uploads.list_albums_for_user_admin_view(user_id)
+    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
+
+
 @app.get("/api/v1/admin/albums")
 async def admin_list_albums(request: Request) -> JSONResponse:
     state = get_state(request)

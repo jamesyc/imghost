@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from io import BytesIO
 from time import monotonic, sleep
+from uuid import uuid4
 from zipfile import ZipFile
 
 import bcrypt
@@ -920,6 +921,8 @@ def test_api_key_upload_creates_user_album_and_current_user_view(tmp_path, monke
         assert me_payload["username"] == "alice"
         assert me_payload["has_api_key"] is True
         assert me_payload["api_key_created_at"] is not None
+        assert me_payload["album_count"] == 1
+        assert me_payload["media_count"] == 1
         assert me_payload["storage_used_bytes"] > 0
 
         album = get_album_record(client, payload["album_id"])
@@ -1161,6 +1164,8 @@ def test_current_user_summary_without_api_key_reports_null_api_key_metadata(tmp_
         payload = me.json()
         assert payload["username"] == "nokeysummary"
         assert payload["has_api_key"] is False
+        assert payload["album_count"] == 0
+        assert payload["media_count"] == 0
         assert payload["api_key_created_at"] is None
         assert payload["api_key_last_used_at"] is None
 
@@ -1357,15 +1362,64 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
         upload = client.post(
             "/api/v1/upload",
             files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Grace Album"},
             headers={"Authorization": f"Bearer {user_key}"},
         )
         assert upload.status_code == 200
+        album_id = upload.json()["album_id"]
 
         users = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_key}"})
         assert users.status_code == 200
         listed = {item["id"]: item for item in users.json()}
         assert listed[user_id]["storage_used_bytes"] > 0
+        assert listed[user_id]["album_count"] == 1
         assert listed[user_id]["suspended"] is False
+
+        user_detail = client.get(f"/api/v1/admin/users/{user_id}", headers={"Authorization": f"Bearer {admin_key}"})
+        assert user_detail.status_code == 200
+        user_detail_payload = user_detail.json()
+        assert user_detail_payload["id"] == user_id
+        assert user_detail_payload["username"] == "grace"
+        assert user_detail_payload["storage_used_bytes"] > 0
+        assert user_detail_payload["album_count"] == 1
+        assert user_detail_payload["media_count"] == 1
+
+        user_stats = client.get(f"/api/v1/admin/users/{user_id}/stats", headers={"Authorization": f"Bearer {admin_key}"})
+        assert user_stats.status_code == 200
+        user_stats_payload = user_stats.json()
+        assert user_stats_payload["user_id"] == user_id
+        assert user_stats_payload["username"] == "grace"
+        assert user_stats_payload["quota_bytes"] > 0
+        assert user_stats_payload["storage_used_bytes"] > 0
+        assert user_stats_payload["album_count"] == 1
+        assert user_stats_payload["media_count"] == 1
+
+        user_albums = client.get(f"/api/v1/admin/users/{user_id}/albums", headers={"Authorization": f"Bearer {admin_key}"})
+        assert user_albums.status_code == 200
+        albums_payload = user_albums.json()
+        assert len(albums_payload) == 1
+        assert albums_payload[0]["id"] == album_id
+        assert albums_payload[0]["title"] == "Grace Album"
+        assert albums_payload[0]["owner_username"] == "grace"
+        assert albums_payload[0]["item_count"] == 1
+
+        missing_user_albums = client.get(
+            f"/api/v1/admin/users/{uuid4()}/albums",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert missing_user_albums.status_code == 404
+
+        missing_user_detail = client.get(
+            f"/api/v1/admin/users/{uuid4()}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert missing_user_detail.status_code == 404
+
+        missing_user_stats = client.get(
+            f"/api/v1/admin/users/{uuid4()}/stats",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert missing_user_stats.status_code == 404
 
         created = client.post(
             "/api/v1/admin/users",
