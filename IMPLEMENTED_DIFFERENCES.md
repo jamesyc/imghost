@@ -79,12 +79,12 @@ This differs from the original design, which assumed a more fully designed end-u
 
 ## 7. Public-Origin Validation Is Simpler Than A Full Trusted-Proxy Model
 
-The app now validates request-derived public origins against an explicit allowlist.
+The app now validates request-derived public origins against an explicit allowlist and can optionally gate forwarded-header trust behind a CIDR-based trusted-proxy check.
 
 What the design still does not fully cover:
 
-- there is no separate trusted-proxy/IP allowlist
 - there is no wildcard public-origin support
+- trusted-proxy enforcement is opt-in rather than on by default
 - exact-match origin validation is intentionally strict and config-driven
 
 ## 8. Observability Is Status-Oriented, Not A Full Metrics Stack

@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from ipaddress import ip_network
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 
 @dataclass(frozen=True)
 class Settings:
     base_url: str
     trusted_public_origins: tuple[str, ...]
+    trusted_proxy_cidrs_enabled: bool
+    trusted_proxy_cidrs: tuple[str, ...]
     database_url: str
     data_dir: Path
     redis_url: str | None
+    redis_password: str | None
     redis_mode: str
     redis_prefix: str
     storage_backend: str
@@ -54,18 +58,47 @@ def _env_csv(name: str) -> tuple[str, ...]:
     return tuple(item for item in values if item)
 
 
+def _resolve_redis_url(raw_url: str | None, raw_password: str | None) -> str | None:
+    url = (raw_url or "").strip() or None
+    password = (raw_password or "").strip() or None
+    if url is None:
+        return None
+    parsed = urlsplit(url)
+    if parsed.password is not None or not password:
+        return url
+    username = parsed.username or ""
+    credentials = f"{username}:{quote(password, safe='')}" if username else f":{quote(password, safe='')}"
+    host = parsed.hostname or ""
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    netloc = f"{credentials}@{host}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 def load_settings() -> Settings:
     data_dir = Path(os.getenv("IMGHOST_DATA_DIR", "data")).resolve()
     base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
     session_cookie_secure = _env_bool("SESSION_COOKIE_SECURE")
+    trusted_proxy_cidrs_enabled = _env_bool("TRUSTED_PROXY_CIDRS_ENABLED")
+    trusted_proxy_cidrs = _env_csv("TRUSTED_PROXY_CIDRS")
+    redis_password = (os.getenv("REDIS_PASSWORD") or "").strip() or None
     if session_cookie_secure is None:
         session_cookie_secure = urlsplit(base_url).scheme == "https"
+    if trusted_proxy_cidrs_enabled is None:
+        trusted_proxy_cidrs_enabled = False
+    if trusted_proxy_cidrs_enabled and not trusted_proxy_cidrs:
+        raise ValueError("TRUSTED_PROXY_CIDRS_ENABLED=true requires TRUSTED_PROXY_CIDRS to be set.")
+    for cidr in trusted_proxy_cidrs:
+        ip_network(cidr, strict=False)
     return Settings(
         base_url=base_url,
         trusted_public_origins=_env_csv("TRUSTED_PUBLIC_ORIGINS"),
+        trusted_proxy_cidrs_enabled=trusted_proxy_cidrs_enabled,
+        trusted_proxy_cidrs=trusted_proxy_cidrs,
         database_url=os.getenv("DATABASE_URL", "postgresql://imghost:imghost@localhost:5432/imghost"),
         data_dir=data_dir,
-        redis_url=(os.getenv("REDIS_URL") or "").strip() or None,
+        redis_url=_resolve_redis_url(os.getenv("REDIS_URL"), redis_password),
+        redis_password=redis_password,
         redis_mode=os.getenv("REDIS_MODE", "auto").strip().lower(),
         redis_prefix=os.getenv("REDIS_PREFIX", "imghost").strip() or "imghost",
         storage_backend=os.getenv("STORAGE_BACKEND", "filesystem").strip().lower(),

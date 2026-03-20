@@ -27,6 +27,7 @@
 - Public absolute URLs are generated from trusted request-derived origin information when the forwarded or direct origin matches the configured trusted allowlist.
 - The app supports multiple public domains for one deployment by validating request-derived origins against `TRUSTED_PUBLIC_ORIGINS` and falling back to `BASE_URL` when the origin is missing, malformed, or untrusted.
 - Trusted forwarded origin handling supports common reverse-proxy setups using `X-Forwarded-Proto` and `X-Forwarded-Host` so multi-domain HTTPS proxy behavior can be tested end to end.
+- Forwarded-header trust can remain permissive by default or be tightened with `TRUSTED_PROXY_CIDRS_ENABLED=true`, at which point only peers inside `TRUSTED_PROXY_CIDRS` are allowed to influence `X-Forwarded-*` URL generation behavior.
 - Image processing covers JPEG, PNG, BMP, GIF, animated WebP, and SVG workflows, including sanitization and thumbnail generation where appropriate.
 - Video processing covers MP4, MOV, and WebM uploads with ffmpeg/ffprobe-based inspection and thumbnail extraction so both media metadata and preview behavior can be exercised.
 - Upload validation rejects empty files and oversized files according to the configured maximum upload size so failure paths can be tested explicitly.
@@ -46,6 +47,7 @@
 - The Docker deployment supports overriding Postgres, Redis, and Garage endpoints so split-host or partially remote infrastructure layouts can be exercised without rewriting the application.
 - The app exposes a simple `/health/live` endpoint for liveness checks and a richer `/health/ready` endpoint that reports dependency state, effective Redis subsystem modes, worker status, and task-queue details for operational verification.
 - Admins can query `/api/v1/admin/runtime-status` to inspect trusted public origins, Redis degradation state, worker lifecycle timestamps, and queue status without needing verbose continuous logs.
+- Admins can query `/api/v1/admin/runtime-status` to inspect whether forwarded-header handling is in permissive mode or trusted-proxies-only mode and to verify the currently configured trusted proxy CIDR list.
 - Redis sessions, rate limits, and task dispatch now emit low-noise degraded and recovered transition logs instead of logging every normal success path, which makes resilience scenarios easier to verify without generating large volumes of output.
 - ShareX configuration export is available from either bearer API key auth or a browser session, and browser-session export will auto-issue or rotate the user API key before embedding it because the server stores only the API-key hash.
 - ShareX config generation respects trusted forwarded origins so reverse-proxied multi-domain request handling can be tested outside the normal browser pages.

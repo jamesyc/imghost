@@ -78,9 +78,12 @@ def make_service(user: User | None = None, *, storage=None) -> tuple[UploadServi
     settings = Settings(
         base_url="http://testserver",
         trusted_public_origins=("http://testserver",),
+        trusted_proxy_cidrs_enabled=False,
+        trusted_proxy_cidrs=(),
         database_url="postgresql://test",
         data_dir=Path("/tmp/imghost-test"),
         redis_url=None,
+        redis_password=None,
         redis_mode="auto",
         redis_prefix="imghost",
         storage_backend="filesystem",

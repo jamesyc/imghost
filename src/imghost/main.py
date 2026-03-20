@@ -185,6 +185,9 @@ class AppState:
                 **(await self.tasks.runtime_status()),
             },
             "trusted_public_origins": list(self.settings.trusted_public_origins),
+            "forwarded_headers_policy": "trusted_proxies_only" if self.settings.trusted_proxy_cidrs_enabled else "permissive",
+            "trusted_proxy_cidrs_enabled": self.settings.trusted_proxy_cidrs_enabled,
+            "trusted_proxy_cidrs": list(self.settings.trusted_proxy_cidrs),
         }
 
 

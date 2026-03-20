@@ -390,6 +390,8 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
     monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://testserver")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,172.16.0.0/12")
 
     _, admin_key = create_admin_and_api_key(capsys, username="statusadmin", email="statusadmin@example.com")
 
@@ -404,6 +406,9 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert payload["storage"]["ok"] is True
         assert "tasks" in payload
         assert "trusted_public_origins" in payload
+        assert payload["forwarded_headers_policy"] == "trusted_proxies_only"
+        assert payload["trusted_proxy_cidrs_enabled"] is True
+        assert payload["trusted_proxy_cidrs"] == ["127.0.0.1/32", "172.16.0.0/12"]
 
 
 def test_album_tools_page_includes_manual_album_controls(tmp_path, monkeypatch) -> None:

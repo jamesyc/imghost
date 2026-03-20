@@ -52,6 +52,7 @@ It is no longer just an anonymous upload proof-of-concept.
 - Long-lived cache headers
 - Public URLs generated from trusted request origin when available, with `BASE_URL` fallback
 - Trusted public-origin allowlist via `TRUSTED_PUBLIC_ORIGINS`
+- Optional trusted-proxy CIDR gate for `X-Forwarded-*` handling via `TRUSTED_PROXY_CIDRS_ENABLED` and `TRUSTED_PROXY_CIDRS`
 
 ### Media Processing
 
@@ -180,7 +181,8 @@ It is no longer just an anonymous upload proof-of-concept.
 - Browser-session ShareX config download rotates or auto-issues the API key because existing raw key material cannot be recovered from hash-only storage
 - Session auth uses Redis when available, but retains signed-cookie fallback semantics rather than becoming purely server-side
 - Rate limiting and task dispatch degrade to process-local behavior when Redis is unavailable
-- Public origin validation is exact-match allowlist based; there is no wildcard or trusted-proxy model yet
+- Public origin validation is exact-match allowlist based; there is no wildcard support and the trusted-proxy gate is still opt-in
+- Trusted-proxy enforcement exists but is opt-in and CIDR-list based, so the default behavior remains permissive unless explicitly enabled
 - Observability is intentionally low-noise and status-endpoint-oriented rather than a full metrics stack
 - Browser UI exists, but is intentionally basic and primarily for testing
 
@@ -206,7 +208,7 @@ It is no longer just an anonymous upload proof-of-concept.
 
 If work continues from the current state, the highest-value next steps are:
 
-1. Add stronger reverse-proxy / trusted-proxy hardening around forwarded headers.
-2. Add richer deployment and operations docs for the new runtime-status and degraded-mode behavior.
-3. Replace the temporary browser UI with a real product UI.
-4. Add richer user settings and identity features such as OAuth-linked account management.
+1. Add richer deployment and operations docs for the new runtime-status and proxy/degraded-mode behavior.
+2. Replace the temporary browser UI with a real product UI.
+3. Add richer user settings and identity features such as OAuth-linked account management.
+4. Decide whether trusted-proxy enforcement should eventually become the default instead of opt-in.

@@ -76,7 +76,16 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -n "$REDIS_PASSWORD" ]; then
+          exec redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"
+        fi
+        exec redis-server --appendonly yes
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
       - redis-data:/data
     ports:

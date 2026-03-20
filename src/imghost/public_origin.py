@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from ipaddress import ip_address, ip_network
 from urllib.parse import urlsplit
 
 from fastapi import Request
@@ -43,6 +44,27 @@ def _header_first_value(request: Request, header_name: str) -> str:
     return request.headers.get(header_name, "").split(",", 1)[0].strip()
 
 
+def _request_peer_host(request: Request) -> str | None:
+    client = request.client
+    if client is None:
+        return None
+    host = (client.host or "").strip()
+    return host or None
+
+
+def request_uses_trusted_proxy_headers(request: Request, settings: Settings) -> bool:
+    if not settings.trusted_proxy_cidrs_enabled:
+        return True
+    peer_host = _request_peer_host(request)
+    if peer_host is None:
+        return False
+    try:
+        peer_ip = ip_address(peer_host)
+    except ValueError:
+        return False
+    return any(peer_ip in ip_network(cidr, strict=False) for cidr in settings.trusted_proxy_cidrs)
+
+
 def _request_origin(request: Request) -> str | None:
     scheme = request.url.scheme.strip().lower()
     host = request.headers.get("Host", "").strip()
@@ -66,7 +88,14 @@ def public_base_url(request: Request, settings: Settings) -> str:
     fallback = _normalize_origin(settings.base_url) or settings.base_url
     observability: ObservabilityState | None = getattr(getattr(request.app.state, "imghost", None), "observability", None)
 
-    forwarded = _forwarded_origin(request)
+    forwarded = _forwarded_origin(request) if request_uses_trusted_proxy_headers(request, settings) else None
+    if forwarded is None and _forwarded_origin(request) is not None and settings.trusted_proxy_cidrs_enabled:
+        peer_host = _request_peer_host(request) or "unknown"
+        if observability is None or observability.should_log_untrusted_origin("proxy_peer", peer_host):
+            logger.warning(
+                "forwarded_headers_ignored_untrusted_proxy",
+                extra={"peer_host": peer_host, "path": request.url.path},
+            )
     if forwarded is not None:
         if forwarded in trusted:
             return forwarded

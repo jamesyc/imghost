@@ -88,6 +88,13 @@ Trusted public origins are configured separately, for example:
 TRUSTED_PUBLIC_ORIGINS=https://imghost.jamesyc.com,https://imghost.002015.xyz
 ```
 
+Trusted proxy CIDRs are configured separately and only enforced when explicitly enabled:
+
+```env
+TRUSTED_PROXY_CIDRS_ENABLED=false
+TRUSTED_PROXY_CIDRS=127.0.0.1/32,172.16.0.0/12
+```
+
 ## One-Machine vs Multi-Machine Docker
 
 The same Compose file supports both:
@@ -161,6 +168,11 @@ That origin is only used if it matches the configured trusted allowlist:
 
 If the forwarded or direct request origin is missing, malformed, or untrusted, the app falls back to `BASE_URL`.
 
+Forwarded-header trust can also be tightened further:
+
+- when `TRUSTED_PROXY_CIDRS_ENABLED=false`, forwarded headers remain permissive as they are today
+- when `TRUSTED_PROXY_CIDRS_ENABLED=true`, `X-Forwarded-*` headers are only trusted from peers inside `TRUSTED_PROXY_CIDRS`
+
 This means one deployment can serve multiple public domains correctly for normal request-driven responses.
 
 ## Development
@@ -181,7 +193,7 @@ The test harness will refuse to run against database names that do not look like
 
 Current full suite status at the time these docs were updated:
 
-- `86 passed`
+- `91 passed`
 
 The test suite uses PostgreSQL and truncates tables between tests. Run it only against a dedicated test database.
 
