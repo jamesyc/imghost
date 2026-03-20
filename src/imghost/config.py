@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 @dataclass(frozen=True)
 class Settings:
     base_url: str
+    trusted_public_origins: tuple[str, ...]
     database_url: str
     data_dir: Path
     redis_url: str | None
@@ -47,6 +48,12 @@ def _env_bool(name: str) -> bool | None:
     raise ValueError(f"{name} must be a boolean-like value.")
 
 
+def _env_csv(name: str) -> tuple[str, ...]:
+    raw = os.getenv(name, "")
+    values = [item.strip() for item in raw.split(",")]
+    return tuple(item for item in values if item)
+
+
 def load_settings() -> Settings:
     data_dir = Path(os.getenv("IMGHOST_DATA_DIR", "data")).resolve()
     base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
@@ -55,6 +62,7 @@ def load_settings() -> Settings:
         session_cookie_secure = urlsplit(base_url).scheme == "https"
     return Settings(
         base_url=base_url,
+        trusted_public_origins=_env_csv("TRUSTED_PUBLIC_ORIGINS"),
         database_url=os.getenv("DATABASE_URL", "postgresql://imghost:imghost@localhost:5432/imghost"),
         data_dir=data_dir,
         redis_url=(os.getenv("REDIS_URL") or "").strip() or None,

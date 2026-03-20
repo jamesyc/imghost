@@ -9,10 +9,13 @@ import asyncpg
 import pytest
 
 INIT_SQL = (Path(__file__).resolve().parent.parent / "db" / "init" / "001-init.sql").read_text(encoding="utf-8")
+DEFAULT_TEST_DATABASE_URL = "postgresql://imghost:imghost@localhost:5432/imghost_test"
 
 
 def _database_url() -> str:
-    return os.getenv("DATABASE_URL", "postgresql://imghost:imghost@localhost:5432/imghost")
+    configured = os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL") or DEFAULT_TEST_DATABASE_URL
+    _assert_safe_test_database_url(configured)
+    return configured
 
 
 def _database_name(dsn: str) -> str:
@@ -23,6 +26,15 @@ def _database_name(dsn: str) -> str:
 def _admin_database_url(dsn: str) -> str:
     parsed = urlparse(dsn)
     return urlunparse(parsed._replace(path="/postgres"))
+
+
+def _assert_safe_test_database_url(dsn: str) -> None:
+    database_name = _database_name(dsn).lower()
+    if "test" not in database_name:
+        raise RuntimeError(
+            "Refusing to run tests against a non-test database. "
+            "Use TEST_DATABASE_URL or DATABASE_URL pointing to a dedicated test database such as 'imghost_test'."
+        )
 
 
 async def _ensure_database_exists(dsn: str) -> None:
@@ -69,4 +81,5 @@ async def _truncate_database() -> None:
 
 @pytest.fixture(autouse=True)
 def clean_database() -> None:
+    os.environ["DATABASE_URL"] = _database_url()
     asyncio.run(_truncate_database())

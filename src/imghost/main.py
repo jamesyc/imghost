@@ -21,6 +21,7 @@ from .db import Database
 from .events import AdminLoggedIn, ConfigChanged, EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
+from .public_origin import public_base_url
 from .rate_limits import build_rate_limiter, hash_anon_identity
 from .redis_support import RedisHandle
 from .repositories import PostgresRepository
@@ -139,6 +140,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="imghost V1", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def clear_stale_session_cookie(request: Request, call_next):
+    request.state.clear_session_cookie = False
+    response = await call_next(request)
+    if getattr(request.state, "clear_session_cookie", False):
+        clear_session_cookie(response, get_state(request).settings)
+    return response
+
+
 class AlbumPatchRequest(BaseModel):
     title: str | None = None
     cover_media_id: str | None = None
@@ -230,18 +240,6 @@ def upload_rate_limit_key(request: Request, user: User | None) -> str:
     if user is not None:
         return user.id
     return hash_anon_identity(client_ip(request), request.headers.get("User-Agent", ""))
-
-
-def public_base_url(request: Request, settings: Settings) -> str:
-    forwarded_proto = request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower()
-    forwarded_host = request.headers.get("X-Forwarded-Host", "").split(",", 1)[0].strip()
-    host = forwarded_host or request.headers.get("Host", "").strip()
-    scheme = forwarded_proto or request.url.scheme
-    if not host and request.url.netloc:
-        host = request.url.netloc
-    if scheme in {"http", "https"} and host and all(char not in host for char in "/?#@"):
-        return f"{scheme}://{host}"
-    return settings.base_url
 
 
 def media_url(base_url: str, media_id: str, fmt: str) -> str:
@@ -390,10 +388,15 @@ async def authenticated_principal(request: Request, *, required: bool = False) -
     session_token = request.cookies.get(state.settings.session_cookie_name)
     if session_token:
         user_id = await state.session_backend.resolve_user(session_token)
-        if user_id:
+        if not user_id:
+            request.state.clear_session_cookie = True
+        else:
             user = await state.repository.get_user(user_id)
             if user is None:
-                raise HTTPException(status_code=401, detail="Invalid session.")
+                request.state.clear_session_cookie = True
+                if required:
+                    raise HTTPException(status_code=401, detail="Invalid session.")
+                return None
             if user.suspended:
                 raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
             return ResolvedPrincipal(user=user)

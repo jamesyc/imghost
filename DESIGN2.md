@@ -28,15 +28,23 @@ Today the application is a single FastAPI service that owns:
 Backing services:
 
 - PostgreSQL
+- optional Redis
 - filesystem storage or Garage/S3-compatible object storage
 
 Current queue/session/rate-limit model:
 
-- in-process task queue
-- signed cookie browser sessions
-- in-process rate limiting
+- Redis-backed task queue with in-process fallback
+- Redis-backed browser sessions with signed-cookie fallback
+- Redis-backed rate limiting with in-process fallback
 
-That is acceptable for a prototype and a single deployment unit, but it is not the final scaling model.
+The app can now run as:
+
+- a web process
+- a dedicated worker process
+
+and still degrade to local behavior if Redis is unavailable.
+
+That is a better step toward the intended scaling model, but it is still a prototype operationally.
 
 ## URL Model
 
@@ -47,6 +55,8 @@ Priority:
 1. `X-Forwarded-Proto` + `X-Forwarded-Host`
 2. direct request scheme/host
 3. `BASE_URL` fallback
+
+Request-derived origins are now validated against an explicit trusted-origin allowlist before they are used.
 
 This allows a single deployment to respond correctly for multiple public domains while still retaining a fallback/default origin for non-request contexts.
 
@@ -66,7 +76,7 @@ Local auth supports:
 
 Passwords are bcrypt-hashed.
 
-Sessions are currently signed cookies. That is fine for now, but if the app needs stronger invalidation semantics or horizontal scale, sessions should move to server-side storage.
+Sessions now prefer Redis-backed state, but retain signed-cookie fallback so auth continues to work during Redis outages.
 
 ## Album Ownership Model
 
@@ -119,7 +129,9 @@ It should eventually be replaced, not endlessly polished in place.
 ### Current Recommended Prototype Deployment
 
 - one FastAPI app process
+- one worker process (optional but recommended when using Redis queue mode)
 - one PostgreSQL instance
+- one Redis instance (optional, but required for the full multi-process behavior)
 - one Garage/S3 backend or filesystem backend
 - optional reverse proxy for HTTPS
 
@@ -129,8 +141,8 @@ The Docker setup under [`docker/`](/home/james/imghost/docker) is now the active
 
 The app container can talk to:
 
-- local Compose Postgres/Garage by default
-- remote Postgres/Garage if env vars are overridden
+- local Compose Postgres/Redis/Garage by default
+- remote Postgres/Redis/Garage if env vars are overridden
 
 That is enough for lightweight split-host deployments.
 
@@ -138,9 +150,9 @@ That is enough for lightweight split-host deployments.
 
 If the project continues toward a more production-oriented design, the next architectural step should be:
 
-1. externalize sessions, rate limits, and task dispatch
-2. add trusted origin/host validation
-3. improve observability
+1. improve observability
+2. stream ZIP downloads
+3. add stronger trusted-proxy / forwarded-header hardening
 4. replace the utility UI
 
 ## What Should Not Change

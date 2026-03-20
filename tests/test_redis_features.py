@@ -113,6 +113,7 @@ class DummyRuntimeConfig:
 def make_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "base_url": "https://testserver",
+        "trusted_public_origins": ("https://testserver",),
         "database_url": "postgresql://test",
         "data_dir": Path("/tmp/imghost-test"),
         "redis_url": None,

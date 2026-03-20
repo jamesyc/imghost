@@ -5,12 +5,14 @@
 The prototype is now a working single-service FastAPI application with:
 
 - PostgreSQL-backed state
+- optional Redis-backed sessions, rate limits, and task dispatch
 - pluggable storage
 - background thumbnail processing
 - authenticated and anonymous upload flows
 - public album/media serving
 - admin APIs
 - a basic multi-page browser UI
+- Docker support for separate app and worker containers
 
 It is no longer just an anonymous upload proof-of-concept.
 
@@ -48,7 +50,8 @@ It is no longer just an anonymous upload proof-of-concept.
 - Thumbnail serving via `/t/{id}.{ext}`
 - Range request support
 - Long-lived cache headers
-- Public URLs generated from request origin when available, with `BASE_URL` fallback
+- Public URLs generated from trusted request origin when available, with `BASE_URL` fallback
+- Trusted public-origin allowlist via `TRUSTED_PUBLIC_ORIGINS`
 
 ### Media Processing
 
@@ -66,7 +69,9 @@ It is no longer just an anonymous upload proof-of-concept.
 
 ### Background Work
 
-- Async in-process task queue
+- Redis-backed task queue
+- Dedicated worker process / container
+- Async in-process fallback queue when Redis is unavailable
 - Sync fallback task mode
 - Startup thumbnail recovery
 - Retry-thumbnails CLI command
@@ -75,7 +80,7 @@ It is no longer just an anonymous upload proof-of-concept.
 
 - Local registration
 - Local login by username or email
-- Signed browser session cookies
+- Hybrid Redis-backed browser sessions with signed-cookie fallback
 - API keys
 - API key regeneration
 - Current-user endpoint
@@ -116,7 +121,8 @@ It is no longer just an anonymous upload proof-of-concept.
 
 ### Rate Limits And Quotas
 
-- In-process upload rate limiting
+- Redis-backed upload rate limiting
+- In-process fallback upload rate limiting when Redis is unavailable
 - Runtime-config-backed anonymous and authenticated upload limit settings
 - Per-user rate-limit overrides
 - Server-wide storage quota
@@ -126,10 +132,12 @@ It is no longer just an anonymous upload proof-of-concept.
 
 - Filesystem storage backend
 - Garage/S3-compatible storage backend
+- Redis service support
 - Storage initialization command
 - Docker setup under [`docker/`](/home/james/imghost/docker)
 - Compose project name `imghost`
 - Local `docker/.env`-based Compose flow
+- Dedicated worker container in Compose
 - Optional remote Postgres/Garage endpoint overrides for the app container
 
 ### Database
@@ -163,8 +171,9 @@ It is no longer just an anonymous upload proof-of-concept.
 
 - ShareX config export exists, but download still requires API-key-authenticated requests
 - ZIP downloads work, but are buffered in memory rather than streamed
-- Rate limiting works, but is in-process instead of Redis-backed
-- Session auth works, but is signed-cookie-based rather than Redis-backed/server-stored
+- Session auth uses Redis when available, but retains signed-cookie fallback semantics rather than becoming purely server-side
+- Rate limiting and task dispatch degrade to process-local behavior when Redis is unavailable
+- Public origin validation is exact-match allowlist based; there is no wildcard or trusted-proxy model yet
 - Browser UI exists, but is intentionally basic and primarily for testing
 
 ## Not Implemented
@@ -172,13 +181,9 @@ It is no longer just an anonymous upload proof-of-concept.
 ### Auth / Identity
 
 - OAuth / SSO flows
-- Redis-backed session storage
 
 ### Infra / Scaling
 
-- Redis-backed rate limiting
-- Redis-backed task queue
-- Multi-service worker deployment
 - Structured metrics/observability stack
 - Full production reverse-proxy/CDN docs
 
@@ -193,8 +198,8 @@ It is no longer just an anonymous upload proof-of-concept.
 
 If work continues from the current state, the highest-value next steps are:
 
-1. Move sessions, rate limits, and task dispatch off in-process memory.
+1. Stream ZIP downloads instead of buffering them in memory.
 2. Decide whether ShareX config should be downloadable from a browser session.
-3. Stream ZIP downloads instead of buffering them.
-4. Add trusted-host/origin validation around forwarded-host URL generation if the app will sit behind arbitrary proxies.
+3. Add structured observability around degraded Redis mode, queue depth, worker health, and rejected public-origin candidates.
+4. Add stronger reverse-proxy / trusted-proxy hardening around forwarded headers.
 5. Replace the temporary browser UI with a real product UI.

@@ -35,6 +35,7 @@ def make_service(user: User | None = None) -> tuple[UploadService, DummyReposito
     repository = DummyRepository(user)
     settings = Settings(
         base_url="http://testserver",
+        trusted_public_origins=("http://testserver",),
         database_url="postgresql://test",
         data_dir=Path("/tmp/imghost-test"),
         redis_url=None,
