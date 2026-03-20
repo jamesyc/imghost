@@ -33,28 +33,48 @@
     <div class="upload-card-header">
       <div>
         <p class="eyebrow">Anonymous uploads currently expire after {{ runtime_flags.anon_expiry_hours }} hour(s).</p>
-        <p class="eyebrow">Quick upload</p>
         <h2>Start a new album.</h2>
       </div>
       <p class="hint upload-note">{% if current_user %}Upload to your account, or add more files to an album you already made.{% else %}Upload one or more files to make a simple shareable album.{% endif %}</p>
     </div>
     <form id="upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data">
-      <div class="form-grid">
-        <input type="text" name="title" placeholder="Album title (optional)">
-        {% if current_user %}
-        <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
-        {% endif %}
-      </div>
-      <label class="upload-dropzone">
-        <span class="upload-dropzone-title">Choose files</span>
-        <span class="upload-dropzone-copy">Drag files here or use the picker. You can upload more than one at once.</span>
-        <input type="file" name="file" required multiple>
-      </label>
-      <div class="row row-actions">
-        <button type="submit">Upload</button>
+      <div class="upload-dropzone">
+        <span class="upload-title-wrap">
+          <input type="text" name="title" placeholder="Album title (optional)">
+        </span>
+        <label class="upload-stage" for="upload-file-input">
+          <span class="upload-stage-frame">
+            <span class="upload-dropzone-title">Drop images here</span>
+            <span class="upload-dropzone-copy">Or pick files from your device. You can upload more than one at once.</span>
+          </span>
+        </label>
+        <div class="upload-actions-panel">
+          <span class="upload-divider" aria-hidden="true"></span>
+          <label class="upload-picker" for="upload-file-input">
+            <span class="upload-picker-icon" aria-hidden="true">▣</span>
+            <span class="upload-picker-label">Choose Photo/Video</span>
+          </label>
+          <span class="upload-or">or</span>
+          <label class="upload-paste-box">
+            <span class="upload-paste-label">Paste image URL or raw image</span>
+            <textarea
+              id="upload-paste-input"
+              class="upload-paste-input"
+              rows="1"
+              placeholder="Paste an image link, or paste an image from your clipboard"
+              spellcheck="false"
+            ></textarea>
+          </label>
+          <span class="upload-file-summary" aria-live="polite"></span>
+          <span class="upload-form-fields">
+            {% if current_user %}
+            <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
+            {% endif %}
+          </span>
+        </div>
+        <input id="upload-file-input" type="file" name="file" required multiple>
       </div>
     </form>
-    <pre id="upload-result" class="result hidden"></pre>
   </section>
   {% else %}
   <section class="card upload-card upload-card-disabled">
