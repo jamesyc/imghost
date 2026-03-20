@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-import conftest as test_conftest
+from . import conftest as test_conftest
 
 
 def test_test_database_default_uses_imghost_test() -> None:

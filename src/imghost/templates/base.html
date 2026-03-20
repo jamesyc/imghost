@@ -9,8 +9,19 @@
   <body>
     <main class="page-shell">
       {% include "partials/nav.html" %}
+      {% block content %}
+      {% if body_html is defined %}
       {{ body_html }}
+      {% endif %}
+      {% endblock %}
     </main>
+    {% if script_html is defined %}
     {{ script_html }}
+    {% endif %}
+    {% if script_paths is defined %}
+    {% for script_path in script_paths %}
+    <script src="{{ url_for('static', path=script_path) }}" defer></script>
+    {% endfor %}
+    {% endif %}
   </body>
 </html>

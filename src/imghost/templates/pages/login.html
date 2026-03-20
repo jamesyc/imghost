@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "partials/flash.html" %}
+<section class="auth-layout">
+  <section class="card auth-card">
+    <p class="eyebrow">Account access</p>
+    <h1>Sign In</h1>
+    <p>Use your username or email to continue to the dashboard.</p>
+    <form id="login-form" class="auth-form" action="/api/v1/auth/login" method="post" data-auth-form data-success-url="{{ next_path }}">
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <input type="text" name="login" placeholder="Username or email" required>
+      <input type="password" name="password" placeholder="Password" required>
+      <label class="check"><input type="checkbox" name="remember_me" checked> Remember me</label>
+      <button type="submit">Sign In</button>
+    </form>
+    {% if runtime_flags.allow_registration %}
+    <p class="hint">Need an account? <a class="inline-link" href="/register">Create one</a>.</p>
+    {% else %}
+    <p class="hint">Registration is currently disabled.</p>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}

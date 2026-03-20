@@ -518,15 +518,23 @@ def humanize_bytes(byte_count: int) -> str:
     return f"{size:.1f} {unit}"
 
 
-def nav_items(user: User | None) -> list[dict[str, str]]:
-    links = [
-        ("/", "Home"),
-        ("/dashboard", "Dashboard"),
-        ("/settings", "Settings"),
-        ("/album-tools", "Album Tools"),
-    ]
-    if user is not None and user.is_admin:
-        links.append(("/admin", "Admin"))
+def nav_items(user: User | None, *, allow_registration: bool) -> list[dict[str, str]]:
+    links = [("/", "Home")]
+    if user is None:
+        links.append(("/login", "Login"))
+        if allow_registration:
+            links.append(("/register", "Register"))
+        links.append(("/album-tools", "Album Tools"))
+    else:
+        links.extend(
+            [
+                ("/dashboard", "Dashboard"),
+                ("/settings", "Settings"),
+                ("/album-tools", "Album Tools"),
+            ]
+        )
+        if user.is_admin:
+            links.append(("/admin", "Admin"))
     return [{"href": href, "label": label} for href, label in links]
 
 async def runtime_flags(request: Request) -> PageRuntimeFlags:
@@ -542,7 +550,7 @@ async def build_page_context(request: Request, *, user: User | None = None) -> d
     flags = await runtime_flags(request)
     return {
         "current_user": user,
-        "nav_items": nav_items(user),
+        "nav_items": nav_items(user, allow_registration=flags.allow_registration),
         "public_base_url": public_base_url(request, get_state(request).settings),
         "runtime_flags": flags,
     }
@@ -603,190 +611,77 @@ async def page_shell(
     )
 
 
+async def render_template_page(
+    request: Request,
+    template_name: str,
+    title: str,
+    *,
+    user: User | None = None,
+    extra_context: dict[str, Any] | None = None,
+    script_paths: list[str] | None = None,
+) -> HTMLResponse:
+    context = await build_page_context(request, user=user)
+    if extra_context:
+        context.update(extra_context)
+    context["page_title"] = title
+    context["script_paths"] = script_paths or []
+    return templates.TemplateResponse(request=request, name=template_name, context=context)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> str:
-    state = get_state(request)
-    base_url = public_base_url(request, state.settings)
     user = await authenticated_user(request, required=False)
-    allow_registration = bool(await state.runtime_config.get_value("allow_registration"))
-    anon_upload_enabled = bool(await state.runtime_config.get_value("anon_upload_enabled"))
-    anon_expiry_hours = int(await state.runtime_config.get_value("anon_expiry_hours"))
-    upload_enabled = user is not None or anon_upload_enabled
-    auth_panel = ""
-    if user is None:
-        register_block = (
-            """
-        <section class="card auth-card">
-          <h2>Create Account</h2>
-          <form id="register-form" class="auth-form" action="/api/v1/auth/register" method="post">
-            <input type="text" name="username" placeholder="Username" required>
-            <input type="email" name="email" placeholder="Email" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <label class="check"><input type="checkbox" name="remember_me" checked> Remember me</label>
-            <button type="submit">Register</button>
-          </form>
-        </section>
-            """
-            if allow_registration
-            else """
-        <section class="card auth-card">
-          <h2>Create Account</h2>
-          <p class="hint">Registration is currently disabled.</p>
-        </section>
-            """
-        )
-        auth_panel = f"""
-      <section class="grid">
-        <section class="card auth-card">
-          <h2>Sign In</h2>
-          <form id="login-form" class="auth-form" action="/api/v1/auth/login" method="post">
-            <input type="text" name="login" placeholder="Username or email" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <label class="check"><input type="checkbox" name="remember_me" checked> Remember me</label>
-            <button type="submit">Sign In</button>
-          </form>
-        </section>
-        {register_block}
-      </section>
-        """
-    else:
-        auth_panel = f"""
-      <section class="card auth-card">
-        <h2>Signed In</h2>
-        <p>Logged in as <strong>{user.username}</strong>.</p>
-        <p class="hint">Continue in the dashboard for album management, account actions, and ShareX export.</p>
-        <form id="logout-form" class="auth-form" action="/api/v1/auth/logout" method="post">
-          <button type="submit">Log Out</button>
-        </form>
-      </section>
-        """
-    upload_block = (
-        f"""
-      <section class="card">
-        <h1>imghost</h1>
-        <p>{'Upload with your session-backed account. You can optionally target an existing owned album by ID.' if user else 'Paste or pick one or more files to create an anonymous album with clean media URLs.'}</p>
-        <form id="upload-form" action="/api/v1/upload" method="post" enctype="multipart/form-data">
-          <input type="text" name="title" placeholder="Album title (optional)">
-          {('<input type="text" name="album_id" placeholder="Existing owned album ID (optional)">' if user else '')}
-          <input type="file" name="file" required multiple>
-          <button type="submit">Upload</button>
-        </form>
-        <p class="hint">Base URL: {base_url}</p>
-        {f'<p class="hint">Anonymous uploads currently expire after {anon_expiry_hours} hour(s).</p>' if user is None else '<p class="hint">Authenticated uploads do not expire by default.</p>'}
-        <p class="hint">For account tools, owned albums, admin APIs, and manual token-based album actions, use the pages in the nav above.</p>
-        <pre id="upload-result" class="result hidden"></pre>
-      </section>
-        """
-        if upload_enabled
-        else f"""
-      <section class="card">
-        <h1>imghost</h1>
-        <p>Anonymous uploads are currently disabled. Sign in to upload.</p>
-        <p class="hint">Base URL: {base_url}</p>
-        <p class="hint">If you already have an API key, the dashboard page can still use it for authenticated testing.</p>
-      </section>
-        """
+    flags = await runtime_flags(request)
+    return await render_template_page(
+        request,
+        "pages/home.html",
+        "imghost",
+        user=user,
+        extra_context={
+            "upload_enabled": user is not None or flags.anon_upload_enabled,
+        },
+        script_paths=["js/home.js"],
     )
-    body = f"""
-      <section class="stack">
-        {auth_panel}
-        {upload_block}
-      </section>
-    """
-    script = """
-    <script>
-      const flash = document.getElementById("flash");
-      const uploadResult = document.getElementById("upload-result");
-      const showMessage = (message) => {
-        if (flash) {
-          flash.textContent = message;
-        }
-      };
-      const submitJson = async (form, url) => {
-        const formData = new FormData(form);
-        const payload = Object.fromEntries(formData.entries());
-        if ("remember_me" in payload) {
-          payload.remember_me = formData.get("remember_me") === "on";
-        }
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(data.detail || "Request failed.");
-        }
-      };
-      const loginForm = document.getElementById("login-form");
-      if (loginForm) {
-        loginForm.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          try {
-            await submitJson(loginForm, "/api/v1/auth/login");
-            window.location.reload();
-          } catch (error) {
-            showMessage(error.message);
-          }
-        });
-      }
-      const registerForm = document.getElementById("register-form");
-      if (registerForm) {
-        registerForm.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          try {
-            await submitJson(registerForm, "/api/v1/auth/register");
-            window.location.reload();
-          } catch (error) {
-            showMessage(error.message);
-          }
-        });
-      }
-      const logoutForm = document.getElementById("logout-form");
-      if (logoutForm) {
-        logoutForm.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          try {
-            await fetch("/api/v1/auth/logout", { method: "POST" });
-            window.location.reload();
-          } catch {
-            showMessage("Logout failed.");
-          }
-        });
-      }
-      const uploadForm = document.getElementById("upload-form");
-      if (uploadForm) {
-        uploadForm.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          try {
-            const response = await fetch("/api/v1/upload", {
-              method: "POST",
-              body: new FormData(uploadForm),
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) {
-              throw new Error(data.detail || "Upload failed.");
-            }
-            if (uploadResult) {
-              uploadResult.classList.remove("hidden");
-              uploadResult.textContent = JSON.stringify(data, null, 2);
-            }
-            showMessage("Upload succeeded.");
-          } catch (error) {
-            showMessage(error.message);
-          }
-        });
-      }
-    </script>
-    """
-    return await page_shell(request, "imghost", with_flash(body), user=user, script=script)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request) -> HTMLResponse:
+    user = await authenticated_user(request, required=False)
+    if user is not None:
+        return RedirectResponse(url="/dashboard", status_code=303)
+    next_path = request.query_params.get("next") or "/dashboard"
+    return await render_template_page(
+        request,
+        "pages/login.html",
+        "Login",
+        extra_context={"next_path": next_path},
+        script_paths=["js/auth.js"],
+    )
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request) -> HTMLResponse:
+    user = await authenticated_user(request, required=False)
+    if user is not None:
+        return RedirectResponse(url="/dashboard", status_code=303)
+    next_path = request.query_params.get("next") or "/dashboard"
+    return await render_template_page(
+        request,
+        "pages/register.html",
+        "Register",
+        extra_context={"next_path": next_path},
+        script_paths=["js/auth.js"],
+    )
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request) -> str:
     state = get_state(request)
     base_url = public_base_url(request, state.settings)
-    user = await authenticated_user(request, required=False)
+    user_or_redirect = await require_page_user(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
     session_user = await state.uploads.get_current_user_summary(user) if user else None
     bootstrap = json.dumps({"session_user": session_user, "base_url": base_url})
     body = """
@@ -1063,8 +958,11 @@ async def dashboard_page(request: Request) -> str:
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request) -> str:
     state = get_state(request)
-    user = await authenticated_user(request, required=False)
-    session_user = await state.uploads.get_current_user_summary(user) if user else None
+    user_or_redirect = await require_page_user(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    session_user = await state.uploads.get_current_user_summary(user)
     bootstrap = json.dumps({"session_user": session_user})
     body = """
       <section id="settings-unauth" class="card">
@@ -1237,8 +1135,11 @@ async def settings_page(request: Request) -> str:
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request) -> str:
     state = get_state(request)
-    user = await authenticated_user(request, required=False)
-    session_user = await state.uploads.get_current_user_summary(user) if user else None
+    user_or_redirect = await require_page_admin(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    session_user = await state.uploads.get_current_user_summary(user)
     bootstrap = json.dumps({"session_user": session_user})
     body = """
       <section class="grid">

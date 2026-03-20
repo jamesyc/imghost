@@ -37,6 +37,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 imghost = [
   "templates/*.html",
+  "templates/pages/*.html",
   "templates/partials/*.html",
   "static/css/*.css",
   "static/js/*.js",

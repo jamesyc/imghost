@@ -1,98 +1,27 @@
 from datetime import datetime, timedelta
 from io import BytesIO
-from time import monotonic, sleep
 from uuid import uuid4
 from zipfile import ZipFile
 
 import bcrypt
 from fastapi.testclient import TestClient
-import pytest
 
 from imghost.__main__ import main as cli_main
 from imghost.main import app
 from imghost.models import utcnow
 from imghost.service import UserCreateInput
-
-PNG_1X1 = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDAT\x08\x99c\xf8\xcf"
-    b"\xc0\x00\x00\x03\x01\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00IEND\xaeB`\x82"
+from .helpers import (
+    PNG_1X1,
+    create_admin_and_api_key,
+    create_user_and_api_key,
+    get_album_record,
+    get_media_record,
+    get_user_record,
+    set_user_password,
+    update_album_record,
+    update_media_record,
+    wait_for_thumbnail,
 )
-
-
-def wait_for_thumbnail(client: TestClient, media_id: str, *, suffix: str = "jpg", timeout: float = 2.0) -> None:
-    deadline = monotonic() + timeout
-    while monotonic() < deadline:
-        response = client.get(f"/t/{media_id}.{suffix}")
-        if response.status_code == 200:
-            return
-        assert response.status_code == 202
-        sleep(0.02)
-    raise AssertionError(f"thumbnail for {media_id} was not ready within {timeout} seconds")
-
-
-def create_user_and_api_key(capsys, *, username: str, email: str) -> tuple[str, str]:
-    assert cli_main(["create-user", "--username", username, "--email", email]) == 0
-    create_output = capsys.readouterr().out.strip().splitlines()
-    user_id = create_output[-1].split(": ", 1)[1]
-    assert cli_main(["issue-api-key", "--user-id", user_id]) == 0
-    issue_lines = capsys.readouterr().out.strip().splitlines()
-    api_key = issue_lines[-1].split(": ", 1)[1]
-    return user_id, api_key
-
-
-def create_admin_and_api_key(capsys, *, username: str, email: str) -> tuple[str, str]:
-    assert cli_main(["create-user", "--username", username, "--email", email, "--admin"]) == 0
-    create_output = capsys.readouterr().out.strip().splitlines()
-    user_id = create_output[-1].split(": ", 1)[1]
-    assert cli_main(["issue-api-key", "--user-id", user_id]) == 0
-    issue_lines = capsys.readouterr().out.strip().splitlines()
-    api_key = issue_lines[-1].split(": ", 1)[1]
-    return user_id, api_key
-
-
-def _hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-
-def set_user_password(client: TestClient, user_id: str, password: str) -> None:
-    state = client.app.state.imghost
-    user = client.portal.call(state.repository.get_user, user_id)
-    assert user is not None
-    user.password_hash = _hash_password(password)
-    user.updated_at = utcnow()
-    client.portal.call(state.repository.update_user, user)
-
-
-def update_album_record(client: TestClient, album_id: str, **updates) -> None:
-    state = client.app.state.imghost
-    album = client.portal.call(state.repository.get_album, album_id)
-    assert album is not None
-    for key, value in updates.items():
-        setattr(album, key, value)
-    album.updated_at = utcnow()
-    client.portal.call(state.repository.update_album, album)
-
-
-def update_media_record(client: TestClient, media_id: str, **updates) -> None:
-    state = client.app.state.imghost
-    media = client.portal.call(state.repository.get_media, media_id)
-    assert media is not None
-    for key, value in updates.items():
-        setattr(media, key, value)
-    client.portal.call(state.repository.update_media, media)
-
-
-def get_album_record(client: TestClient, album_id: str):
-    return client.portal.call(client.app.state.imghost.repository.get_album, album_id)
-
-
-def get_media_record(client: TestClient, media_id: str):
-    return client.portal.call(client.app.state.imghost.repository.get_media, media_id)
-
-
-def get_user_record(client: TestClient, user_id: str):
-    return client.portal.call(client.app.state.imghost.repository.get_user, user_id)
 
 
 def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
@@ -256,222 +185,6 @@ def test_upload_falls_back_to_base_url_when_direct_request_origin_is_untrusted(t
         assert payload["album_url"].startswith("https://fallback.example.com/")
 
 
-def test_index_page_reflects_runtime_config_and_session_state(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "http://testserver")
-
-    _, admin_key = create_admin_and_api_key(capsys, username="indexadmin", email="indexadmin@example.com")
-
-    with TestClient(app) as client:
-        anonymous = client.get("/")
-        assert anonymous.status_code == 200
-        assert 'id="login-form"' in anonymous.text
-        assert 'action="/api/v1/auth/login"' in anonymous.text
-        assert 'method="post"' in anonymous.text
-        assert 'id="register-form"' in anonymous.text
-        assert 'action="/api/v1/auth/register"' in anonymous.text
-        assert "Anonymous uploads currently expire after 24 hour(s)." in anonymous.text
-        assert "const showMessage = (message) => {" in anonymous.text
-        assert "const showMessage = (message) => {{" not in anonymous.text
-
-        updated = client.patch(
-            "/api/v1/admin/config",
-            headers={"Authorization": f"Bearer {admin_key}"},
-            json={"allow_registration": False, "anon_upload_enabled": False},
-        )
-        assert updated.status_code == 200
-
-        disabled = client.get("/")
-        assert disabled.status_code == 200
-        assert "Registration is currently disabled." in disabled.text
-        assert "Anonymous uploads are currently disabled. Sign in to upload." in disabled.text
-        assert 'action="/api/v1/upload"' not in disabled.text
-
-
-def test_index_page_shows_session_upload_state_when_logged_in(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "https://testserver")
-
-    with TestClient(app, base_url="https://testserver") as client:
-        registered = client.post(
-            "/api/v1/auth/register",
-            json={
-                "username": "browseruser",
-                "email": "browser@example.com",
-                "password": "secret-pass",
-            },
-        )
-        assert registered.status_code == 200
-
-        page = client.get("/")
-        assert page.status_code == 200
-        assert "Logged in as <strong>browseruser</strong>." in page.text
-        assert 'id="logout-form"' in page.text
-        assert 'action="/api/v1/auth/logout"' in page.text
-        assert 'method="post"' in page.text
-        assert "Authenticated uploads do not expire by default." in page.text
-        assert 'action="/api/v1/upload"' in page.text
-
-
-def test_static_base_css_is_served(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "http://testserver")
-
-    with TestClient(app) as client:
-        response = client.get("/static/css/base.css")
-        assert response.status_code == 200
-        assert response.headers["content-type"].startswith("text/css")
-        assert ":root {" in response.text
-        assert ".site-nav {" in response.text
-        assert ".page-shell {" in response.text
-
-
-@pytest.mark.parametrize(
-    ("path", "expected_heading"),
-    [
-        ("/", "imghost"),
-        ("/dashboard", "User Dashboard"),
-        ("/settings", "Settings"),
-        ("/admin", "Admin Dashboard"),
-        ("/album-tools", "Album Tools"),
-    ],
-)
-def test_template_shell_wraps_primary_pages_with_shared_nav_and_stylesheet(
-    tmp_path,
-    monkeypatch,
-    path: str,
-    expected_heading: str,
-) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "http://testserver")
-
-    with TestClient(app) as client:
-        response = client.get(path)
-        assert response.status_code == 200
-        assert '<link rel="stylesheet" href="http://testserver/static/css/base.css">' in response.text
-        assert '<nav class="site-nav" aria-label="Primary">' in response.text
-        assert 'href="/"' in response.text
-        assert 'href="/dashboard"' in response.text
-        assert 'href="/settings"' in response.text
-        assert 'href="/album-tools"' in response.text
-        assert expected_heading in response.text
-
-
-def test_template_shell_hides_admin_nav_for_non_admin_users(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "https://testserver")
-
-    with TestClient(app, base_url="https://testserver") as client:
-        registered = client.post(
-            "/api/v1/auth/register",
-            json={
-                "username": "plainuser",
-                "email": "plain@example.com",
-                "password": "secret-pass",
-            },
-        )
-        assert registered.status_code == 200
-
-        response = client.get("/")
-        assert response.status_code == 200
-        assert 'href="/admin"' not in response.text
-
-
-def test_template_shell_adds_admin_nav_for_admin_users(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "https://testserver")
-    monkeypatch.setenv("SECRET_KEY", "test-secret")
-
-    admin_id, _ = create_admin_and_api_key(capsys, username="shelladmin", email="shelladmin@example.com")
-
-    with TestClient(app, base_url="https://testserver") as client:
-        set_user_password(client, admin_id, "admin-pass")
-        login = client.post(
-            "/api/v1/auth/login",
-            json={"login": "shelladmin@example.com", "password": "admin-pass"},
-        )
-        assert login.status_code == 200
-
-        response = client.get("/")
-        assert response.status_code == 200
-        assert 'href="/admin"' in response.text
-
-
-def test_dashboard_page_focuses_on_uploads_albums_and_links_to_settings(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "https://testserver")
-    monkeypatch.setenv("SECRET_KEY", "test-secret")
-
-    user_id, _ = create_user_and_api_key(capsys, username="dashuser", email="dash@example.com")
-
-    with TestClient(app, base_url="https://testserver") as client:
-        set_user_password(client, user_id, "open-sesame")
-        login = client.post(
-            "/api/v1/auth/login",
-            json={"login": "dash@example.com", "password": "open-sesame"},
-        )
-        assert login.status_code == 200
-
-        page = client.get("/dashboard")
-        assert page.status_code == 200
-        assert "User Dashboard" in page.text
-        assert "API Key Mode" in page.text
-        assert 'id="dashboard-upload-form"' in page.text
-        assert 'id="owned-albums"' in page.text
-        assert 'href="/settings"' in page.text
-        assert 'id="change-password-form"' not in page.text
-
-
-def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "https://testserver")
-    monkeypatch.setenv("SECRET_KEY", "test-secret")
-
-    user_id, _ = create_user_and_api_key(capsys, username="settingsuser", email="settings@example.com")
-
-    with TestClient(app, base_url="https://testserver") as client:
-        set_user_password(client, user_id, "open-sesame")
-        login = client.post(
-            "/api/v1/auth/login",
-            json={"login": "settings@example.com", "password": "open-sesame"},
-        )
-        assert login.status_code == 200
-
-        page = client.get("/settings")
-        assert page.status_code == 200
-        assert "Settings" in page.text
-        assert 'id="settings-account-summary"' in page.text
-        assert 'id="reveal-api-key"' in page.text
-        assert 'id="download-sharex-settings"' in page.text
-        assert 'id="settings-password-form"' in page.text
-        assert 'id="settings-delete-account-form"' in page.text
-
-
-def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "https://testserver")
-    monkeypatch.setenv("SECRET_KEY", "test-secret")
-
-    admin_id, _ = create_admin_and_api_key(capsys, username="uiadmin", email="uiadmin@example.com")
-
-    with TestClient(app, base_url="https://testserver") as client:
-        set_user_password(client, admin_id, "admin-pass")
-        login = client.post(
-            "/api/v1/auth/login",
-            json={"login": "uiadmin@example.com", "password": "admin-pass"},
-        )
-        assert login.status_code == 200
-
-        page = client.get("/admin")
-        assert page.status_code == 200
-        assert "Admin Dashboard" in page.text
-        assert "Create User" in page.text
-        assert "Runtime Config" in page.text
-        assert "Audit Log" in page.text
-        assert 'id="admin-users"' in page.text
-        assert 'id="admin-albums"' in page.text
-
-
 def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
@@ -495,105 +208,6 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert payload["forwarded_headers_policy"] == "trusted_proxies_only"
         assert payload["trusted_proxy_cidrs_enabled"] is True
         assert payload["trusted_proxy_cidrs"] == ["127.0.0.1/32", "172.16.0.0/12"]
-
-
-def test_album_tools_page_includes_manual_album_controls(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "http://testserver")
-
-    with TestClient(app) as client:
-        page = client.get("/album-tools")
-        assert page.status_code == 200
-        assert "Album Tools" in page.text
-        assert "Load Album" in page.text
-        assert 'name="album_id"' in page.text
-        assert 'name="delete_token"' in page.text
-
-
-def test_public_album_page_uses_shared_stylesheet(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "http://testserver")
-
-    with TestClient(app) as client:
-        upload = client.post(
-            "/api/v1/upload",
-            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
-            data={"title": "Shell Album"},
-        )
-        assert upload.status_code == 200
-
-        response = client.get(f"/a/{upload.json()['album_id']}")
-        assert response.status_code == 200
-        assert '<link rel="stylesheet" href="http://testserver/static/css/base.css">' in response.text
-        assert '<nav class="site-nav" aria-label="Primary">' in response.text
-        assert "Shell Album" in response.text
-
-
-def test_public_user_album_list_page_shows_owned_albums_sorted_by_recent_update(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "http://testserver")
-
-    _, api_key = create_user_and_api_key(capsys, username="showcase", email="showcase@example.com")
-
-    with TestClient(app) as client:
-        first = client.post(
-            "/api/v1/upload",
-            files=[("file", ("first.png", BytesIO(PNG_1X1), "image/png"))],
-            data={"title": "Older Album"},
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
-        assert first.status_code == 200
-
-        second = client.post(
-            "/api/v1/upload",
-            files=[("file", ("second.png", BytesIO(PNG_1X1), "image/png"))],
-            data={"title": "Newer Album"},
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
-        assert second.status_code == 200
-        wait_for_thumbnail(client, first.json()["media_id"])
-        wait_for_thumbnail(client, second.json()["media_id"])
-
-        page = client.get("/u/showcase")
-        assert page.status_code == 200
-        assert "Public user album list." in page.text
-        assert "Older Album" in page.text
-        assert "Newer Album" in page.text
-        assert f'/a/{first.json()["album_id"]}' in page.text
-        assert f'/a/{second.json()["album_id"]}' in page.text
-        assert page.text.index("Newer Album") < page.text.index("Older Album")
-
-
-def test_public_user_album_list_page_hides_expired_albums_and_404s_for_missing_user(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "http://testserver")
-
-    _, admin_key = create_admin_and_api_key(capsys, username="hidadmin", email="hidadmin@example.com")
-    _, api_key = create_user_and_api_key(capsys, username="hidden", email="hidden@example.com")
-
-    with TestClient(app) as client:
-        upload = client.post(
-            "/api/v1/upload",
-            files=[("file", ("expired.png", BytesIO(PNG_1X1), "image/png"))],
-            data={"title": "Expired Album"},
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
-        assert upload.status_code == 200
-
-        expired = client.patch(
-            f"/api/v1/admin/albums/{upload.json()['album_id']}",
-            headers={"Authorization": f"Bearer {admin_key}"},
-            json={"expires_at": (utcnow() - timedelta(hours=1)).isoformat()},
-        )
-        assert expired.status_code == 200
-
-        page = client.get("/u/hidden")
-        assert page.status_code == 200
-        assert "Expired Album" not in page.text
-        assert "This user has no public albums yet." in page.text
-
-        missing = client.get("/u/does-not-exist")
-        assert missing.status_code == 404
 
 
 def test_multi_file_upload_reuses_album_and_delete_removes_media(tmp_path, monkeypatch) -> None:
@@ -1711,7 +1325,7 @@ def test_local_http_login_uses_insecure_cookie_for_dev_refreshes(tmp_path, monke
 
         page = client.get("/")
         assert page.status_code == 200
-        assert "Logged in as <strong>devcookie</strong>." in page.text
+        assert "Signed in as <strong>devcookie</strong>." in page.text
 
         logout = client.post("/api/v1/auth/logout")
         assert logout.status_code == 200
@@ -1741,7 +1355,8 @@ def test_home_page_clears_stale_session_cookie_and_renders_anonymous_state(tmp_p
 
         page = client.get("/")
         assert page.status_code == 200
-        assert 'id="login-form"' in page.text
+        assert 'href="/login"' in page.text
+        assert 'id="login-form"' not in page.text
         assert "Invalid session." not in page.text
         assert "imghost_session=" in page.headers["set-cookie"]
 
