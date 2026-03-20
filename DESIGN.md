@@ -591,7 +591,7 @@ When the server quota is reached: **hard stop** — all uploads rejected with HT
 
 - **Change password** (requires current password)
 - **Connected accounts:** Shows linked SSO providers; "Connect Google"; "Disconnect" (only if a password is also set)
-- **API Key:** Generate / revoke ShareX key (one active at a time); "Download ShareX Config" downloads `.sxcu`
+- **API Key:** Manage the current API key from Settings; if no key exists yet, the page auto-issues one for the user; revealing or rotating a key always shows a fresh raw value because only the hash is stored server-side; "Download ShareX Config" downloads `.sxcu`
 - **Storage usage:** Used / quota displayed as a progress bar with byte values
 - **Delete account:** Confirmation flow requiring password (or SSO re-auth)
 
@@ -698,6 +698,8 @@ All audit metadata includes a `correlation_id` field automatically, populated fr
 ### How It Works
 
 ShareX POSTs files to a custom uploader defined by a `.sxcu` config file. The user downloads this file from imghost Settings and double-clicks it to import into ShareX. From then on, screenshots are automatically uploaded to imghost and the resulting URL is placed on the clipboard.
+
+When ShareX config is downloaded from a browser session, the server must auto-issue or rotate the user's API key before embedding it, because raw API key material is not recoverable from the stored hash.
 
 ### `.sxcu` Config (Generated Server-Side Per User)
 
@@ -1975,7 +1977,7 @@ python -m imghost retry-thumbnails            # Re-enqueue all failed thumbnails
 ### Auth
 
 - Passwords: bcrypt, cost factor 12
-- API keys: raw value shown once only; stored as SHA-256 hash
+- API keys: raw value shown only at issuance or rotation time; stored as SHA-256 hash, so browser-session ShareX export and browser-session key reveal issue a fresh key rather than exposing an old raw value
 - Session tokens: 32-byte random, stored hashed in Redis (or signed cookies in Redis-free mode)
 - Cookie flags: `httponly; secure; samesite=lax`
 - CSRF protection on all state-mutating form endpoints

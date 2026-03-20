@@ -25,14 +25,16 @@ Current state:
 - cookie `Secure` behavior is configurable and defaults from `BASE_URL`
 - logout still clears the browser cookie even if Redis is unavailable
 
-## 2. ShareX Config Download Still Requires API-Key Authentication
+## 2. ShareX Config Download From Browser Sessions Rotates The API Key
 
 The design treats ShareX config as a settings action for a signed-in user.
 
 Current state:
 
-- `GET /api/v1/user/me/sharex-config` rejects ordinary session-authenticated requests
-- the request itself must be authenticated with the API key being embedded
+- `GET /api/v1/user/me/sharex-config` now works for ordinary browser-session-authenticated users
+- if the request is authenticated by API key, that presented raw key is embedded as-is
+- if the request is authenticated by browser session, the app auto-issues or rotates the API key and embeds the fresh raw key in the exported `.sxcu`
+- this behavior exists because only the API-key hash is stored, so an existing raw key cannot be recovered and shown later
 
 ## 3. Upload Size Policy Is Still Simplified
 

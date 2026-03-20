@@ -35,12 +35,14 @@ The current UI is intentionally simple and exists mainly to exercise the backend
   - register
   - anonymous upload
 - `/dashboard`:
-  - account summary
-  - password change
-  - API key generation
-  - ShareX export
   - authenticated upload
   - owned album management
+- `/settings`:
+  - account summary
+  - password change
+  - API key reveal/rotation
+  - ShareX export
+  - account deletion
 - `/admin`:
   - user management
   - album management
@@ -124,7 +126,8 @@ Docker/infra defaults:
   - Redis-backed when Redis is healthy
   - signed-cookie fallback when Redis is unavailable
 - Logout still clears the browser cookie if Redis is down, but Redis-backed revocation semantics only apply while Redis is healthy.
-- ShareX config download still requires API-key-authenticated requests, even if the user has a valid browser session.
+- ShareX config download now works from either a browser session or bearer API key auth.
+- Because API keys are stored hash-only, browser-session ShareX download rotates or auto-issues the user API key before embedding it into the exported `.sxcu` file.
 
 ## Queue And Rate-Limit Notes
 
@@ -178,7 +181,7 @@ The test harness will refuse to run against database names that do not look like
 
 Current full suite status at the time these docs were updated:
 
-- `81 passed`
+- `86 passed`
 
 The test suite uses PostgreSQL and truncates tables between tests. Run it only against a dedicated test database.
 

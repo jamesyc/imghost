@@ -9,7 +9,7 @@
 - Stale or invalid browser session cookies are now cleared automatically so a user who returns with an old cookie is silently logged out instead of seeing an `Invalid session` JSON error on normal pages.
 - Browser session authentication prefers Redis-backed session state when Redis is healthy but gracefully falls back to signed-cookie validation when Redis is unavailable.
 - API clients can authenticate with bearer API keys and use those keys across upload, dashboard-related API calls, and other authenticated endpoints without relying on browser sessions.
-- Users can generate or rotate their API key and immediately use the new key while the previous value stops working once rotated.
+- Users can generate or rotate their API key from the dedicated settings page and immediately use the new key while the previous value stops working once rotated.
 - Users can change their own password through the authenticated user flow and then log in with the new password.
 - Users can delete their own account and the system will remove their associated content and invalidate their API-key-based access.
 - Admin users can sign in through the normal login flow and the system records an admin-login audit event with the request correlation ID.
@@ -47,14 +47,15 @@
 - The app exposes a simple `/health/live` endpoint for liveness checks and a richer `/health/ready` endpoint that reports dependency state, effective Redis subsystem modes, worker status, and task-queue details for operational verification.
 - Admins can query `/api/v1/admin/runtime-status` to inspect trusted public origins, Redis degradation state, worker lifecycle timestamps, and queue status without needing verbose continuous logs.
 - Redis sessions, rate limits, and task dispatch now emit low-noise degraded and recovered transition logs instead of logging every normal success path, which makes resilience scenarios easier to verify without generating large volumes of output.
-- ShareX configuration export is available for API-key-authenticated requests and can be tested for correct upload URL, header, and delete URL template generation.
+- ShareX configuration export is available from either bearer API key auth or a browser session, and browser-session export will auto-issue or rotate the user API key before embedding it because the server stores only the API-key hash.
 - ShareX config generation respects trusted forwarded origins so reverse-proxied multi-domain request handling can be tested outside the normal browser pages.
 - Album ZIP download now streams the archive on the fly instead of buffering the entire ZIP in memory first, which means large albums can be tested for lower-memory download behavior and correct archive contents.
 - Streamed ZIP downloads preserve stable archive entry naming, deduplicate conflicting filenames, and still return a normal downloadable ZIP file with the expected attachment header.
 - ZIP downloads remain accessible from the album page, dashboard utility links, and direct API URL patterns, so both UI-driven and direct-link download behavior can be checked.
 - Public album delete URLs support ShareX-style GET deletion behavior for anonymous albums so tokenized deletion flows can be tested without a JavaScript client.
 - Album pages include links to raw media, thumbnails, and ZIP downloads so a manual tester can navigate through the full public artifact surface from one place.
-- The dashboard page supports account-level tooling, authenticated upload flows, owned album inspection, mutation actions, and ShareX export in one browser surface.
+- The dashboard page is focused on authenticated upload flows and owned album inspection while the dedicated settings page now owns account summary, API key reveal or rotation, ShareX export, password changes, and account deletion.
+- The settings page auto-issues an API key for users who do not already have one so a newly registered browser-session user can immediately export ShareX config and test authenticated API access.
 - The admin page exposes utility-style controls for user management, album management, runtime config changes, and audit-log inspection so operational admin behaviors can be tested interactively.
 - The album-tools page provides token-based testing helpers for anonymous and public albums so delete-token workflows can be exercised without writing custom HTTP calls.
 - The app records audit log entries for relevant administrative and account actions and exposes filtered audit retrieval so end-to-end action tracing can be validated through the admin API.

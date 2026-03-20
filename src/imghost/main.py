@@ -505,6 +505,7 @@ def nav_links(user: User | None) -> str:
     links = [
         ("/", "Home"),
         ("/dashboard", "Dashboard"),
+        ("/settings", "Settings"),
         ("/album-tools", "Album Tools"),
     ]
     if user is not None and user.is_admin:
@@ -761,7 +762,7 @@ async def dashboard_page(request: Request) -> str:
       <section class="grid">
         <section class="card">
           <h1>User Dashboard</h1>
-          <p>Use this page to test authenticated account features, owned album management, ShareX export, and authenticated uploads. Session auth or a pasted API key both work.</p>
+          <p>Use this page to test authenticated uploads and owned album management. Session auth or a pasted API key both work.</p>
         </section>
         <section class="card">
           <h2>API Key Mode</h2>
@@ -780,28 +781,10 @@ async def dashboard_page(request: Request) -> str:
         <p>Sign in on the home page or paste an API key here to unlock the dashboard.</p>
       </section>
       <section id="dashboard-auth" class="stack hidden">
-        <section class="grid">
-          <section class="card">
-            <h2>Account</h2>
-            <pre id="account-summary" class="result"></pre>
-            <div class="row">
-              <button id="refresh-account" type="button">Refresh Account</button>
-              <button id="generate-api-key" type="button" class="secondary">Generate API Key</button>
-              <button id="download-sharex" type="button" class="ghost">Download ShareX Config</button>
-            </div>
-            <pre id="api-key-output" class="result hidden"></pre>
-          </section>
-          <section class="card">
-            <h2>Account Actions</h2>
-            <form id="change-password-form">
-              <input type="password" name="current_password" placeholder="Current password" required>
-              <input type="password" name="new_password" placeholder="New password" required>
-              <button type="submit">Change Password</button>
-            </form>
-            <form id="delete-account-form">
-              <button type="submit" class="danger">Delete My Account</button>
-            </form>
-          </section>
+        <section class="card">
+          <h2>User Settings</h2>
+          <p>API key management, ShareX export, password changes, and account deletion now live on the dedicated settings page.</p>
+          <p><a class="inline-link" href="/settings">Open settings</a></p>
         </section>
         <section class="card">
           <h2>Authenticated Upload</h2>
@@ -835,8 +818,6 @@ async def dashboard_page(request: Request) -> str:
       const apiKeyInput = document.getElementById("api-key-input");
       const unauth = document.getElementById("dashboard-unauth");
       const auth = document.getElementById("dashboard-auth");
-      const accountSummary = document.getElementById("account-summary");
-      const apiKeyOutput = document.getElementById("api-key-output");
       const albumsRoot = document.getElementById("owned-albums");
       const albumsLink = document.getElementById("owned-albums-link");
       const uploadResult = document.getElementById("dashboard-upload-result");
@@ -873,12 +854,10 @@ async def dashboard_page(request: Request) -> str:
         unauth.classList.toggle("hidden", isAuthed);
         auth.classList.toggle("hidden", !isAuthed);
         if (!isAuthed) {{
-          accountSummary.textContent = "";
           albumsRoot.innerHTML = "";
           albumsLink.textContent = "";
           return;
         }}
-        accountSummary.textContent = JSON.stringify(state.user, null, 2);
         albumsLink.innerHTML = `Public album list: <a class="inline-link" href="/u/${{encodeURIComponent(state.user.username)}}" target="_blank">/u/${{escapeHtml(state.user.username)}}</a>`;
       }};
       const refreshUser = async () => {{
@@ -951,77 +930,6 @@ async def dashboard_page(request: Request) -> str:
         window.localStorage.removeItem("imghost_api_key");
         await refreshUser();
         showMessage("API key cleared.");
-      }});
-      document.getElementById("refresh-account").addEventListener("click", refreshUser);
-      document.getElementById("generate-api-key").addEventListener("click", async () => {{
-        try {{
-          const data = await requestJson("/api/v1/user/me/api-key", {{ method: "POST" }});
-          state.latestApiKey = data.api_key;
-          state.apiKey = data.api_key;
-          apiKeyInput.value = data.api_key;
-          window.localStorage.setItem("imghost_api_key", data.api_key);
-          apiKeyOutput.classList.remove("hidden");
-          apiKeyOutput.textContent = JSON.stringify(data, null, 2);
-          await refreshUser();
-          showMessage("API key generated and stored in the dashboard.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      document.getElementById("download-sharex").addEventListener("click", async () => {{
-        const apiKey = state.apiKey || state.latestApiKey;
-        if (!apiKey) {{
-          showMessage("Generate or paste an API key first.");
-          return;
-        }}
-        try {{
-          const response = await fetch("/api/v1/user/me/sharex-config", {{
-            headers: {{ Authorization: `Bearer ${{apiKey}}` }},
-          }});
-          const data = await response.json().catch(() => ({{}}));
-          if (!response.ok) {{
-            throw new Error(data.detail || "ShareX export failed.");
-          }}
-          const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: "application/json" }});
-          const url = URL.createObjectURL(blob);
-          const anchor = document.createElement("a");
-          anchor.href = url;
-          anchor.download = "imghost.sxcu";
-          anchor.click();
-          URL.revokeObjectURL(url);
-          showMessage("ShareX config downloaded.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      document.getElementById("change-password-form").addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        try {{
-          const payload = formToObject(event.currentTarget);
-          await requestJson("/api/v1/user/me/password", {{
-            method: "PATCH",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify(payload),
-          }});
-          event.currentTarget.reset();
-          showMessage("Password updated.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      document.getElementById("delete-account-form").addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        if (!window.confirm("Delete this account and all owned content?")) {{
-          return;
-        }}
-        try {{
-          await requestJson("/api/v1/user/me", {{ method: "DELETE" }});
-          state.user = null;
-          renderState();
-          showMessage("Account deleted.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
       }});
       document.getElementById("dashboard-upload-form").addEventListener("submit", async (event) => {{
         event.preventDefault();
@@ -1119,6 +1027,181 @@ async def dashboard_page(request: Request) -> str:
     </script>
     """
     return page_shell("Dashboard", body, user=user, script=script)
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request) -> str:
+    state = get_state(request)
+    user = await authenticated_user(request, required=False)
+    session_user = await state.uploads.get_current_user_summary(user) if user else None
+    bootstrap = json.dumps({"session_user": session_user})
+    body = """
+      <p id="flash" class="flash"></p>
+      <section id="settings-unauth" class="card">
+        <h1>Settings</h1>
+        <p>Sign in on the home page to manage your password, API key, ShareX config, and account settings.</p>
+      </section>
+      <section id="settings-auth" class="stack hidden">
+        <section class="grid">
+          <section class="card">
+            <h1>Settings</h1>
+            <p>Manage your account, API key, and ShareX integration from one place.</p>
+            <pre id="settings-account-summary" class="result"></pre>
+          </section>
+          <section class="card">
+            <h2>API Key</h2>
+            <p class="hint">Raw API keys are stored hash-only server-side, so revealing a key or downloading ShareX config from a browser session rotates the key and invalidates the previous value.</p>
+            <div class="row">
+              <button id="reveal-api-key" type="button">Rotate And Reveal API Key</button>
+              <button id="download-sharex-settings" type="button" class="secondary">Download ShareX Config</button>
+            </div>
+            <pre id="settings-api-key-output" class="result hidden"></pre>
+          </section>
+        </section>
+        <section class="grid">
+          <section class="card">
+            <h2>Password</h2>
+            <form id="settings-password-form">
+              <input type="password" name="current_password" placeholder="Current password" required>
+              <input type="password" name="new_password" placeholder="New password" required>
+              <button type="submit">Change Password</button>
+            </form>
+          </section>
+          <section class="card">
+            <h2>Danger Zone</h2>
+            <form id="settings-delete-account-form">
+              <button type="submit" class="danger">Delete My Account</button>
+            </form>
+          </section>
+        </section>
+      </section>
+    """
+    script = f"""
+    <script>
+      const boot = {bootstrap};
+      const state = {{
+        user: boot.session_user,
+        latestApiKey: null,
+      }};
+      const flash = document.getElementById("flash");
+      const unauth = document.getElementById("settings-unauth");
+      const auth = document.getElementById("settings-auth");
+      const accountSummary = document.getElementById("settings-account-summary");
+      const apiKeyOutput = document.getElementById("settings-api-key-output");
+
+      const showMessage = (message) => {{
+        flash.textContent = message || "";
+      }};
+      const renderState = () => {{
+        const isAuthed = !!state.user;
+        unauth.classList.toggle("hidden", isAuthed);
+        auth.classList.toggle("hidden", !isAuthed);
+        if (!isAuthed) {{
+          accountSummary.textContent = "";
+          return;
+        }}
+        accountSummary.textContent = JSON.stringify(state.user, null, 2);
+      }};
+      const requestJson = async (url, options = {{}}) => {{
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({{}}));
+        if (!response.ok) {{
+          throw new Error(data.detail || `Request failed (${{response.status}}).`);
+        }}
+        return data;
+      }};
+      const triggerDownload = (payload) => {{
+        const blob = new Blob([JSON.stringify(payload, null, 2)], {{ type: "application/json" }});
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "imghost.sxcu";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      }};
+      const refreshUser = async () => {{
+        try {{
+          state.user = await requestJson("/api/v1/user/me");
+        }} catch {{
+          state.user = null;
+        }}
+        renderState();
+      }};
+      const rotateAndRevealApiKey = async (message) => {{
+        const issued = await requestJson("/api/v1/user/me/api-key", {{ method: "POST" }});
+        state.latestApiKey = issued.api_key;
+        apiKeyOutput.classList.remove("hidden");
+        apiKeyOutput.textContent = JSON.stringify(issued, null, 2);
+        await refreshUser();
+        showMessage(message);
+        return issued;
+      }};
+
+      document.getElementById("reveal-api-key")?.addEventListener("click", async () => {{
+        try {{
+          await rotateAndRevealApiKey("API key rotated and revealed.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+
+      document.getElementById("download-sharex-settings")?.addEventListener("click", async () => {{
+        try {{
+          const response = await fetch("/api/v1/user/me/sharex-config");
+          const data = await response.json().catch(() => ({{}}));
+          if (!response.ok) {{
+            throw new Error(data.detail || "ShareX download failed.");
+          }}
+          triggerDownload(data);
+          await refreshUser();
+          showMessage("ShareX config downloaded. Browser-session download rotates the API key before embedding it.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+
+      document.getElementById("settings-password-form")?.addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        try {{
+          await requestJson("/api/v1/user/me/password", {{
+            method: "PATCH",
+            headers: {{ "Content-Type": "application/json" }},
+            body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries())),
+          }});
+          event.currentTarget.reset();
+          showMessage("Password changed.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+
+      document.getElementById("settings-delete-account-form")?.addEventListener("submit", async (event) => {{
+        event.preventDefault();
+        if (!window.confirm("Delete your account and all owned content?")) {{
+          return;
+        }}
+        try {{
+          await requestJson("/api/v1/user/me", {{ method: "DELETE" }});
+          state.user = null;
+          state.latestApiKey = null;
+          apiKeyOutput.classList.add("hidden");
+          apiKeyOutput.textContent = "";
+          renderState();
+          showMessage("Account deleted.");
+        }} catch (error) {{
+          showMessage(error.message);
+        }}
+      }});
+
+      renderState();
+      if (state.user && !state.user.has_api_key) {{
+        rotateAndRevealApiKey("No API key existed, so one was issued automatically.");
+      }}
+    </script>
+    """
+    return page_shell("Settings", body, user=user, script=script)
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -2073,9 +2156,11 @@ async def change_current_user_password(request: Request, payload: UserPasswordPa
 @app.get("/api/v1/user/me/sharex-config")
 async def download_sharex_config(request: Request) -> Response:
     principal = await authenticated_principal(request, required=True)
-    if principal.raw_api_key is None:
-        raise HTTPException(status_code=400, detail="ShareX config download requires API key authentication.")
     state = get_state(request)
+    raw_api_key = principal.raw_api_key
+    if raw_api_key is None:
+        issued = await state.uploads.issue_api_key(principal.user)
+        raw_api_key = issued.raw_key
     base_url = public_base_url(request, state.settings)
     payload = {
         "Version": "14.1.0",
@@ -2084,7 +2169,7 @@ async def download_sharex_config(request: Request) -> Response:
         "RequestMethod": "POST",
         "RequestURL": f"{base_url}/api/v1/upload",
         "Headers": {
-            "Authorization": f"Bearer {principal.raw_api_key}",
+            "Authorization": f"Bearer {raw_api_key}",
         },
         "Body": "MultipartFormData",
         "FileFormName": "file",

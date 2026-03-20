@@ -682,6 +682,7 @@ class UploadService:
             "quota_bytes": effective_quota,
             "storage_used_bytes": usage,
             "has_api_key": api_key is not None,
+            "api_key_created_at": api_key.created_at.isoformat() if api_key else None,
             "api_key_last_used_at": api_key.last_used_at.isoformat() if api_key and api_key.last_used_at else None,
         }
 

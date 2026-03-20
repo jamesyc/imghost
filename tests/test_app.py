@@ -311,7 +311,7 @@ def test_index_page_shows_session_upload_state_when_logged_in(tmp_path, monkeypa
         assert 'action="/api/v1/upload"' in page.text
 
 
-def test_dashboard_page_includes_account_and_album_ui(tmp_path, monkeypatch, capsys) -> None:
+def test_dashboard_page_focuses_on_uploads_albums_and_links_to_settings(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
     monkeypatch.setenv("SECRET_KEY", "test-secret")
@@ -330,9 +330,35 @@ def test_dashboard_page_includes_account_and_album_ui(tmp_path, monkeypatch, cap
         assert page.status_code == 200
         assert "User Dashboard" in page.text
         assert "API Key Mode" in page.text
-        assert 'id="change-password-form"' in page.text
         assert 'id="dashboard-upload-form"' in page.text
         assert 'id="owned-albums"' in page.text
+        assert 'href="/settings"' in page.text
+        assert 'id="change-password-form"' not in page.text
+
+
+def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="settingsuser", email="settings@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "settings@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        page = client.get("/settings")
+        assert page.status_code == 200
+        assert "Settings" in page.text
+        assert 'id="settings-account-summary"' in page.text
+        assert 'id="reveal-api-key"' in page.text
+        assert 'id="download-sharex-settings"' in page.text
+        assert 'id="settings-password-form"' in page.text
+        assert 'id="settings-delete-account-form"' in page.text
 
 
 def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> None:
@@ -888,6 +914,7 @@ def test_api_key_upload_creates_user_album_and_current_user_view(tmp_path, monke
         assert me_payload["id"] == user_id
         assert me_payload["username"] == "alice"
         assert me_payload["has_api_key"] is True
+        assert me_payload["api_key_created_at"] is not None
         assert me_payload["storage_used_bytes"] > 0
 
         album = get_album_record(client, payload["album_id"])
@@ -1078,6 +1105,59 @@ def test_sharex_config_rejects_untrusted_forwarded_public_origin(tmp_path, monke
         assert response.status_code == 200
         payload = response.json()
         assert payload["RequestURL"] == "https://fallback.example.com/api/v1/upload"
+
+
+def test_sharex_config_download_from_browser_session_auto_issues_api_key(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "sharexsession",
+                "email": "sharexsession@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        response = client.get("/api/v1/user/me/sharex-config")
+        assert response.status_code == 200
+        payload = response.json()
+        auth_header = payload["Headers"]["Authorization"]
+        assert auth_header.startswith("Bearer ")
+        issued_api_key = auth_header.removeprefix("Bearer ")
+
+        me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {issued_api_key}"})
+        assert me.status_code == 200
+        assert me.json()["username"] == "sharexsession"
+
+
+def test_current_user_summary_without_api_key_reports_null_api_key_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "nokeysummary",
+                "email": "nokeysummary@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 200
+        payload = me.json()
+        assert payload["username"] == "nokeysummary"
+        assert payload["has_api_key"] is False
+        assert payload["api_key_created_at"] is None
+        assert payload["api_key_last_used_at"] is None
 
 
 def test_delete_current_user_removes_content_and_invalidates_api_key(tmp_path, monkeypatch, capsys) -> None:
@@ -1503,12 +1583,12 @@ def test_home_page_clears_stale_session_cookie_and_renders_anonymous_state(tmp_p
         assert "imghost_session=" in page.headers["set-cookie"]
 
 
-def test_local_login_supports_username_session_cookie_and_sharex_requires_api_key(tmp_path, monkeypatch, capsys) -> None:
+def test_local_login_supports_username_session_cookie_and_browser_sharex_download_rotates_key(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
     monkeypatch.setenv("SECRET_KEY", "test-secret")
 
-    user_id, _ = create_user_and_api_key(capsys, username="lena", email="lena@example.com")
+    user_id, old_api_key = create_user_and_api_key(capsys, username="lena", email="lena@example.com")
 
     with TestClient(app, base_url="https://testserver") as client:
         set_user_password(client, user_id, "letmein")
@@ -1528,8 +1608,19 @@ def test_local_login_supports_username_session_cookie_and_sharex_requires_api_ke
         assert "Max-Age=" not in login.headers["set-cookie"]
 
         sharex = client.get("/api/v1/user/me/sharex-config")
-        assert sharex.status_code == 400
-        assert sharex.json()["detail"] == "ShareX config download requires API key authentication."
+        assert sharex.status_code == 200
+        payload = sharex.json()
+        new_auth_header = payload["Headers"]["Authorization"]
+        assert new_auth_header.startswith("Bearer ")
+        new_api_key = new_auth_header.removeprefix("Bearer ")
+        assert new_api_key != old_api_key
+
+        old_me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {old_api_key}"})
+        assert old_me.status_code == 401
+
+        new_me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {new_api_key}"})
+        assert new_me.status_code == 200
+        assert new_me.json()["username"] == "lena"
 
 
 def test_admin_local_login_writes_admin_login_audit_event(tmp_path, monkeypatch, capsys) -> None:

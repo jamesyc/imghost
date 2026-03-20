@@ -4,7 +4,7 @@ This file is intentionally not a blocker list. Everything here is working or at 
 
 ## High Value
 
-- Decide whether ShareX config should support browser-session download instead of API-key-only download.
+- Add richer settings-page account management beyond the current password, API key, ShareX, and delete-account utilities.
 - Replace the utility UI with a real product/admin UI.
 
 ## Security / Hardening

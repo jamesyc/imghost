@@ -83,6 +83,7 @@ It is no longer just an anonymous upload proof-of-concept.
 - Hybrid Redis-backed browser sessions with signed-cookie fallback
 - API keys
 - API key regeneration
+- Browser-session ShareX config download with auto-issue / rotation semantics
 - Current-user endpoint
 - Password change
 - Account deletion
@@ -98,10 +99,14 @@ It is no longer just an anonymous upload proof-of-concept.
   - logout
   - anonymous upload
 - `/dashboard`
-  - session or API-key driven account tools
   - authenticated upload
   - owned album listing and mutation
+- `/settings`
+  - account summary
+  - API key rotation/reveal
   - ShareX download
+  - password change
+  - account deletion
 - `/admin`
   - admin user and album operations
   - runtime config
@@ -172,7 +177,7 @@ It is no longer just an anonymous upload proof-of-concept.
 
 ## Partially Implemented Or Deliberately Simplified
 
-- ShareX config export exists, but download still requires API-key-authenticated requests
+- Browser-session ShareX config download rotates or auto-issues the API key because existing raw key material cannot be recovered from hash-only storage
 - Session auth uses Redis when available, but retains signed-cookie fallback semantics rather than becoming purely server-side
 - Rate limiting and task dispatch degrade to process-local behavior when Redis is unavailable
 - Public origin validation is exact-match allowlist based; there is no wildcard or trusted-proxy model yet
@@ -201,7 +206,7 @@ It is no longer just an anonymous upload proof-of-concept.
 
 If work continues from the current state, the highest-value next steps are:
 
-1. Decide whether ShareX config should be downloadable from a browser session.
-2. Add stronger reverse-proxy / trusted-proxy hardening around forwarded headers.
-3. Add richer deployment and operations docs for the new runtime-status and degraded-mode behavior.
-4. Replace the temporary browser UI with a real product UI.
+1. Add stronger reverse-proxy / trusted-proxy hardening around forwarded headers.
+2. Add richer deployment and operations docs for the new runtime-status and degraded-mode behavior.
+3. Replace the temporary browser UI with a real product UI.
+4. Add richer user settings and identity features such as OAuth-linked account management.
