@@ -32,6 +32,12 @@ The app process also runs the normal FastAPI lifespan startup, which:
 - starts the task queue backend
 - re-enqueues pending thumbnails
 
+Before uvicorn starts, the app container entrypoint script also runs:
+
+- `python -m imghost init-storage` when `STORAGE_BACKEND=garage`
+
+This behavior comes from [`docker/scripts/start-app.sh`](/home/james/imghost/docker/scripts/start-app.sh) and means web-container startup has a storage-bootstrap side effect in Garage mode.
+
 ## Volumes
 
 - `../postgres-data`
@@ -62,6 +68,11 @@ The Redis service starts with:
 
 In the current stack, `REDIS_PASSWORD` is set in [`docker/.env`](/home/james/imghost/docker/.env), so Redis authentication is enabled.
 
+The Compose healthcheck follows the same auth mode:
+
+- unauthenticated `redis-cli ping` when no password is configured
+- authenticated `redis-cli -a "$REDIS_PASSWORD" ping` when a password is configured
+
 ## Current Garage bootstrap behavior
 
 [`docker/scripts/garage-init.sh`](/home/james/imghost/docker/scripts/garage-init.sh) does the following:
@@ -72,4 +83,3 @@ In the current stack, `REDIS_PASSWORD` is set in [`docker/.env`](/home/james/img
 - grants read/write/owner access for the configured key to the bucket
 
 This means the first-run bootstrap state is tied closely to the current env values and persisted Garage volumes.
-

@@ -10,6 +10,9 @@ This directory holds implementation-oriented documentation for the current `imgh
 - [configuration.md](/home/james/imghost/docs/configuration.md)
   Reference for the current env/config surface, including app settings, Docker settings, and runtime config stored in PostgreSQL.
 
+- [cli.md](/home/james/imghost/docs/cli.md)
+  Operational command reference for the current `python -m imghost` subcommands and how they are used.
+
 - [docker-deployment.md](/home/james/imghost/docs/docker-deployment.md)
   Description of the Docker Compose stack, service roles, startup flow, volumes, and Redis/Garage bootstrap behavior.
 

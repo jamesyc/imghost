@@ -52,6 +52,12 @@ Behavior:
 - long-lived cache headers
 - content streamed from the storage backend
 
+Thumbnail-specific status behavior:
+
+- `200` when a thumbnail is available
+- `202` while thumbnail generation is still `pending` or `processing`
+- `404` when thumbnail generation failed, the media is missing, or the album is expired/unavailable
+
 ## ZIP streaming
 
 Album ZIP downloads are streamed, not fully buffered in memory.
@@ -64,4 +70,3 @@ Implementation:
 The route is:
 
 - `GET /api/v1/album/{album_id}/zip`
-

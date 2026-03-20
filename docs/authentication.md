@@ -60,6 +60,22 @@ Current user API key route:
 
 - `POST /api/v1/user/me/api-key`
 
+## Delete-token authorization
+
+Anonymous albums do not have an owning user, so their mutation model is based on `delete_token`.
+
+A valid `delete_token` can authorize:
+
+- album deletion
+- album metadata updates
+- album reorder
+- media deletion
+
+Owned albums can instead be managed by:
+
+- the owning authenticated user
+- an admin
+
 ## ShareX behavior
 
 `GET /api/v1/user/me/sharex-config` works with either:
@@ -73,4 +89,3 @@ Behavior:
 - if the request is browser-session-authenticated, the app auto-issues or rotates the API key and embeds the fresh raw key
 
 That behavior exists because the app only stores the hash of the key, not the original raw value.
-
