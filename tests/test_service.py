@@ -37,6 +37,9 @@ def make_service(user: User | None = None) -> tuple[UploadService, DummyReposito
         base_url="http://testserver",
         database_url="postgresql://test",
         data_dir=Path("/tmp/imghost-test"),
+        redis_url=None,
+        redis_mode="auto",
+        redis_prefix="imghost",
         storage_backend="filesystem",
         s3_endpoint_url=None,
         s3_access_key_id=None,
@@ -54,6 +57,7 @@ def make_service(user: User | None = None) -> tuple[UploadService, DummyReposito
         server_quota_bytes=0,
         video_thumb_frames=10,
         task_queue_mode="async",
+        task_worker_enabled=True,
         thumbnail_worker_count=1,
     )
     service = UploadService(

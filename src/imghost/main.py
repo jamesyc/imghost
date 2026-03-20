@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-import base64
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from html import escape
-import hmac
 import json
 from hashlib import sha256
 from math import ceil
@@ -23,10 +21,12 @@ from .db import Database
 from .events import AdminLoggedIn, ConfigChanged, EventBus, MediaUploaded
 from .ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from .processors import ProcessorRegistry, build_processor_registry
-from .rate_limits import InMemoryRateLimiter, hash_anon_identity
+from .rate_limits import build_rate_limiter, hash_anon_identity
+from .redis_support import RedisHandle
 from .repositories import PostgresRepository
 from .models import User, utcnow
 from .runtime_config import PostgresRuntimeConfig
+from .sessions import SessionBackend, build_session_backend
 from .service import (
     AdminAlbumUpdateInput,
     CurrentActor,
@@ -38,18 +38,21 @@ from .service import (
     UserUpdateInput,
 )
 from .storage import build_storage_backend
-from .tasks import AsyncTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
+from .tasks import AsyncTaskQueue, RedisTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 
 
 class AppState:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, run_task_worker: bool | None = None) -> None:
         self.settings = settings
+        self.run_task_worker = settings.task_worker_enabled if run_task_worker is None else run_task_worker
         self.database = Database(settings.database_url)
         self.event_bus = EventBus()
         self.repository = PostgresRepository(self.database)
         self.audit = PostgresAuditLog(self.database)
         self.runtime_config = PostgresRuntimeConfig(self.database)
-        self.rate_limiter = InMemoryRateLimiter(self.runtime_config)
+        self.redis = RedisHandle(settings)
+        self.session_backend: SessionBackend = build_session_backend(settings, self.redis)
+        self.rate_limiter = build_rate_limiter(self.runtime_config, self.redis)
         self.storage = build_storage_backend(settings)
         self.processors = build_processor_registry(
             settings.max_pixel_megapixels * 1_000_000,
@@ -73,15 +76,24 @@ class AppState:
         context = TaskContext(self.repository, self.storage, self.processors)
         if self.settings.task_queue_mode == "sync":
             return SyncTaskQueue(context)
+        if self.settings.task_queue_mode == "redis" and self.redis.enabled:
+            return RedisTaskQueue(
+                self.redis,
+                context,
+                worker_count=self.settings.thumbnail_worker_count,
+                run_worker=self.run_task_worker,
+            )
         return AsyncTaskQueue(context, worker_count=self.settings.thumbnail_worker_count)
 
     async def start(self) -> None:
         await self.database.connect()
+        await self.redis.ensure_startup_ready()
         await self.tasks.start()
         await self.recover_thumbnails(include_failed=False)
 
     async def stop(self) -> None:
         await self.tasks.stop()
+        await self.redis.close()
         await self.database.close()
 
     async def _enqueue_thumbnail(self, event: MediaUploaded) -> None:
@@ -337,58 +349,6 @@ class ResolvedPrincipal:
     user: User
     raw_api_key: str | None = None
 
-
-def _b64encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
-
-
-def _b64decode(data: str) -> bytes:
-    padding = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(f"{data}{padding}")
-
-
-def create_session_token(settings: Settings, user: User, *, remember_me: bool) -> tuple[str, datetime | None]:
-    created_at = utcnow().replace(microsecond=0)
-    expires_at = None
-    if remember_me:
-        expires_at = created_at + timedelta(days=settings.session_remember_days)
-    payload = {
-        "user_id": user.id,
-        "created_at": created_at.isoformat(),
-        "expires_at": expires_at.isoformat() if expires_at else None,
-    }
-    payload_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    signature = hmac.new(settings.secret_key.encode("utf-8"), payload_bytes, sha256).hexdigest()
-    return f"{_b64encode(payload_bytes)}.{signature}", expires_at
-
-
-def resolve_session_user(settings: Settings, token: str) -> str | None:
-    payload_b64, dot, signature = token.partition(".")
-    if not dot or not payload_b64 or not signature:
-        return None
-    try:
-        payload_bytes = _b64decode(payload_b64)
-    except Exception:
-        return None
-    expected = hmac.new(settings.secret_key.encode("utf-8"), payload_bytes, sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected):
-        return None
-    try:
-        payload = json.loads(payload_bytes.decode("utf-8"))
-    except json.JSONDecodeError:
-        return None
-    expires_at_raw = payload.get("expires_at")
-    if expires_at_raw:
-        try:
-            expires_at = datetime.fromisoformat(expires_at_raw)
-        except ValueError:
-            return None
-        if expires_at <= utcnow():
-            return None
-    user_id = payload.get("user_id")
-    return user_id if isinstance(user_id, str) and user_id else None
-
-
 def apply_session_cookie(response: Response, settings: Settings, token: str, *, expires_at: datetime | None) -> None:
     max_age = None
     if expires_at is not None:
@@ -429,7 +389,7 @@ async def authenticated_principal(request: Request, *, required: bool = False) -
 
     session_token = request.cookies.get(state.settings.session_cookie_name)
     if session_token:
-        user_id = resolve_session_user(state.settings, session_token)
+        user_id = await state.session_backend.resolve_user(session_token)
         if user_id:
             user = await state.repository.get_user(user_id)
             if user is None:
@@ -1687,7 +1647,7 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
                 correlation_id=cid,
             )
         )
-    token, expires_at = create_session_token(state.settings, user, remember_me=payload.remember_me)
+    token, expires_at = await state.session_backend.create_session(user, remember_me=payload.remember_me)
     summary = await state.uploads.get_current_user_summary(user)
     response = JSONResponse({"authenticated": True, "user": summary}, headers={"X-Correlation-ID": cid})
     apply_session_cookie(response, state.settings, token, expires_at=expires_at)
@@ -1712,7 +1672,7 @@ async def register(request: Request, payload: RegistrationRequest) -> JSONRespon
         correlation_id=cid,
         source="web",
     )
-    token, expires_at = create_session_token(state.settings, created, remember_me=payload.remember_me)
+    token, expires_at = await state.session_backend.create_session(created, remember_me=payload.remember_me)
     summary = await state.uploads.get_current_user_summary(created)
     response = JSONResponse({"authenticated": True, "user": summary}, headers={"X-Correlation-ID": cid})
     apply_session_cookie(response, state.settings, token, expires_at=expires_at)
@@ -1721,8 +1681,10 @@ async def register(request: Request, payload: RegistrationRequest) -> JSONRespon
 
 @app.post("/api/v1/auth/logout")
 async def logout(request: Request) -> JSONResponse:
+    state = get_state(request)
+    await state.session_backend.clear_session(request.cookies.get(state.settings.session_cookie_name))
     response = JSONResponse({"authenticated": False}, headers={"X-Correlation-ID": correlation_id(request)})
-    clear_session_cookie(response, get_state(request).settings)
+    clear_session_cookie(response, state.settings)
     return response
 
 

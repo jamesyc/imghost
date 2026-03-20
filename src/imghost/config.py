@@ -11,6 +11,9 @@ class Settings:
     base_url: str
     database_url: str
     data_dir: Path
+    redis_url: str | None
+    redis_mode: str
+    redis_prefix: str
     storage_backend: str
     s3_endpoint_url: str | None
     s3_access_key_id: str | None
@@ -28,6 +31,7 @@ class Settings:
     server_quota_bytes: int
     video_thumb_frames: int
     task_queue_mode: str
+    task_worker_enabled: bool
     thumbnail_worker_count: int
 
 
@@ -53,6 +57,9 @@ def load_settings() -> Settings:
         base_url=base_url,
         database_url=os.getenv("DATABASE_URL", "postgresql://imghost:imghost@localhost:5432/imghost"),
         data_dir=data_dir,
+        redis_url=(os.getenv("REDIS_URL") or "").strip() or None,
+        redis_mode=os.getenv("REDIS_MODE", "auto").strip().lower(),
+        redis_prefix=os.getenv("REDIS_PREFIX", "imghost").strip() or "imghost",
         storage_backend=os.getenv("STORAGE_BACKEND", "filesystem").strip().lower(),
         s3_endpoint_url=(os.getenv("S3_ENDPOINT_URL") or "").strip() or None,
         s3_access_key_id=(os.getenv("S3_ACCESS_KEY_ID") or "").strip() or None,
@@ -70,5 +77,6 @@ def load_settings() -> Settings:
         server_quota_bytes=int(os.getenv("SERVER_QUOTA_BYTES", "0")),
         video_thumb_frames=max(1, int(os.getenv("VIDEO_THUMB_FRAMES", "10"))),
         task_queue_mode=os.getenv("TASK_QUEUE_MODE", "async").strip().lower(),
+        task_worker_enabled=_env_bool("TASK_WORKER_ENABLED") if _env_bool("TASK_WORKER_ENABLED") is not None else True,
         thumbnail_worker_count=max(1, int(os.getenv("THUMBNAIL_WORKER_COUNT", "1"))),
     )

@@ -18,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("retry-thumbnails")
     subparsers.add_parser("init-storage")
+    subparsers.add_parser("run-worker")
 
     create_user = subparsers.add_parser("create-user")
     create_user.add_argument("--username", required=True)
@@ -35,7 +36,7 @@ async def run_cli(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     settings = load_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    state = AppState(settings)
+    state = AppState(settings, run_task_worker=args.command in {"retry-thumbnails", "run-worker"})
     await state.database.connect()
 
     try:
@@ -63,6 +64,15 @@ async def run_cli(argv: list[str] | None = None) -> int:
             await state.storage.init_storage()
             print("storage initialized")
             return 0
+
+        if args.command == "run-worker":
+            await state.redis.ensure_startup_ready()
+            await state.tasks.start()
+            try:
+                while True:
+                    await asyncio.sleep(3600)
+            finally:
+                await state.tasks.stop()
 
         if args.command == "create-user":
             user = User(

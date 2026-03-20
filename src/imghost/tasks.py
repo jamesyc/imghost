@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from time import monotonic
 
 from .processors import ProcessorRegistry
+from .redis_support import RedisHandle, RedisUnavailable
 from .repositories import PostgresRepository
 from .storage import StorageBackend
 
 TaskHandler = Callable[..., Awaitable[None]]
 logger = logging.getLogger(__name__)
+KNOWN_QUEUES = ("default", "thumbnails")
 
 
 @dataclass(slots=True)
@@ -100,3 +104,111 @@ class SyncTaskQueue(TaskQueue):
     async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
         handler = self._handlers[task_name]
         await handler(**kwargs)
+
+
+class RedisTaskQueue(TaskQueue):
+    def __init__(
+        self,
+        redis: RedisHandle,
+        context: TaskContext,
+        *,
+        worker_count: int = 1,
+        run_worker: bool = True,
+    ) -> None:
+        self.redis = redis
+        self.context = context
+        self.worker_count = max(1, worker_count)
+        self.run_worker = run_worker
+        self._handlers: dict[str, TaskHandler] = {}
+        self._fallback = AsyncTaskQueue(context, worker_count=worker_count)
+        self._workers: list[asyncio.Task[None]] = []
+        self._active_jobs = 0
+        self._known_queues = set(KNOWN_QUEUES)
+
+    def register(self, task_name: str, handler: TaskHandler) -> None:
+        self._handlers[task_name] = handler
+        self._fallback.register(task_name, handler)
+
+    async def start(self) -> None:
+        await self._fallback.start()
+        if not self.run_worker or self._workers:
+            return
+        self._workers = [asyncio.create_task(self._run_worker(index)) for index in range(self.worker_count)]
+
+    async def stop(self) -> None:
+        for worker in self._workers:
+            worker.cancel()
+        if self._workers:
+            await asyncio.gather(*self._workers, return_exceptions=True)
+            self._workers = []
+        await self._fallback.stop()
+
+    async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
+        if task_name not in self._handlers:
+            raise KeyError(task_name)
+        self._known_queues.add(queue)
+        message = json.dumps({"task_name": task_name, "kwargs": kwargs}, separators=(",", ":"))
+        try:
+            await self.redis.execute(
+                "enqueue task",
+                lambda client: client.rpush(self.redis.prefixed(f"queue:{queue}"), message),
+            )
+        except RedisUnavailable:
+            await self._fallback.enqueue(task_name, queue=queue, **kwargs)
+
+    async def join(self) -> None:
+        await self._fallback.join()
+        if not self.run_worker:
+            return
+        deadline = monotonic() + 5.0
+        while monotonic() < deadline:
+            if self._active_jobs == 0 and await self._all_queues_empty():
+                return
+            await asyncio.sleep(0.05)
+
+    async def _all_queues_empty(self) -> bool:
+        try:
+            lengths = await self.redis.execute(
+                "check queue lengths",
+                lambda client: self._read_queue_lengths(client),
+            )
+        except RedisUnavailable:
+            return True
+        return all(length == 0 for length in lengths)
+
+    async def _read_queue_lengths(self, client: object) -> list[int]:
+        lengths: list[int] = []
+        for queue in self._known_queues:
+            lengths.append(int(await client.llen(self.redis.prefixed(f"queue:{queue}"))))
+        return lengths
+
+    async def _run_worker(self, worker_index: int) -> None:
+        queue_keys = [self.redis.prefixed(f"queue:{queue}") for queue in sorted(self._known_queues)]
+        while True:
+            try:
+                item = await self.redis.execute(
+                    "dequeue task",
+                    lambda client: client.blpop(queue_keys, timeout=1),
+                )
+            except RedisUnavailable:
+                await asyncio.sleep(0.25)
+                continue
+            except asyncio.CancelledError:
+                raise
+            if item is None:
+                continue
+            _, raw_payload = item
+            try:
+                payload = json.loads(raw_payload)
+                task_name = payload["task_name"]
+                kwargs = payload["kwargs"]
+                handler = self._handlers[task_name]
+                self._active_jobs += 1
+                await handler(**kwargs)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("redis_task_worker_failed", extra={"worker_index": worker_index})
+            finally:
+                if self._active_jobs > 0:
+                    self._active_jobs -= 1

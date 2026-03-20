@@ -30,7 +30,7 @@ from .events import (
 from .ids import generate_album_id, generate_media_id
 from .models import Album, ApiKey, Media, User, utcnow
 from .processors import ProcessorRegistry
-from .rate_limits import InMemoryRateLimiter
+from .rate_limits import RateLimiter
 from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
 from .storage import StorageBackend
@@ -120,7 +120,7 @@ class UploadService:
         event_bus: EventBus,
         processors: ProcessorRegistry,
         runtime_config: PostgresRuntimeConfig,
-        rate_limiter: InMemoryRateLimiter,
+        rate_limiter: RateLimiter,
     ) -> None:
         self.settings = settings
         self.repository = repository
