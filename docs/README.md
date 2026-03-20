@@ -7,6 +7,9 @@ This directory holds implementation-oriented documentation for the current `imgh
 - [overview.md](/home/james/imghost/docs/overview.md)
   High-level summary of what the app does, the main moving parts, and the supported deployment shapes.
 
+- [setup.md](/home/james/imghost/docs/setup.md)
+  Opinionated step-by-step setup guide for a practical Docker plus reverse-proxy deployment.
+
 - [configuration.md](/home/james/imghost/docs/configuration.md)
   Reference for the current env/config surface, including app settings, Docker settings, and runtime config stored in PostgreSQL.
 
