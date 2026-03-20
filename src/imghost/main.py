@@ -8,12 +8,16 @@ import json
 import logging
 from hashlib import sha256
 from math import ceil
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from pydantic import BaseModel
 
 from .audit import PostgresAuditLog, register_audit_listeners
@@ -201,6 +205,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="imghost V1", lifespan=lifespan)
+BASE_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
 @app.middleware("http")
@@ -411,6 +418,13 @@ class ResolvedPrincipal:
     user: User
     raw_api_key: str | None = None
 
+
+@dataclass
+class PageRuntimeFlags:
+    allow_registration: bool
+    anon_upload_enabled: bool
+    anon_expiry_hours: int
+
 def apply_session_cookie(response: Response, settings: Settings, token: str, *, expires_at: datetime | None) -> None:
     max_age = None
     if expires_at is not None:
@@ -504,7 +518,7 @@ def humanize_bytes(byte_count: int) -> str:
     return f"{size:.1f} {unit}"
 
 
-def nav_links(user: User | None) -> str:
+def nav_items(user: User | None) -> list[dict[str, str]]:
     links = [
         ("/", "Home"),
         ("/dashboard", "Dashboard"),
@@ -513,64 +527,80 @@ def nav_links(user: User | None) -> str:
     ]
     if user is not None and user.is_admin:
         links.append(("/admin", "Admin"))
-    return "".join(f'<a class="nav-link" href="{href}">{escape(label)}</a>' for href, label in links)
+    return [{"href": href, "label": label} for href, label in links]
+
+async def runtime_flags(request: Request) -> PageRuntimeFlags:
+    state = get_state(request)
+    return PageRuntimeFlags(
+        allow_registration=bool(await state.runtime_config.get_value("allow_registration")),
+        anon_upload_enabled=bool(await state.runtime_config.get_value("anon_upload_enabled")),
+        anon_expiry_hours=int(await state.runtime_config.get_value("anon_expiry_hours")),
+    )
 
 
-def page_shell(title: str, body: str, *, user: User | None = None, script: str = "") -> str:
-    nav = nav_links(user)
-    return f"""
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{escape(title)}</title>
-    <style>
-      :root {{ color-scheme: light; --bg: #f5efe4; --fg: #14213d; --card: #fffaf2; --accent: #d97706; --line: #eadcc2; }}
-      * {{ box-sizing: border-box; }}
-      body {{ margin: 0; font-family: Georgia, serif; background: radial-gradient(circle at top, #fff8eb, var(--bg)); color: var(--fg); }}
-      main {{ max-width: 1100px; margin: 0 auto; padding: 28px 20px 64px; }}
-      nav {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }}
-      .nav-link {{ text-decoration: none; color: var(--fg); background: #fff3dc; border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px; }}
-      .card {{ background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 24px; box-shadow: 0 12px 30px rgba(20,33,61,.08); }}
-      .stack {{ display: grid; gap: 16px; }}
-      .grid {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }}
-      h1 {{ font-size: 2.6rem; margin: 0 0 12px; }}
-      h2, h3 {{ margin: 0 0 12px; }}
-      p {{ line-height: 1.5; }}
-      form {{ display: grid; gap: 12px; margin-top: 16px; }}
-      input, button, textarea, select {{ font: inherit; }}
-      input[type="text"], input[type="email"], input[type="password"], input[type="datetime-local"], input[type="number"], input[type="file"], textarea, select {{
-        width: 100%; padding: 12px; background: white; border: 1px solid #d4c5a8; border-radius: 12px;
-      }}
-      textarea {{ min-height: 120px; resize: vertical; }}
-      button {{ padding: 12px 16px; border: 0; border-radius: 999px; background: var(--accent); color: white; cursor: pointer; }}
-      button.secondary {{ background: #375a7f; }}
-      button.danger {{ background: #b42318; }}
-      button.ghost {{ background: #8b6b3f; }}
-      .row {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
-      .row > * {{ flex: 1 1 180px; }}
-      .hint {{ color: #6b7280; font-size: .95rem; }}
-      .flash {{ min-height: 1.4rem; color: #7c5414; }}
-      .hidden {{ display: none !important; }}
-      .check {{ display: flex; gap: 8px; align-items: center; font-size: .95rem; color: #6b7280; }}
-      .result, pre {{ background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px; overflow: auto; }}
-      .album-card, .user-card, .admin-card {{ border: 1px solid var(--line); border-radius: 16px; padding: 16px; background: #fffdf8; }}
-      .item-list {{ display: grid; gap: 10px; margin-top: 12px; }}
-      .item {{ border-top: 1px solid var(--line); padding-top: 10px; }}
-      .muted {{ color: #786b57; }}
-      a.inline-link {{ color: #9a4d00; }}
-    </style>
-  </head>
-  <body>
-    <main>
-      <nav>{nav}</nav>
-      {body}
-    </main>
-    {script}
-  </body>
-</html>
-"""
+async def build_page_context(request: Request, *, user: User | None = None) -> dict[str, Any]:
+    flags = await runtime_flags(request)
+    return {
+        "current_user": user,
+        "nav_items": nav_items(user),
+        "public_base_url": public_base_url(request, get_state(request).settings),
+        "runtime_flags": flags,
+    }
+
+
+def flash_html() -> str:
+    return templates.get_template("partials/flash.html").render()
+
+
+def with_flash(body: str) -> str:
+    return flash_html() + body
+
+
+def login_redirect(next_path: str | None = None) -> RedirectResponse:
+    location = "/login"
+    if next_path:
+        location = f"{location}?{urlencode({'next': next_path})}"
+    return RedirectResponse(url=location, status_code=303)
+
+
+async def require_page_user(request: Request) -> User | RedirectResponse:
+    user = await authenticated_user(request, required=False)
+    if user is None:
+        return login_redirect(str(request.url.path))
+    return user
+
+
+async def require_page_admin(request: Request) -> User | RedirectResponse:
+    user = await authenticated_user(request, required=False)
+    if user is None:
+        return login_redirect(str(request.url.path))
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return user
+
+
+async def page_shell(
+    request: Request,
+    title: str,
+    body: str,
+    *,
+    user: User | None = None,
+    script: str = "",
+    extra_context: dict[str, Any] | None = None,
+) -> HTMLResponse:
+    context = await build_page_context(request, user=user)
+    if extra_context:
+        context.update(extra_context)
+    return templates.TemplateResponse(
+        request=request,
+        name="base.html",
+        context={
+            "page_title": title,
+            "body_html": Markup(body),
+            "script_html": Markup(script),
+            **context,
+        },
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -658,7 +688,6 @@ async def index(request: Request) -> str:
         """
     )
     body = f"""
-      <p id="flash" class="flash"></p>
       <section class="stack">
         {auth_panel}
         {upload_block}
@@ -750,7 +779,7 @@ async def index(request: Request) -> str:
       }
     </script>
     """
-    return page_shell("imghost", body, user=user, script=script)
+    return await page_shell(request, "imghost", with_flash(body), user=user, script=script)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -761,7 +790,6 @@ async def dashboard_page(request: Request) -> str:
     session_user = await state.uploads.get_current_user_summary(user) if user else None
     bootstrap = json.dumps({"session_user": session_user, "base_url": base_url})
     body = """
-      <p id="flash" class="flash"></p>
       <section class="grid">
         <section class="card">
           <h1>User Dashboard</h1>
@@ -1029,7 +1057,7 @@ async def dashboard_page(request: Request) -> str:
       refreshUser();
     </script>
     """
-    return page_shell("Dashboard", body, user=user, script=script)
+    return await page_shell(request, "Dashboard", with_flash(body), user=user, script=script)
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -1039,7 +1067,6 @@ async def settings_page(request: Request) -> str:
     session_user = await state.uploads.get_current_user_summary(user) if user else None
     bootstrap = json.dumps({"session_user": session_user})
     body = """
-      <p id="flash" class="flash"></p>
       <section id="settings-unauth" class="card">
         <h1>Settings</h1>
         <p>Sign in on the home page to manage your password, API key, ShareX config, and account settings.</p>
@@ -1204,7 +1231,7 @@ async def settings_page(request: Request) -> str:
       }}
     </script>
     """
-    return page_shell("Settings", body, user=user, script=script)
+    return await page_shell(request, "Settings", with_flash(body), user=user, script=script)
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -1214,7 +1241,6 @@ async def admin_page(request: Request) -> str:
     session_user = await state.uploads.get_current_user_summary(user) if user else None
     bootstrap = json.dumps({"session_user": session_user})
     body = """
-      <p id="flash" class="flash"></p>
       <section class="grid">
         <section class="card">
           <h1>Admin Dashboard</h1>
@@ -1581,14 +1607,13 @@ async def admin_page(request: Request) -> str:
       refreshContext();
     </script>
     """
-    return page_shell("Admin", body, user=user, script=script)
+    return await page_shell(request, "Admin", with_flash(body), user=user, script=script)
 
 
 @app.get("/album-tools", response_class=HTMLResponse)
 async def album_tools_page(request: Request) -> str:
     user = await authenticated_user(request, required=False)
     body = """
-      <p id="flash" class="flash"></p>
       <section class="grid">
         <section class="card">
           <h1>Album Tools</h1>
@@ -1728,7 +1753,7 @@ async def album_tools_page(request: Request) -> str:
       });
     </script>
     """
-    return page_shell("Album Tools", body, user=user, script=script)
+    return await page_shell(request, "Album Tools", with_flash(body), user=user, script=script)
 
 
 @app.post("/api/v1/upload")

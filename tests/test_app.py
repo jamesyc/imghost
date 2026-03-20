@@ -6,6 +6,7 @@ from zipfile import ZipFile
 
 import bcrypt
 from fastapi.testclient import TestClient
+import pytest
 
 from imghost.__main__ import main as cli_main
 from imghost.main import app
@@ -312,6 +313,90 @@ def test_index_page_shows_session_upload_state_when_logged_in(tmp_path, monkeypa
         assert 'action="/api/v1/upload"' in page.text
 
 
+def test_static_base_css_is_served(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        response = client.get("/static/css/base.css")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/css")
+        assert ":root {" in response.text
+        assert ".site-nav {" in response.text
+        assert ".page-shell {" in response.text
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_heading"),
+    [
+        ("/", "imghost"),
+        ("/dashboard", "User Dashboard"),
+        ("/settings", "Settings"),
+        ("/admin", "Admin Dashboard"),
+        ("/album-tools", "Album Tools"),
+    ],
+)
+def test_template_shell_wraps_primary_pages_with_shared_nav_and_stylesheet(
+    tmp_path,
+    monkeypatch,
+    path: str,
+    expected_heading: str,
+) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        response = client.get(path)
+        assert response.status_code == 200
+        assert '<link rel="stylesheet" href="http://testserver/static/css/base.css">' in response.text
+        assert '<nav class="site-nav" aria-label="Primary">' in response.text
+        assert 'href="/"' in response.text
+        assert 'href="/dashboard"' in response.text
+        assert 'href="/settings"' in response.text
+        assert 'href="/album-tools"' in response.text
+        assert expected_heading in response.text
+
+
+def test_template_shell_hides_admin_nav_for_non_admin_users(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "plainuser",
+                "email": "plain@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        response = client.get("/")
+        assert response.status_code == 200
+        assert 'href="/admin"' not in response.text
+
+
+def test_template_shell_adds_admin_nav_for_admin_users(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    admin_id, _ = create_admin_and_api_key(capsys, username="shelladmin", email="shelladmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, admin_id, "admin-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "shelladmin@example.com", "password": "admin-pass"},
+        )
+        assert login.status_code == 200
+
+        response = client.get("/")
+        assert response.status_code == 200
+        assert 'href="/admin"' in response.text
+
+
 def test_dashboard_page_focuses_on_uploads_albums_and_links_to_settings(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
@@ -423,6 +508,25 @@ def test_album_tools_page_includes_manual_album_controls(tmp_path, monkeypatch) 
         assert "Load Album" in page.text
         assert 'name="album_id"' in page.text
         assert 'name="delete_token"' in page.text
+
+
+def test_public_album_page_uses_shared_stylesheet(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Shell Album"},
+        )
+        assert upload.status_code == 200
+
+        response = client.get(f"/a/{upload.json()['album_id']}")
+        assert response.status_code == 200
+        assert '<link rel="stylesheet" href="http://testserver/static/css/base.css">' in response.text
+        assert '<nav class="site-nav" aria-label="Primary">' in response.text
+        assert "Shell Album" in response.text
 
 
 def test_public_user_album_list_page_shows_owned_albums_sorted_by_recent_update(tmp_path, monkeypatch, capsys) -> None:

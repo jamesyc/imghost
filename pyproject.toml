@@ -13,6 +13,8 @@ dependencies = [
   "boto3>=1.35,<2",
   "cairosvg>=2.7,<3",
   "fastapi>=0.115,<1",
+  "jinja2>=3.1,<4",
+  "markupsafe>=3,<4",
   "pillow>=11,<12",
   "python-multipart>=0.0.9,<1",
   "redis>=5,<6",
@@ -31,3 +33,11 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+imghost = [
+  "templates/*.html",
+  "templates/partials/*.html",
+  "static/css/*.css",
+  "static/js/*.js",
+]
