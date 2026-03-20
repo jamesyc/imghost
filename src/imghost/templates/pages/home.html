@@ -2,59 +2,63 @@
 
 {% block content %}
 {% include "partials/flash.html" %}
-<section class="stack">
-  <section class="grid">
-    <section class="card">
-      <p class="eyebrow">Public but obscure by ID.</p>
-      <h1>Upload fast. Share clean links.</h1>
-      <p class="lede">imghost is a self-hosted image and video host built around frictionless upload, public album sharing, and simple ownership controls.</p>
-      {% if current_user %}
-      <div class="row row-actions">
-        <a class="button-link" href="/dashboard">Open dashboard</a>
-        <a class="button-link secondary-link" href="/settings">Settings</a>
-      </div>
+<section class="stack home-shell">
+  <section class="card hero-card hero-card-primary">
+    <h1>Upload your photos and videos. Share them in seconds.</h1>
+    <p class="lede">Drop your files in, get a link, and send it to anyone. No clutter, no weird extras, just a fast way to share.</p>
+    {% if current_user %}
+    <div class="status-panel">
       <p>Signed in as <strong>{{ current_user.username }}</strong>.</p>
       <p class="hint">Authenticated uploads do not expire by default.</p>
-      <form id="logout-form" class="inline-form" action="/api/v1/auth/logout" method="post">
-        <button type="submit">Log Out</button>
-      </form>
-      {% else %}
-      <div class="row row-actions">
-        <a class="button-link" href="/login">Sign In</a>
-        {% if runtime_flags.allow_registration %}
-        <a class="button-link secondary-link" href="/register">Create Account</a>
-        {% endif %}
-      </div>
+    </div>
+    <div class="row row-actions hero-actions">
+      <a class="button-link" href="/dashboard">Open dashboard</a>
+      <a class="button-link secondary-link" href="/settings">Settings</a>
+    </div>
+    <form id="logout-form" class="inline-form inline-form-tight" action="/api/v1/auth/logout" method="post">
+      <button type="submit" class="ghost">Log Out</button>
+    </form>
+    {% else %}
+    <div class="status-panel">
       <p class="hint">Anonymous uploads currently expire after {{ runtime_flags.anon_expiry_hours }} hour(s).</p>
-      {% if not runtime_flags.allow_registration %}
-      <p class="hint">Registration is currently disabled.</p>
-      {% endif %}
-      {% endif %}
-    </section>
-    <section class="card">
-      <h2>How it works</h2>
-      <p>Drop files, paste from the clipboard, or use the file picker. You get a public album link immediately, plus direct media and thumbnail URLs.</p>
-      <p class="hint">Use the dedicated auth pages for login and registration. Use Album Tools for manual token-based operations while the new UI is still replacing the old utility screens.</p>
-    </section>
+    {% if not runtime_flags.allow_registration %}
+    <p class="hint">Registration is currently disabled.</p>
+    {% endif %}
+    </div>
+    {% endif %}
   </section>
 
   {% if upload_enabled %}
-  <section class="card">
-    <h2>Quick Upload</h2>
-    <p>{% if current_user %}Upload with your session-backed account. You can optionally target an existing owned album by ID.{% else %}Paste or pick one or more files to create an anonymous album with clean media URLs.{% endif %}</p>
-    <form id="upload-form" action="/api/v1/upload" method="post" enctype="multipart/form-data">
-      <input type="text" name="title" placeholder="Album title (optional)">
-      {% if current_user %}
-      <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
-      {% endif %}
-      <input type="file" name="file" required multiple>
-      <button type="submit">Upload</button>
+  <section class="card upload-card">
+    <div class="upload-card-header">
+      <div>
+        <p class="eyebrow">Anonymous uploads currently expire after {{ runtime_flags.anon_expiry_hours }} hour(s).</p>
+        <p class="eyebrow">Quick upload</p>
+        <h2>Start a new album.</h2>
+      </div>
+      <p class="hint upload-note">{% if current_user %}Upload to your account, or add more files to an album you already made.{% else %}Upload one or more files to make a simple shareable album.{% endif %}</p>
+    </div>
+    <form id="upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data">
+      <div class="form-grid">
+        <input type="text" name="title" placeholder="Album title (optional)">
+        {% if current_user %}
+        <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
+        {% endif %}
+      </div>
+      <label class="upload-dropzone">
+        <span class="upload-dropzone-title">Choose files</span>
+        <span class="upload-dropzone-copy">Drag files here or use the picker. You can upload more than one at once.</span>
+        <input type="file" name="file" required multiple>
+      </label>
+      <div class="row row-actions">
+        <button type="submit">Upload</button>
+      </div>
     </form>
-    <p class="hint">Base URL: {{ public_base_url }}</p>
     <pre id="upload-result" class="result hidden"></pre>
   </section>
   {% else %}
-  <section class="card">
+  <section class="card upload-card upload-card-disabled">
+    <p class="eyebrow">Upload unavailable</p>
     <h2>Uploads Disabled</h2>
     <p>Anonymous uploads are currently disabled. Sign in to upload.</p>
     <p class="hint">If you already have an API key, the dashboard page can still use it for authenticated testing.</p>

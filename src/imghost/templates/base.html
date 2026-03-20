@@ -4,6 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ page_title }}</title>
+    <script>
+      (() => {
+        const storedTheme = window.localStorage.getItem("imghost-theme");
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const resolvedTheme = storedTheme || (prefersDark ? "dark" : "light");
+        document.documentElement.dataset.theme = resolvedTheme;
+      })();
+    </script>
     <link rel="stylesheet" href="/static/css/base.css">
   </head>
   <body>
@@ -18,6 +26,7 @@
     {% if script_html is defined %}
     {{ script_html }}
     {% endif %}
+    <script src="/static/js/theme.js" defer></script>
     {% if script_paths is defined %}
     {% for script_path in script_paths %}
     <script src="/static/{{ script_path }}" defer></script>

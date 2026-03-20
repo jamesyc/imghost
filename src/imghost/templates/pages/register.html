@@ -7,16 +7,19 @@
     <p class="eyebrow">New account</p>
     <h1>Create Account</h1>
     {% if runtime_flags.allow_registration %}
-    <p>Register with a username, email, and password. You will be signed in immediately.</p>
     <form id="register-form" class="auth-form" action="/api/v1/auth/register" method="post" data-auth-form data-success-url="{{ next_path }}">
       <input type="hidden" name="next" value="{{ next_path }}">
       <input type="text" name="username" placeholder="Username" required>
       <input type="email" name="email" placeholder="Email" required>
-      <input type="password" name="password" placeholder="Password" required>
+      <input type="password" name="password" placeholder="Password" required minlength="8">
+      <input type="password" name="confirm_password" placeholder="Confirm Password" required minlength="8">
       <label class="check"><input type="checkbox" name="remember_me" checked> Remember me</label>
+      <p class="form-error hidden" aria-live="polite"></p>
       <button type="submit">Create Account</button>
     </form>
-    <p class="hint">Already have an account? <a class="inline-link" href="/login">Sign in</a>.</p>
+    <div class="auth-footer">
+      <p class="hint">Already have an account? <a class="inline-link" href="/login">Sign in</a>.</p>
+    </div>
     {% else %}
     <p>Registration is currently disabled.</p>
     <p class="hint">Use the sign-in page if you already have an account.</p>

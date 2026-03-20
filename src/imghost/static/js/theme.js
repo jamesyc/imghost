@@ -1,0 +1,23 @@
+const root = document.documentElement;
+const themeToggle = document.querySelector("[data-theme-toggle]");
+const themeIcon = document.querySelector("[data-theme-icon]");
+const storageKey = "imghost-theme";
+
+const applyTheme = (theme) => {
+  root.dataset.theme = theme;
+  if (themeIcon) {
+    themeIcon.textContent = theme === "dark" ? "☀" : "☾";
+  }
+  if (themeToggle) {
+    themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+    themeToggle.setAttribute("title", theme === "dark" ? "Switch to light mode" : "Switch to dark mode");
+  }
+};
+
+applyTheme(root.dataset.theme || "light");
+
+themeToggle?.addEventListener("click", () => {
+  const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
+  window.localStorage.setItem(storageKey, nextTheme);
+  applyTheme(nextTheme);
+});
