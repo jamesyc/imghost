@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ page_title }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
+    <link rel="stylesheet" href="/static/css/base.css">
   </head>
   <body>
     <main class="page-shell">
@@ -20,7 +20,7 @@
     {% endif %}
     {% if script_paths is defined %}
     {% for script_path in script_paths %}
-    <script src="{{ url_for('static', path=script_path) }}" defer></script>
+    <script src="/static/{{ script_path }}" defer></script>
     {% endfor %}
     {% endif %}
   </body>
