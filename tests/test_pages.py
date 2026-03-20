@@ -36,8 +36,8 @@ def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> 
     with TestClient(app) as client:
         response = client.get("/")
         assert response.status_code == 200
-        assert '<link rel="stylesheet" href="http://testserver/static/css/base.css">' in response.text
-        assert '<script src="http://testserver/static/js/home.js" defer></script>' in response.text
+        assert '<link rel="stylesheet" href="/static/css/base.css">' in response.text
+        assert '<script src="/static/js/home.js" defer></script>' in response.text
         assert 'href="/login"' in response.text
         assert 'href="/register"' in response.text
         assert 'id="login-form"' not in response.text
@@ -102,7 +102,7 @@ def test_login_page_renders_form_and_register_link(tmp_path, monkeypatch) -> Non
         assert 'id="login-form"' in response.text
         assert 'data-auth-form' in response.text
         assert 'href="/register"' in response.text
-        assert '<script src="http://testserver/static/js/auth.js" defer></script>' in response.text
+        assert '<script src="/static/js/auth.js" defer></script>' in response.text
 
 
 def test_register_page_renders_form_when_enabled(tmp_path, monkeypatch) -> None:
@@ -211,7 +211,7 @@ def test_template_shell_wraps_phase_three_pages_and_private_pages(tmp_path, monk
         for public_path in ("/", "/login", "/register", "/album-tools"):
             response = client.get(public_path)
             assert response.status_code == 200
-            assert '<link rel="stylesheet" href="https://testserver/static/css/base.css">' in response.text
+            assert '<link rel="stylesheet" href="/static/css/base.css">' in response.text
             assert '<nav class="site-nav" aria-label="Primary">' in response.text
 
         set_user_password(client, user_id, "open-sesame")
@@ -392,3 +392,32 @@ def test_public_user_album_list_page_hides_expired_albums_and_404s_for_missing_u
 
         missing = client.get("/u/does-not-exist")
         assert missing.status_code == 404
+
+
+def test_home_page_clears_stale_session_cookie_and_renders_anonymous_state(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "stalesession",
+                "email": "stalesession@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        state = client.app.state.imghost
+        user = client.portal.call(state.repository.get_user_by_username, "stalesession")
+        assert user is not None
+        client.portal.call(state.repository.delete_user, user.id)
+
+        page = client.get("/")
+        assert page.status_code == 200
+        assert 'href="/login"' in page.text
+        assert 'id="login-form"' not in page.text
+        assert "Invalid session." not in page.text
+        assert "imghost_session=" in page.headers["set-cookie"]

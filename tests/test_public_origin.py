@@ -1,10 +1,15 @@
+from io import BytesIO
 from pathlib import Path
 
+from fastapi.testclient import TestClient
 from starlette.applications import Starlette
 from starlette.requests import Request
 
 from imghost.config import Settings
+from imghost.main import app
 from imghost.public_origin import public_base_url, request_uses_trusted_proxy_headers
+
+from .helpers import PNG_1X1, create_user_and_api_key
 
 
 def _settings(*, enabled: bool, cidrs: tuple[str, ...] = ()) -> Settings:
@@ -121,3 +126,148 @@ def test_direct_request_origin_still_works_when_proxy_gate_enabled() -> None:
 
     settings = _settings(enabled=True, cidrs=("127.0.0.1/32",))
     assert public_base_url(request, settings) == "https://trusted.example"
+
+
+def test_upload_uses_forwarded_public_origin_for_generated_urls(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://imghost.b.example")
+
+    with TestClient(app, base_url="http://backend") as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Forwarded Album"},
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "imghost.b.example",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["album_url"].startswith("https://imghost.b.example/")
+        assert payload["media_url"].startswith("https://imghost.b.example/")
+        assert payload["thumb_url"].startswith("https://imghost.b.example/")
+        assert payload["delete_url"].startswith("https://imghost.b.example/")
+
+
+def test_upload_rejects_untrusted_forwarded_public_origin_and_falls_back_to_base_url(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://trusted.example")
+
+    with TestClient(app, base_url="http://backend") as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Fallback Album"},
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "evil.example",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["album_url"].startswith("https://fallback.example.com/")
+        assert payload["media_url"].startswith("https://fallback.example.com/")
+        assert payload["thumb_url"].startswith("https://fallback.example.com/")
+        assert payload["delete_url"].startswith("https://fallback.example.com/")
+
+
+def test_upload_rejects_malformed_forwarded_public_origin_and_falls_back_to_base_url(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://trusted.example")
+
+    with TestClient(app, base_url="http://backend") as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Malformed Album"},
+            headers={
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "bad/path.example/evil",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["album_url"].startswith("https://fallback.example.com/")
+
+
+def test_upload_uses_direct_request_origin_when_trusted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://imghost.002015.xyz")
+
+    with TestClient(app, base_url="https://imghost.002015.xyz") as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Direct Trusted Album"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["album_url"].startswith("https://imghost.002015.xyz/")
+
+
+def test_upload_falls_back_to_base_url_when_direct_request_origin_is_untrusted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://trusted.example")
+
+    with TestClient(app, base_url="https://imghost.002015.xyz") as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Direct Untrusted Album"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["album_url"].startswith("https://fallback.example.com/")
+
+
+def test_sharex_config_uses_forwarded_public_origin(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://imghost.a.example,https://imghost.b.example")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexforward", email="sharexforward@example.com")
+
+    with TestClient(app, base_url="http://backend") as client:
+        response = client.get(
+            "/api/v1/user/me/sharex-config",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "imghost.a.example",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["RequestURL"] == "https://imghost.a.example/api/v1/upload"
+
+
+def test_sharex_config_rejects_untrusted_forwarded_public_origin(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://imghost.a.example")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexfallback", email="sharexfallback@example.com")
+
+    with TestClient(app, base_url="http://backend") as client:
+        response = client.get(
+            "/api/v1/user/me/sharex-config",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "evil.example",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["RequestURL"] == "https://fallback.example.com/api/v1/upload"
