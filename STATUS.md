@@ -139,6 +139,9 @@ It is no longer just an anonymous upload proof-of-concept.
 - Local `docker/.env`-based Compose flow
 - Dedicated worker container in Compose
 - Optional remote Postgres/Garage endpoint overrides for the app container
+- `/health/live` liveness endpoint
+- `/health/ready` readiness snapshot endpoint
+- `/api/v1/admin/runtime-status` admin operational status endpoint
 
 ### Database
 
@@ -170,10 +173,10 @@ It is no longer just an anonymous upload proof-of-concept.
 ## Partially Implemented Or Deliberately Simplified
 
 - ShareX config export exists, but download still requires API-key-authenticated requests
-- ZIP downloads work, but are buffered in memory rather than streamed
 - Session auth uses Redis when available, but retains signed-cookie fallback semantics rather than becoming purely server-side
 - Rate limiting and task dispatch degrade to process-local behavior when Redis is unavailable
 - Public origin validation is exact-match allowlist based; there is no wildcard or trusted-proxy model yet
+- Observability is intentionally low-noise and status-endpoint-oriented rather than a full metrics stack
 - Browser UI exists, but is intentionally basic and primarily for testing
 
 ## Not Implemented
@@ -198,8 +201,7 @@ It is no longer just an anonymous upload proof-of-concept.
 
 If work continues from the current state, the highest-value next steps are:
 
-1. Stream ZIP downloads instead of buffering them in memory.
-2. Decide whether ShareX config should be downloadable from a browser session.
-3. Add structured observability around degraded Redis mode, queue depth, worker health, and rejected public-origin candidates.
-4. Add stronger reverse-proxy / trusted-proxy hardening around forwarded headers.
-5. Replace the temporary browser UI with a real product UI.
+1. Decide whether ShareX config should be downloadable from a browser session.
+2. Add stronger reverse-proxy / trusted-proxy hardening around forwarded headers.
+3. Add richer deployment and operations docs for the new runtime-status and degraded-mode behavior.
+4. Replace the temporary browser UI with a real product UI.

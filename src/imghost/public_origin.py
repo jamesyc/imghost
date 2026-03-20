@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
-from urllib.parse import SplitResult, urlsplit
+from urllib.parse import urlsplit
 
 from fastapi import Request
 
 from .config import Settings
+from .observability import ObservabilityState
 
 logger = logging.getLogger(__name__)
 
@@ -63,17 +64,26 @@ def _forwarded_origin(request: Request) -> str | None:
 def public_base_url(request: Request, settings: Settings) -> str:
     trusted = _trusted_origin_set(settings)
     fallback = _normalize_origin(settings.base_url) or settings.base_url
+    observability: ObservabilityState | None = getattr(getattr(request.app.state, "imghost", None), "observability", None)
 
     forwarded = _forwarded_origin(request)
     if forwarded is not None:
         if forwarded in trusted:
             return forwarded
-        logger.warning("untrusted_forwarded_public_origin", extra={"candidate_origin": forwarded})
+        if observability is None or observability.should_log_untrusted_origin("forwarded", forwarded):
+            logger.warning(
+                "untrusted_public_origin",
+                extra={"source": "forwarded", "candidate_origin": forwarded, "fallback_origin": fallback, "path": request.url.path},
+            )
         return fallback
 
     request_origin = _request_origin(request)
     if request_origin is not None and request_origin in trusted:
         return request_origin
     if request_origin is not None:
-        logger.warning("untrusted_request_public_origin", extra={"candidate_origin": request_origin})
+        if observability is None or observability.should_log_untrusted_origin("request", request_origin):
+            logger.warning(
+                "untrusted_public_origin",
+                extra={"source": "request", "candidate_origin": request_origin, "fallback_origin": fallback, "path": request.url.path},
+            )
     return fallback

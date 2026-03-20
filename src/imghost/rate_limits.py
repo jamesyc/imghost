@@ -3,16 +3,19 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from hashlib import sha256
+import logging
 from time import monotonic, time
 
 from fastapi import HTTPException
 
 from .models import User
+from .observability import ObservabilityState
 from .redis_support import RedisHandle, RedisUnavailable
 from .runtime_config import PostgresRuntimeConfig
 
 MINUTE_SECONDS = 60.0
 HOUR_SECONDS = 3600.0
+logger = logging.getLogger(__name__)
 
 
 class RateLimiter:
@@ -106,10 +109,17 @@ class InMemoryRateLimiter(RateLimiter):
 
 
 class RedisRateLimiter(RateLimiter):
-    def __init__(self, runtime_config: PostgresRuntimeConfig, redis: RedisHandle, fallback: InMemoryRateLimiter) -> None:
+    def __init__(
+        self,
+        runtime_config: PostgresRuntimeConfig,
+        redis: RedisHandle,
+        fallback: InMemoryRateLimiter,
+        observability: ObservabilityState,
+    ) -> None:
         self.runtime_config = runtime_config
         self.redis = redis
         self.fallback = fallback
+        self.observability = observability
 
     async def enforce_upload_limits(
         self,
@@ -129,7 +139,14 @@ class RedisRateLimiter(RateLimiter):
                 ),
             )
         except RedisUnavailable:
+            self.observability.mark_subsystem_degraded(
+                "rate_limits",
+                operation="rate limit check",
+                reason="redis_unavailable",
+            )
             await self.fallback.enforce_upload_limits(actor_key=actor_key, byte_count=byte_count, user=user)
+            return
+        self.observability.mark_subsystem_recovered("rate_limits", operation="rate limit check")
 
     async def _enforce_with_redis(
         self,
@@ -170,6 +187,7 @@ class RedisRateLimiter(RateLimiter):
             current_requests = await client.get(req_key)
             requests_this_minute = int(current_requests or "0")
             if requests_this_minute >= rpm_limit:
+                logger.warning("rate_limit_denied", extra={"scope": scope, "limit_type": "rpm"})
                 raise HTTPException(status_code=429, detail="Upload rate limit exceeded.")
 
         if bph_limit > 0:
@@ -186,6 +204,7 @@ class RedisRateLimiter(RateLimiter):
             if stale_fields:
                 await client.hdel(bytes_key, *stale_fields)
             if bytes_this_hour + byte_count > bph_limit:
+                logger.warning("rate_limit_denied", extra={"scope": scope, "limit_type": "bph"})
                 raise HTTPException(status_code=429, detail="Upload bandwidth limit exceeded.")
 
         await client.incr(req_key)
@@ -194,10 +213,14 @@ class RedisRateLimiter(RateLimiter):
         await client.expire(bytes_key, int(HOUR_SECONDS) + 120)
 
 
-def build_rate_limiter(runtime_config: PostgresRuntimeConfig, redis: RedisHandle) -> RateLimiter:
+def build_rate_limiter(
+    runtime_config: PostgresRuntimeConfig,
+    redis: RedisHandle,
+    observability: ObservabilityState,
+) -> RateLimiter:
     fallback = InMemoryRateLimiter(runtime_config)
     if redis.enabled:
-        return RedisRateLimiter(runtime_config, redis, fallback)
+        return RedisRateLimiter(runtime_config, redis, fallback, observability)
     return fallback
 
 

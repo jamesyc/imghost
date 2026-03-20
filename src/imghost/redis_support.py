@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Any, TypeVar
 
 from .config import Settings
 
-logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 try:
@@ -108,17 +106,21 @@ class RedisHandle:
         except RedisUnavailable:
             if self.mode == "required":
                 raise RuntimeError("Redis is required but unavailable during startup.")
-            logger.warning("redis_startup_degraded")
 
     def _mark_failure(self, operation: str, exc: BaseException) -> None:
         self._blocked_until = monotonic() + self._cooldown_seconds
         if not self._degraded:
-            logger.warning("redis_degraded", extra={"operation": operation, "error": str(exc)})
             self._degraded = True
 
     def _mark_success(self, operation: str) -> None:
         self._blocked_until = 0.0
         if self._degraded:
-            logger.info("redis_recovered", extra={"operation": operation})
             self._degraded = False
 
+    async def ping(self) -> bool:
+        if not self.enabled:
+            return False
+        try:
+            return bool(await self.execute("ping", lambda client: client.ping()))
+        except RedisUnavailable:
+            return False

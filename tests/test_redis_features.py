@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from imghost.config import Settings
 from imghost.main import app
 from imghost.models import User, utcnow
+from imghost.observability import ObservabilityState
 from imghost.rate_limits import InMemoryRateLimiter, RedisRateLimiter
 from imghost.redis_support import RedisHandle
 from imghost.sessions import RedisBackedSessionBackend
@@ -164,7 +165,11 @@ def test_redis_session_backend_falls_back_to_cookie_when_redis_is_down() -> None
     fake = FakeRedis()
     fake.fail = True
     settings = make_settings(redis_url="redis://fake")
-    backend = RedisBackedSessionBackend(settings, RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0))
+    backend = RedisBackedSessionBackend(
+        settings,
+        RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
+        ObservabilityState(),
+    )
 
     token, _ = asyncio.run(backend.create_session(make_user(), remember_me=True))
 
@@ -175,7 +180,11 @@ def test_redis_session_backend_falls_back_to_cookie_when_redis_is_down() -> None
 def test_redis_session_backend_uses_redis_when_available_and_gracefully_falls_back_during_outage() -> None:
     fake = FakeRedis()
     settings = make_settings(redis_url="redis://fake")
-    backend = RedisBackedSessionBackend(settings, RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0))
+    backend = RedisBackedSessionBackend(
+        settings,
+        RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
+        ObservabilityState(),
+    )
 
     token, _ = asyncio.run(backend.create_session(make_user(), remember_me=True))
     assert any(key.endswith("session:") is False for key in fake.values)
@@ -202,7 +211,12 @@ def test_redis_rate_limiter_enforces_limits_when_available() -> None:
             "rate_limit_global_anon_bph": 100,
         }
     )
-    limiter = RedisRateLimiter(runtime, RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0), InMemoryRateLimiter(runtime))
+    limiter = RedisRateLimiter(
+        runtime,
+        RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
+        InMemoryRateLimiter(runtime),
+        ObservabilityState(),
+    )
     user = make_user()
 
     asyncio.run(limiter.enforce_upload_limits(actor_key=user.id, byte_count=10, user=user))
@@ -225,7 +239,12 @@ def test_redis_rate_limiter_falls_back_to_in_memory_when_redis_is_down() -> None
             "rate_limit_global_anon_bph": 100,
         }
     )
-    limiter = RedisRateLimiter(runtime, RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0), InMemoryRateLimiter(runtime))
+    limiter = RedisRateLimiter(
+        runtime,
+        RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
+        InMemoryRateLimiter(runtime),
+        ObservabilityState(),
+    )
     user = make_user()
 
     asyncio.run(limiter.enforce_upload_limits(actor_key=user.id, byte_count=10, user=user))
@@ -250,7 +269,13 @@ def test_redis_task_queue_processes_jobs_with_worker_enabled() -> None:
     fake = FakeRedis()
     settings = make_settings(redis_url="redis://fake")
     handle = RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0)
-    queue = RedisTaskQueue(handle, TaskContext(None, None, None), worker_count=1, run_worker=True)  # type: ignore[arg-type]
+    queue = RedisTaskQueue(
+        handle,
+        TaskContext(None, None, None),
+        ObservabilityState(),
+        worker_count=1,
+        run_worker=True,
+    )  # type: ignore[arg-type]
     calls: list[str] = []
 
     asyncio.run(_run_queue(queue, calls))
@@ -263,7 +288,13 @@ def test_redis_task_queue_falls_back_to_local_async_queue_when_redis_is_down() -
     fake.fail = True
     settings = make_settings(redis_url="redis://fake")
     handle = RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0)
-    queue = RedisTaskQueue(handle, TaskContext(None, None, None), worker_count=1, run_worker=False)  # type: ignore[arg-type]
+    queue = RedisTaskQueue(
+        handle,
+        TaskContext(None, None, None),
+        ObservabilityState(),
+        worker_count=1,
+        run_worker=False,
+    )  # type: ignore[arg-type]
     calls: list[str] = []
 
     asyncio.run(_run_queue(queue, calls))
@@ -322,3 +353,23 @@ def test_app_logout_still_clears_cookie_when_redis_delete_fails(tmp_path, monkey
 
         after_logout = client.get("/api/v1/user/me")
         assert after_logout.status_code == 401
+
+
+def test_health_ready_reports_detailed_status_when_redis_is_unavailable(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://testserver")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        fake.fail = True
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["redis"]["configured"] is True
+        assert payload["redis"]["reachable"] is False
+        assert payload["tasks"]["mode"] in {"async", "redis"}

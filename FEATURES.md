@@ -44,6 +44,9 @@
 - The storage backend is pluggable between local filesystem mode and Garage/S3-compatible mode, allowing the same application behavior to be tested against both local and object-storage-backed binaries.
 - Docker Compose provides a multi-service local deployment that includes the app, worker, Postgres, Redis, Garage, and Garage bootstrap flow, making it possible to test the intended self-hosted topology in one command.
 - The Docker deployment supports overriding Postgres, Redis, and Garage endpoints so split-host or partially remote infrastructure layouts can be exercised without rewriting the application.
+- The app exposes a simple `/health/live` endpoint for liveness checks and a richer `/health/ready` endpoint that reports dependency state, effective Redis subsystem modes, worker status, and task-queue details for operational verification.
+- Admins can query `/api/v1/admin/runtime-status` to inspect trusted public origins, Redis degradation state, worker lifecycle timestamps, and queue status without needing verbose continuous logs.
+- Redis sessions, rate limits, and task dispatch now emit low-noise degraded and recovered transition logs instead of logging every normal success path, which makes resilience scenarios easier to verify without generating large volumes of output.
 - ShareX configuration export is available for API-key-authenticated requests and can be tested for correct upload URL, header, and delete URL template generation.
 - ShareX config generation respects trusted forwarded origins so reverse-proxied multi-domain request handling can be tested outside the normal browser pages.
 - Album ZIP download now streams the archive on the fly instead of buffering the entire ZIP in memory first, which means large albums can be tested for lower-memory download behavior and correct archive contents.

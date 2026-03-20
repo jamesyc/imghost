@@ -25,16 +25,7 @@ Current state:
 - cookie `Secure` behavior is configurable and defaults from `BASE_URL`
 - logout still clears the browser cookie even if Redis is unavailable
 
-## 2. ZIP Downloads Are Buffered In Memory
-
-The design calls for streaming ZIP generation.
-
-Current state:
-
-- album ZIP downloads work
-- the full ZIP archive is assembled in memory before the response is returned
-
-## 3. ShareX Config Download Still Requires API-Key Authentication
+## 2. ShareX Config Download Still Requires API-Key Authentication
 
 The design treats ShareX config as a settings action for a signed-in user.
 
@@ -43,7 +34,7 @@ Current state:
 - `GET /api/v1/user/me/sharex-config` rejects ordinary session-authenticated requests
 - the request itself must be authenticated with the API key being embedded
 
-## 4. Upload Size Policy Is Still Simplified
+## 3. Upload Size Policy Is Still Simplified
 
 The original design separated image and video size limits.
 
@@ -52,7 +43,7 @@ Current state:
 - one global `MAX_UPLOAD_BYTES` cap applies to all uploads
 - there is no distinct image-vs-video size policy yet
 
-## 5. Admin Bootstrap CLI Is Simpler Than Designed
+## 4. Admin Bootstrap CLI Is Simpler Than Designed
 
 The original design suggested a richer admin bootstrap flow.
 
@@ -68,7 +59,7 @@ Current state:
 - `create-user --admin` exists, but there is no dedicated interactive `create-admin` command
 - CLI-created users still start with `password_hash=None` unless a password is set later through the app/admin flow
 
-## 6. Media Responses Still Do Not Explicitly Set `Content-Length`
+## 5. Media Responses Still Do Not Explicitly Set `Content-Length`
 
 The design expected explicit forwarding of media response length.
 
@@ -78,13 +69,13 @@ Current state:
 - the storage layer computes stream length
 - the response path does not explicitly set `Content-Length`
 
-## 7. The Browser UI Is Utility-Focused, Not Product-Focused
+## 6. The Browser UI Is Utility-Focused, Not Product-Focused
 
 The current UI is intentionally basic and mostly exists to exercise the backend.
 
 This differs from the original design, which assumed a more fully designed end-user and admin interface.
 
-## 8. Public-Origin Validation Is Simpler Than A Full Trusted-Proxy Model
+## 7. Public-Origin Validation Is Simpler Than A Full Trusted-Proxy Model
 
 The app now validates request-derived public origins against an explicit allowlist.
 
@@ -93,3 +84,13 @@ What the design still does not fully cover:
 - there is no separate trusted-proxy/IP allowlist
 - there is no wildcard public-origin support
 - exact-match origin validation is intentionally strict and config-driven
+
+## 8. Observability Is Status-Oriented, Not A Full Metrics Stack
+
+The app now exposes low-noise health and runtime-status snapshots and logs subsystem degraded/recovered transitions.
+
+What it still does not provide:
+
+- a full metrics/telemetry backend
+- deep per-task success logging by default
+- broad request-level structured event capture

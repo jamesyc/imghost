@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from html import escape
 import json
+import logging
 from hashlib import sha256
 from math import ceil
 from typing import Any
@@ -26,6 +27,7 @@ from .rate_limits import build_rate_limiter, hash_anon_identity
 from .redis_support import RedisHandle
 from .repositories import PostgresRepository
 from .models import User, utcnow
+from .observability import ObservabilityState
 from .runtime_config import PostgresRuntimeConfig
 from .sessions import SessionBackend, build_session_backend
 from .service import (
@@ -47,13 +49,14 @@ class AppState:
         self.settings = settings
         self.run_task_worker = settings.task_worker_enabled if run_task_worker is None else run_task_worker
         self.database = Database(settings.database_url)
+        self.observability = ObservabilityState()
         self.event_bus = EventBus()
         self.repository = PostgresRepository(self.database)
         self.audit = PostgresAuditLog(self.database)
         self.runtime_config = PostgresRuntimeConfig(self.database)
         self.redis = RedisHandle(settings)
-        self.session_backend: SessionBackend = build_session_backend(settings, self.redis)
-        self.rate_limiter = build_rate_limiter(self.runtime_config, self.redis)
+        self.session_backend: SessionBackend = build_session_backend(settings, self.redis, self.observability)
+        self.rate_limiter = build_rate_limiter(self.runtime_config, self.redis, self.observability)
         self.storage = build_storage_backend(settings)
         self.processors = build_processor_registry(
             settings.max_pixel_megapixels * 1_000_000,
@@ -81,6 +84,7 @@ class AppState:
             return RedisTaskQueue(
                 self.redis,
                 context,
+                self.observability,
                 worker_count=self.settings.thumbnail_worker_count,
                 run_worker=self.run_task_worker,
             )
@@ -125,7 +129,63 @@ class AppState:
                 correlation_id=f"recovery-{media.id}",
             )
             enqueued += 1
+        if enqueued:
+            logging.getLogger(__name__).info(
+                "thumbnail_recovery_enqueued",
+                extra={"count": enqueued, "include_failed": include_failed},
+            )
         return enqueued
+
+    async def runtime_status(self) -> dict[str, Any]:
+        database_ok = False
+        try:
+            pool = self.database.require_pool()
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            database_ok = True
+        except Exception:
+            database_ok = False
+        storage_ok = await self.storage.health_check()
+        redis_reachable = await self.redis.ping()
+        redis_configured = self.redis.enabled
+        tasks_configured = redis_configured and self.settings.task_queue_mode == "redis"
+        return {
+            "database": {"ok": database_ok},
+            "storage": {"ok": storage_ok},
+            "redis": {
+                "configured": redis_configured,
+                "reachable": redis_reachable,
+                "subsystems": {
+                    "sessions": self.observability.subsystem_snapshot(
+                        "sessions",
+                        configured=redis_configured,
+                        default_mode="redis" if redis_configured else "disabled",
+                    ),
+                    "rate_limits": self.observability.subsystem_snapshot(
+                        "rate_limits",
+                        configured=redis_configured,
+                        default_mode="redis" if redis_configured else "disabled",
+                    ),
+                    "tasks": self.observability.subsystem_snapshot(
+                        "tasks",
+                        configured=tasks_configured,
+                        default_mode="redis" if tasks_configured else "fallback",
+                    ),
+                },
+            },
+            "worker": {
+                "enabled_in_this_process": self.run_task_worker,
+                "last_started_at": self.observability.last_worker_started_at,
+                "last_stopped_at": self.observability.last_worker_stopped_at,
+                "last_task_failure_at": self.observability.last_task_failure_at,
+                "last_task_failure": self.observability.last_task_failure,
+            },
+            "tasks": {
+                "mode": self.settings.task_queue_mode,
+                **(await self.tasks.runtime_status()),
+            },
+            "trusted_public_origins": list(self.settings.trusted_public_origins),
+        }
 
 
 @asynccontextmanager
@@ -146,6 +206,7 @@ async def clear_stale_session_cookie(request: Request, call_next):
     response = await call_next(request)
     if getattr(request.state, "clear_session_cookie", False):
         clear_session_cookie(response, get_state(request).settings)
+        logging.getLogger(__name__).info("session_cookie_cleared", extra={"path": request.url.path})
     return response
 
 
@@ -2294,6 +2355,14 @@ async def admin_stats(request: Request) -> JSONResponse:
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
+@app.get("/api/v1/admin/runtime-status")
+async def admin_runtime_status(request: Request) -> JSONResponse:
+    state = get_state(request)
+    await require_admin_user(request)
+    payload = await state.runtime_status()
+    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
+
+
 @app.patch("/api/v1/album/{album_id}")
 async def patch_album(
     request: Request,
@@ -2373,5 +2442,9 @@ async def health_live() -> PlainTextResponse:
 @app.get("/health/ready")
 async def health_ready(request: Request) -> JSONResponse:
     state = get_state(request)
-    ready = await state.storage.health_check()
-    return JSONResponse({"ok": ready}, status_code=200 if ready else 503)
+    payload = await state.runtime_status()
+    ready = payload["database"]["ok"] and payload["storage"]["ok"]
+    if state.settings.redis_mode == "required" and payload["redis"]["configured"] and not payload["redis"]["reachable"]:
+        ready = False
+    payload["ok"] = bool(ready)
+    return JSONResponse(payload, status_code=200 if ready else 503)

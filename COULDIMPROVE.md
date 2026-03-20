@@ -4,7 +4,6 @@ This file is intentionally not a blocker list. Everything here is working or at 
 
 ## High Value
 
-- Stream ZIP downloads instead of buffering entire archives in memory.
 - Decide whether ShareX config should support browser-session download instead of API-key-only download.
 - Replace the utility UI with a real product/admin UI.
 
@@ -38,7 +37,6 @@ This file is intentionally not a blocker list. Everything here is working or at 
 
 - Structured logging
 - metrics
-- clearer degraded-mode/Redis-recovery visibility
 - health/readiness documentation
 - backup/restore docs
 - multi-machine deployment docs beyond the current env-override pattern

@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
 
+from .observability import ObservabilityState
 from .processors import ProcessorRegistry
 from .redis_support import RedisHandle, RedisUnavailable
 from .repositories import PostgresRepository
@@ -39,6 +40,9 @@ class TaskQueue:
 
     async def join(self) -> None:
         return None
+
+    async def runtime_status(self) -> dict[str, object]:
+        return {"queue_backend": "unknown"}
 
 
 @dataclass(slots=True)
@@ -92,6 +96,14 @@ class AsyncTaskQueue(TaskQueue):
     async def join(self) -> None:
         await self._queue.join()
 
+    async def runtime_status(self) -> dict[str, object]:
+        return {
+            "queue_backend": "async",
+            "worker_count": self.worker_count,
+            "active_workers": len(self._workers),
+            "queue_depth": self._queue.qsize(),
+        }
+
 
 class SyncTaskQueue(TaskQueue):
     def __init__(self, context: TaskContext) -> None:
@@ -105,18 +117,23 @@ class SyncTaskQueue(TaskQueue):
         handler = self._handlers[task_name]
         await handler(**kwargs)
 
+    async def runtime_status(self) -> dict[str, object]:
+        return {"queue_backend": "sync"}
+
 
 class RedisTaskQueue(TaskQueue):
     def __init__(
         self,
         redis: RedisHandle,
         context: TaskContext,
+        observability: ObservabilityState,
         *,
         worker_count: int = 1,
         run_worker: bool = True,
     ) -> None:
         self.redis = redis
         self.context = context
+        self.observability = observability
         self.worker_count = max(1, worker_count)
         self.run_worker = run_worker
         self._handlers: dict[str, TaskHandler] = {}
@@ -133,6 +150,7 @@ class RedisTaskQueue(TaskQueue):
         await self._fallback.start()
         if not self.run_worker or self._workers:
             return
+        self.observability.mark_worker_started()
         self._workers = [asyncio.create_task(self._run_worker(index)) for index in range(self.worker_count)]
 
     async def stop(self) -> None:
@@ -141,6 +159,7 @@ class RedisTaskQueue(TaskQueue):
         if self._workers:
             await asyncio.gather(*self._workers, return_exceptions=True)
             self._workers = []
+            self.observability.mark_worker_stopped()
         await self._fallback.stop()
 
     async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
@@ -154,7 +173,14 @@ class RedisTaskQueue(TaskQueue):
                 lambda client: client.rpush(self.redis.prefixed(f"queue:{queue}"), message),
             )
         except RedisUnavailable:
+            self.observability.mark_subsystem_degraded(
+                "tasks",
+                operation="enqueue task",
+                reason="redis_unavailable",
+            )
             await self._fallback.enqueue(task_name, queue=queue, **kwargs)
+            return
+        self.observability.mark_subsystem_recovered("tasks", operation="enqueue task")
 
     async def join(self) -> None:
         await self._fallback.join()
@@ -191,13 +217,20 @@ class RedisTaskQueue(TaskQueue):
                     lambda client: client.blpop(queue_keys, timeout=1),
                 )
             except RedisUnavailable:
+                self.observability.mark_subsystem_degraded(
+                    "tasks",
+                    operation="dequeue task",
+                    reason="redis_unavailable",
+                )
                 await asyncio.sleep(0.25)
                 continue
             except asyncio.CancelledError:
                 raise
+            self.observability.mark_subsystem_recovered("tasks", operation="dequeue task")
             if item is None:
                 continue
             _, raw_payload = item
+            payload: dict[str, object] | None = None
             try:
                 payload = json.loads(raw_payload)
                 task_name = payload["task_name"]
@@ -208,7 +241,48 @@ class RedisTaskQueue(TaskQueue):
             except asyncio.CancelledError:
                 raise
             except Exception:
+                task_name = str(payload.get("task_name")) if isinstance(payload, dict) else "unknown"
+                details = {"worker_index": worker_index}
+                if isinstance(payload, dict):
+                    kwargs = payload.get("kwargs")
+                    if isinstance(kwargs, dict):
+                        details.update({key: kwargs.get(key) for key in ("media_id", "correlation_id")})
+                self.observability.record_task_failure(task_name=task_name, details=details)
                 logger.exception("redis_task_worker_failed", extra={"worker_index": worker_index})
             finally:
                 if self._active_jobs > 0:
                     self._active_jobs -= 1
+
+    async def runtime_status(self) -> dict[str, object]:
+        queues = await self._safe_queue_lengths()
+        return {
+            "queue_backend": "redis",
+            "worker_count": self.worker_count,
+            "worker_enabled": self.run_worker,
+            "active_workers": len(self._workers),
+            "active_jobs": self._active_jobs,
+            "queue_depth": sum(queues.values()),
+            "queues": queues,
+        }
+
+    async def _safe_queue_lengths(self) -> dict[str, int]:
+        try:
+            lengths = await self.redis.execute(
+                "check queue lengths",
+                lambda client: self._read_named_queue_lengths(client),
+            )
+        except RedisUnavailable:
+            self.observability.mark_subsystem_degraded(
+                "tasks",
+                operation="check queue lengths",
+                reason="redis_unavailable",
+            )
+            return {}
+        self.observability.mark_subsystem_recovered("tasks", operation="check queue lengths")
+        return lengths
+
+    async def _read_named_queue_lengths(self, client: object) -> dict[str, int]:
+        lengths: dict[str, int] = {}
+        for queue in self._known_queues:
+            lengths[queue] = int(await client.llen(self.redis.prefixed(f"queue:{queue}")))
+        return lengths

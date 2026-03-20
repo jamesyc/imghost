@@ -4,7 +4,7 @@ This document is the updated design snapshot for the current state of the projec
 
 ## Goals
 
-- Keep the current prototype useful and operable.
+- Keep the current code useful and operable.
 - Preserve clean public media URLs.
 - Support both anonymous and authenticated usage.
 - Keep deployment simple for one-machine self-hosting.
@@ -150,10 +150,9 @@ That is enough for lightweight split-host deployments.
 
 If the project continues toward a more production-oriented design, the next architectural step should be:
 
-1. improve observability
-2. stream ZIP downloads
-3. add stronger trusted-proxy / forwarded-header hardening
-4. replace the utility UI
+1. add stronger trusted-proxy / forwarded-header hardening
+2. expand operations/deployment documentation
+3. replace the utility UI
 
 ## What Should Not Change
 

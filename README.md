@@ -136,6 +136,13 @@ Docker/infra defaults:
   - upload rate limiting falls back to in-process memory
   - thumbnail jobs fall back to in-process async execution
 
+## Health And Runtime Status
+
+- `/health/live` returns a simple liveness response for process-level checks.
+- `/health/ready` returns a low-noise readiness snapshot covering database, storage, Redis reachability, subsystem modes, worker state, and task queue status.
+- `/api/v1/admin/runtime-status` returns a richer admin-only operational snapshot including trusted public origins, worker/task state, and Redis subsystem degradation status.
+- Redis observability is transition-oriented rather than per-operation noisy, so degraded and recovered states are logged while repeated fallback behavior is suppressed.
+
 ## URL Generation
 
 Absolute URLs now prefer the request's public origin:
@@ -171,7 +178,7 @@ The test harness will refuse to run against database names that do not look like
 
 Current full suite status at the time these docs were updated:
 
-- `80 passed`
+- `81 passed`
 
 The test suite uses PostgreSQL and truncates tables between tests. Run it only against a dedicated test database.
 

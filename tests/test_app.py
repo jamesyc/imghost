@@ -360,6 +360,26 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert 'id="admin-albums"' in page.text
 
 
+def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="statusadmin", email="statusadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["database"]["ok"] is True
+        assert payload["storage"]["ok"] is True
+        assert "tasks" in payload
+        assert "trusted_public_origins" in payload
+
+
 def test_album_tools_page_includes_manual_album_controls(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

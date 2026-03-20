@@ -5,12 +5,16 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import hmac
 import json
+import logging
 from hashlib import sha256
 from uuid import uuid4
 
 from .config import Settings
 from .models import User, utcnow
+from .observability import ObservabilityState
 from .redis_support import RedisHandle, RedisUnavailable
+
+logger = logging.getLogger(__name__)
 
 
 def _b64encode(data: bytes) -> str:
@@ -67,9 +71,10 @@ class CookieSessionBackend(SessionBackend):
 
 
 class RedisBackedSessionBackend(SessionBackend):
-    def __init__(self, settings: Settings, redis: RedisHandle) -> None:
+    def __init__(self, settings: Settings, redis: RedisHandle, observability: ObservabilityState) -> None:
         self.settings = settings
         self.redis = redis
+        self.observability = observability
 
     async def create_session(self, user: User, *, remember_me: bool) -> tuple[str, datetime | None]:
         token, expires_at = _create_signed_token(self.settings, user, remember_me=remember_me, store="cookie")
@@ -87,7 +92,14 @@ class RedisBackedSessionBackend(SessionBackend):
                 ),
             )
         except RedisUnavailable:
+            self.observability.mark_subsystem_degraded(
+                "sessions",
+                operation="create session",
+                reason="redis_unavailable",
+            )
+            logger.warning("session_backend_fallback", extra={"reason": "redis_unavailable", "action": "create"})
             return token, expires_at
+        self.observability.mark_subsystem_recovered("sessions", operation="create session")
         return _sign_payload(self.settings, payload, store="redis"), expires_at
 
     async def resolve_user(self, token: str) -> str | None:
@@ -102,7 +114,14 @@ class RedisBackedSessionBackend(SessionBackend):
                 lambda client: client.get(self.redis.prefixed(f"session:{payload.session_id}")),
             )
         except RedisUnavailable:
+            self.observability.mark_subsystem_degraded(
+                "sessions",
+                operation="resolve session",
+                reason="redis_unavailable",
+            )
+            logger.warning("session_backend_fallback", extra={"reason": "redis_unavailable", "action": "resolve"})
             return payload.user_id
+        self.observability.mark_subsystem_recovered("sessions", operation="resolve session")
         if raw is None:
             return None
         try:
@@ -124,12 +143,18 @@ class RedisBackedSessionBackend(SessionBackend):
                 lambda client: client.delete(self.redis.prefixed(f"session:{payload.session_id}")),
             )
         except RedisUnavailable:
+            self.observability.mark_subsystem_degraded(
+                "sessions",
+                operation="delete session",
+                reason="redis_unavailable",
+            )
             return
+        self.observability.mark_subsystem_recovered("sessions", operation="delete session")
 
 
-def build_session_backend(settings: Settings, redis: RedisHandle) -> SessionBackend:
+def build_session_backend(settings: Settings, redis: RedisHandle, observability: ObservabilityState) -> SessionBackend:
     if redis.enabled:
-        return RedisBackedSessionBackend(settings, redis)
+        return RedisBackedSessionBackend(settings, redis, observability)
     return CookieSessionBackend(settings)
 
 
