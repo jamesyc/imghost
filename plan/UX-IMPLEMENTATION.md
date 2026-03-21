@@ -411,13 +411,13 @@ JavaScript needed here:
 
 Status:
 
-- in progress
+- complete
 - `/admin`, `/admin/users`, `/admin/users/new`, `/admin/albums`, `/admin/config`, and `/admin/ops` now exist as split template-backed pages
 - `/admin/users` and `/admin/albums` now use paginated listing surfaces rather than loading the full dataset at once
 - `/admin/config` is grouped into readable operational sections with inline save feedback and an optional debug payload view
-- `/admin/ops` now presents structured runtime health panels and a bounded audit list with a default page size instead of dumping an unbounded raw response
-- `/admin` overview now shows summary cards for storage and runtime instead of raw JSON blocks
-- remaining work is polish and any deeper admin interaction coverage, not the original split-page rewrite
+- `/admin/ops` now presents structured runtime health panels, shared network-trust sections, and a bounded audit list with a default page size instead of dumping an unbounded raw response
+- `/admin` overview now shows summary cards for storage/runtime and reuses the shared runtime rendering used by `/admin/ops`
+- admin runtime/network-trust rendering now lives in shared client code to avoid surface drift between overview and ops
 
 ## HTMX Strategy
 

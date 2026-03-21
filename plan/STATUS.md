@@ -231,15 +231,14 @@ It is no longer just an anonymous upload proof-of-concept.
 - polished end-user UI for `/dashboard`, `/albums`, `/albums/{id}`, `/a/{id}`, `/u/{username}`, and the split admin pages
 - private/password-protected albums
 - email-based password reset
-- richer admin UX beyond the current utility page
+- deeper admin behavior coverage and follow-on UX refinement beyond the completed split admin redesign
 
 ## Immediate Next Work
 
 If work continues from the current state, the highest-value next steps are:
 
 1. Add richer deployment and operations docs for the new runtime-status and proxy/degraded-mode behavior.
-2. Rebuild `/a/{id}` on the same visual system as the owner album workspace.
-3. Strengthen automated coverage for browser-side dashboard, album-list, and owner-workspace interactions beyond page-shell checks.
-4. Split the admin surface into `/admin`, `/admin/users`, `/admin/albums`, `/admin/config`, and `/admin/ops`.
-5. Add richer user settings and identity features such as OAuth-linked account management.
-6. Decide whether trusted-proxy enforcement should eventually become the default instead of opt-in.
+2. Strengthen automated coverage for browser-side dashboard, album-list, and owner-workspace interactions beyond page-shell checks.
+3. Add deeper admin mutation coverage beyond the current page-shell and runtime-status regressions.
+4. Add richer user settings and identity features such as OAuth-linked account management.
+5. Decide whether trusted-proxy enforcement should eventually become the default instead of opt-in.

@@ -58,3 +58,96 @@ window.adminFormatDateTime = (value) => {
   }
   return date.toLocaleString();
 };
+
+window.renderAdminRuntimeCards = (payload) => {
+  const hasSeparateWorkerService = payload.redis?.configured && payload.tasks?.mode === "redis";
+  const queueDetails = Object.entries(payload.tasks?.queues || {})
+    .map(([name, depth]) => `${name}: ${window.adminFormatNumber(depth)}`)
+    .join(" · ");
+
+  const entries = [
+    {
+      label: "Database",
+      status: payload.database?.ok ? "Healthy" : "Unavailable",
+      tone: payload.database?.ok ? "ok" : "warn",
+      hint: "Primary SQL database health check",
+    },
+    {
+      label: "Storage",
+      status: payload.storage?.ok ? "Healthy" : "Unavailable",
+      tone: payload.storage?.ok ? "ok" : "warn",
+      hint: "Object storage connection status",
+    },
+    {
+      label: "Redis",
+      status: payload.redis?.configured ? (payload.redis?.reachable ? "Reachable" : "Configured, not reachable") : "Disabled",
+      tone: payload.redis?.configured ? (payload.redis?.reachable ? "ok" : "warn") : "neutral",
+      hint: `Sessions ${payload.redis?.subsystems?.sessions?.mode || "unknown"} · Rate limits ${payload.redis?.subsystems?.rate_limits?.mode || "unknown"}`,
+    },
+    {
+      label: "Task queue",
+      status: payload.tasks?.mode || "Unknown",
+      tone: payload.tasks?.queue_depth > 0 ? "warn" : "ok",
+      hint: `Depth ${window.adminFormatNumber(payload.tasks?.queue_depth || 0)}${queueDetails ? ` · ${queueDetails}` : ""}`,
+    },
+    {
+      label: "Worker",
+      status: payload.worker?.enabled_in_this_process
+        ? "Running in app process"
+        : hasSeparateWorkerService
+          ? "Separate worker service"
+          : "Disabled",
+      tone: payload.worker?.enabled_in_this_process || hasSeparateWorkerService
+        ? (payload.worker?.last_task_failure ? "warn" : "ok")
+        : "neutral",
+      hint: payload.worker?.last_task_failure
+        ? `Last failure: ${window.escapeAdminHtml(String(payload.worker.last_task_failure))}`
+        : `Last started ${window.adminFormatDateTime(payload.worker?.last_started_at)}`,
+    },
+    {
+      label: "Proxy trust",
+      status: payload.forwarded_headers_policy || "Unknown",
+      tone: payload.trusted_proxy_cidrs_enabled ? "ok" : "neutral",
+      hint: `${(payload.trusted_proxy_cidrs || []).length} trusted CIDR(s)`,
+    },
+  ];
+
+  return `
+    <div class="admin-runtime-grid">
+      ${entries
+        .map(
+          (entry) => `
+            <article class="admin-runtime-card">
+              <div class="admin-status-pill" data-tone="${entry.tone}">${window.escapeAdminHtml(entry.status)}</div>
+              <h3>${window.escapeAdminHtml(entry.label)}</h3>
+              <p class="hint">${window.escapeAdminHtml(entry.hint)}</p>
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
+window.renderAdminNetworkTrust = (payload) => `
+  <section class="admin-overview-subsection">
+    <div class="admin-section-header">
+      <h3>Network trust</h3>
+      <p class="hint">Origins and proxy trust that affect request handling.</p>
+    </div>
+    <div class="item-list">
+      <article class="admin-list-row">
+        <div>
+          <strong>Trusted public origins</strong>
+          <p class="hint">${window.escapeAdminHtml((payload.trusted_public_origins || []).join(", ") || "None configured")}</p>
+        </div>
+      </article>
+      <article class="admin-list-row">
+        <div>
+          <strong>Trusted proxy CIDRs</strong>
+          <p class="hint">${window.escapeAdminHtml((payload.trusted_proxy_cidrs || []).join(", ") || "None configured")}</p>
+        </div>
+      </article>
+    </div>
+  </section>
+`;

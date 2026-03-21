@@ -267,11 +267,13 @@ Should include:
 
 Should include:
 
-- runtime config values
+- grouped runtime config values
 - editable values
 - locked values with explicit locked state
 - rate-limit settings
 - registration and anonymous-upload settings
+- inline save feedback near the form
+- optional debug payload view for low-level inspection
 
 ### `/admin/ops`
 
@@ -282,6 +284,8 @@ Should include:
 - anonymous storage usage
 - runtime-status data
 - Redis, task, and worker visibility
+- network-trust visibility
+- bounded audit results with filter inputs and paging controls
 
 ## Backend Mapping
 

@@ -530,6 +530,8 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert overview.status_code == 200
         assert "Admin overview" in overview.text
         assert 'href="/admin/users"' in overview.text
+        assert '<script src="/static/js/admin-common.js" defer></script>' in overview.text
+        assert '<script src="/static/js/admin-index.js" defer></script>' in overview.text
         assert 'id="admin-overview-stats"' in overview.text
         assert 'id="admin-overview-stats-status"' in overview.text
         assert 'id="admin-overview-runtime"' in overview.text
@@ -565,7 +567,10 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         ops = client.get("/admin/ops")
         assert ops.status_code == 200
         assert "Operations" in ops.text
+        assert '<script src="/static/js/admin-common.js" defer></script>' in ops.text
+        assert '<script src="/static/js/admin-ops.js" defer></script>' in ops.text
         assert 'id="admin-runtime-status"' in ops.text
+        assert 'id="admin-network-trust"' in ops.text
         assert 'id="admin-audit-form"' in ops.text
         assert 'value="25"' in ops.text
         assert 'id="admin-audit-prev"' in ops.text

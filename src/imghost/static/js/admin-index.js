@@ -55,89 +55,9 @@ if (adminOverviewStats && adminOverviewRuntime) {
   };
 
   const renderRuntime = (payload) => {
-    const subsystems = [
-      {
-        label: "Database",
-        value: payload.database?.ok ? "Healthy" : "Unavailable",
-        tone: statusTone(payload.database?.ok),
-        hint: "Primary application database",
-      },
-      {
-        label: "Storage",
-        value: payload.storage?.ok ? "Healthy" : "Unavailable",
-        tone: statusTone(payload.storage?.ok),
-        hint: "Object storage health check",
-      },
-      {
-        label: "Redis",
-        value: payload.redis?.configured ? (payload.redis?.reachable ? "Reachable" : "Configured, not reachable") : "Disabled",
-        tone: payload.redis?.configured ? statusTone(payload.redis?.reachable) : "neutral",
-        hint: `Sessions ${payload.redis?.subsystems?.sessions?.mode || "unknown"} · Tasks ${payload.redis?.subsystems?.tasks?.mode || "unknown"}`,
-      },
-      {
-        label: "Tasks",
-        value: payload.tasks?.mode ? `${payload.tasks.mode} queue` : "Unknown",
-        tone: payload.tasks?.queue_depth > 0 ? "warn" : "ok",
-        hint: `Queue depth ${window.adminFormatNumber(payload.tasks?.queue_depth || 0)} · Workers ${window.adminFormatNumber(payload.tasks?.active_workers || 0)}`,
-      },
-      {
-        label: "Worker",
-        value: payload.worker?.enabled_in_this_process
-          ? "Running in app process"
-          : payload.tasks?.mode === "redis"
-            ? "Separate worker service"
-            : "Disabled",
-        tone: payload.worker?.enabled_in_this_process || payload.tasks?.mode === "redis"
-          ? (payload.worker?.last_task_failure ? "warn" : "ok")
-          : "neutral",
-        hint: payload.worker?.last_task_failure_at
-          ? `Last failure ${window.adminFormatDateTime(payload.worker.last_task_failure_at)}`
-          : `Last started ${window.adminFormatDateTime(payload.worker?.last_started_at)}`,
-      },
-      {
-        label: "Proxy policy",
-        value: payload.forwarded_headers_policy || "Unknown",
-        tone: "neutral",
-        hint: payload.trusted_proxy_cidrs_enabled
-          ? `${(payload.trusted_proxy_cidrs || []).length} trusted CIDR(s)`
-          : "Forwarded headers accepted permissively",
-      },
-    ];
-
     adminOverviewRuntime.innerHTML = `
-      <div class="admin-runtime-grid">
-        ${subsystems
-          .map(
-            (entry) => `
-              <article class="admin-runtime-card">
-                <div class="admin-status-pill" data-tone="${entry.tone}">${window.escapeAdminHtml(entry.value)}</div>
-                <h3>${window.escapeAdminHtml(entry.label)}</h3>
-                <p class="hint">${window.escapeAdminHtml(entry.hint)}</p>
-              </article>
-            `
-          )
-          .join("")}
-      </div>
-      <section class="admin-overview-subsection">
-        <div class="admin-section-header">
-          <h3>Network trust</h3>
-          <p class="hint">Origins and proxy trust that affect request handling.</p>
-        </div>
-        <div class="item-list">
-          <article class="admin-list-row">
-            <div>
-              <strong>Trusted public origins</strong>
-              <p class="hint">${window.escapeAdminHtml((payload.trusted_public_origins || []).join(", ") || "None configured")}</p>
-            </div>
-          </article>
-          <article class="admin-list-row">
-            <div>
-              <strong>Trusted proxy CIDRs</strong>
-              <p class="hint">${window.escapeAdminHtml((payload.trusted_proxy_cidrs || []).join(", ") || "None configured")}</p>
-            </div>
-          </article>
-        </div>
-      </section>
+      ${window.renderAdminRuntimeCards(payload)}
+      ${window.renderAdminNetworkTrust(payload)}
     `;
   };
 

@@ -34,6 +34,28 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert payload["trusted_proxy_cidrs"] == ["127.0.0.1/32", "172.16.0.0/12"]
 
 
+def test_admin_runtime_status_reports_redis_disabled_when_redis_queue_mode_is_not_backed_by_redis(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "redis")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    _, admin_key = create_admin_and_api_key(capsys, username="noredisadmin", email="noredisadmin@example.com")
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["tasks"]["mode"] == "redis"
+        assert payload["redis"]["configured"] is False
+        assert payload["redis"]["reachable"] is False
+
+
 def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
