@@ -25,24 +25,7 @@ const showMessage = (message) => {
   }
 };
 
-const escapeHtml = (value) =>
-  String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-
-const formatBytes = (value) => {
-  const bytes = Number(value || 0);
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const scaled = bytes / (1024 ** exponent);
-  const decimals = scaled >= 10 || exponent === 0 ? 0 : 1;
-  return `${scaled.toFixed(decimals)} ${units[exponent]}`;
-};
+const formatBytes = window.albumCardFormatBytes;
 
 const requestJson = async (url, options = {}) => {
   const response = await fetch(url, options);
@@ -71,69 +54,6 @@ const updateUsageSummary = () => {
   usageBar.style.width = `${percent}%`;
 };
 
-const privateAlbumPath = (albumId) => `/albums/${encodeURIComponent(albumId)}`;
-const publicAlbumUrl = (albumId) => `${window.location.origin}/a/${encodeURIComponent(albumId)}`;
-
-const albumPreviewItem = (album) => {
-  if (!Array.isArray(album.items) || !album.items.length) {
-    return null;
-  }
-  if (album.cover_media_id) {
-    const coverItem = album.items.find((item) => item.id === album.cover_media_id);
-    if (coverItem) {
-      return coverItem;
-    }
-  }
-  return album.items[0];
-};
-
-const renderRecentAlbum = (album) => `
-  <section
-    class="album-card album-list-card dashboard-recent-album-card"
-    role="link"
-    tabindex="0"
-    data-album-open-url="${privateAlbumPath(album.id)}"
-    aria-label="Open album ${escapeHtml(album.title || album.id)}"
-  >
-    <div class="dashboard-recent-album-copy">
-      <div>
-        <h3>${escapeHtml(album.title || "Untitled album")}</h3>
-        <p class="hint">${album.item_count} item(s)</p>
-      </div>
-      <div class="row row-actions">
-        <div class="split-link-control">
-          <a class="split-link-action" href="${publicAlbumUrl(album.id)}" target="_blank" rel="noreferrer">Public Page</a>
-          <input
-            class="split-link-value"
-            type="text"
-            value="${escapeHtml(publicAlbumUrl(album.id))}"
-            readonly
-            aria-label="Public page URL"
-            onclick="this.select()"
-          >
-        </div>
-      </div>
-    </div>
-    <a class="dashboard-recent-album-thumb" href="${privateAlbumPath(album.id)}" aria-label="Open private album ${escapeHtml(album.title || album.id)}">
-      ${(() => {
-        const previewItem = albumPreviewItem(album);
-        if (!previewItem) {
-          return '<span class="dashboard-recent-album-thumb-placeholder">No media</span>';
-        }
-        if (previewItem.thumb_status === "failed") {
-          return '<span class="dashboard-recent-album-thumb-placeholder">Thumbnail failed</span>';
-        }
-        if (previewItem.thumb_status === "pending" || previewItem.thumb_status === "processing") {
-          return '<span class="dashboard-recent-album-thumb-placeholder">Thumbnail pending</span>';
-        }
-        return `<img src="${escapeHtml(previewItem.thumb_url)}" alt="${escapeHtml(album.title || "Untitled album")}">`;
-      })()}
-    </a>
-  </section>
-`;
-
-const interactiveRecentAlbumTarget = (target) => target.closest("a, input, button, textarea, select, label");
-
 const refreshUser = async () => {
   state.user = await requestJson("/api/v1/user/me");
   updateUsageSummary();
@@ -142,7 +62,7 @@ const refreshUser = async () => {
 const refreshRecentAlbums = async () => {
   const albums = await requestJson("/api/v1/user/me/albums");
   const recentAlbums = albums.slice(0, 5);
-  recentAlbumsRoot.innerHTML = recentAlbums.length ? recentAlbums.map(renderRecentAlbum).join("") : "";
+  recentAlbumsRoot.innerHTML = recentAlbums.length ? recentAlbums.map((album) => window.renderAlbumCard(album)).join("") : "";
   emptyState?.classList.toggle("hidden", recentAlbums.length > 0);
 };
 
@@ -348,24 +268,4 @@ updateUsageSummary();
 Promise.all([refreshUser(), refreshRecentAlbums()]).catch((error) => {
   showMessage(error.message);
 });
-
-recentAlbumsRoot?.addEventListener("click", (event) => {
-  if (interactiveRecentAlbumTarget(event.target)) {
-    return;
-  }
-  const card = event.target.closest("[data-album-open-url]");
-  if (card?.dataset.albumOpenUrl) {
-    window.location.assign(card.dataset.albumOpenUrl);
-  }
-});
-
-recentAlbumsRoot?.addEventListener("keydown", (event) => {
-  const card = event.target.closest("[data-album-open-url]");
-  if (!card || interactiveRecentAlbumTarget(event.target)) {
-    return;
-  }
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
-    window.location.assign(card.dataset.albumOpenUrl);
-  }
-});
+window.attachAlbumCardNavigation?.(recentAlbumsRoot);

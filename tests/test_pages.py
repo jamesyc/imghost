@@ -232,7 +232,8 @@ def test_template_shell_wraps_phase_three_pages_and_private_pages(tmp_path, monk
         assert settings.status_code == 200
         assert "Your dashboard" in dashboard.text
         assert '<script src="/static/js/upload-box.js" defer></script>' in dashboard.text
-        assert "Your albums" in albums.text
+        assert '<script src="/static/js/album-cards.js" defer></script>' in dashboard.text
+        assert "All owned albums" in albums.text
         assert "Settings" in settings.text
         assert 'href="/albums"' in dashboard.text
         assert 'href="/settings"' in dashboard.text
@@ -295,7 +296,9 @@ def test_albums_page_focuses_on_album_list_and_has_no_primary_upload_box(tmp_pat
 
         page = client.get("/albums")
         assert page.status_code == 200
-        assert "Your albums" in page.text
+        assert "Your albums" not in page.text
+        assert "Recent albums appear first. Open an album to continue managing it." not in page.text
+        assert '<script src="/static/js/album-cards.js" defer></script>' in page.text
         assert 'id="owned-albums"' in page.text
         assert 'id="albums-upload-form"' not in page.text
         assert 'href="/dashboard"' in page.text

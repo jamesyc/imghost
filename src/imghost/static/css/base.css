@@ -265,6 +265,10 @@ body::after {
   gap: 24px;
 }
 
+.albums-list-header {
+  margin-bottom: 18px;
+}
+
 .dashboard-shell {
   gap: 24px;
 }
@@ -422,6 +426,15 @@ body::after {
 
 .dashboard-recent-album-copy .row-actions {
   justify-content: flex-start;
+}
+
+.album-card-actions-stack {
+  display: grid;
+  justify-items: start;
+}
+
+.album-card-actions-stack > * {
+  width: min(100%, 540px);
 }
 
 .dashboard-recent-album-thumb {

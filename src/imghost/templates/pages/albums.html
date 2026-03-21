@@ -3,28 +3,14 @@
 {% block content %}
 {% include "partials/flash.html" %}
 <section class="stack albums-shell">
-  <section class="card hero-card albums-hero">
-    <div class="albums-hero-copy">
-      <p class="eyebrow">Owned albums</p>
-      <h1>Your albums</h1>
-      <p class="lede">Browse everything you own in one place. Use the dashboard when you want to upload, then come here to open the full list.</p>
-    </div>
-    <div class="albums-hero-actions row row-actions">
-      <a class="button-link secondary-link" href="/dashboard">Dashboard</a>
-      <a class="button-link secondary-link" href="/settings">Settings</a>
-      <a class="button-link secondary-link" href="/u/{{ current_user.username }}" target="_blank" rel="noreferrer">Public gallery</a>
-    </div>
-  </section>
-
   <section class="card">
-    <div class="albums-section-header row">
+    <div class="albums-section-header row albums-list-header">
       <div>
         <p class="eyebrow">Album list</p>
         <h2>All owned albums</h2>
       </div>
       <button id="refresh-albums" type="button" class="secondary">Refresh Albums</button>
     </div>
-    <p class="hint">Recent albums appear first. Open an album to continue managing it.</p>
     <div id="owned-albums-empty" class="albums-empty-state hidden">
       <h3>No albums yet.</h3>
       <p class="hint">Use the dashboard upload box to create your first album.</p>

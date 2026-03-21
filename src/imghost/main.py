@@ -689,7 +689,7 @@ async def dashboard_page(request: Request) -> HTMLResponse:
         "Dashboard",
         user=user,
         extra_context={"session_user": session_user},
-        script_paths=["js/upload-box.js", "js/dashboard.js"],
+        script_paths=["js/upload-box.js", "js/album-cards.js", "js/dashboard.js"],
     )
 
 
@@ -704,7 +704,7 @@ async def albums_page(request: Request) -> HTMLResponse:
         "pages/albums.html",
         "Albums",
         user=user,
-        script_paths=["js/albums.js"],
+        script_paths=["js/album-cards.js", "js/albums.js"],
     )
 
 
