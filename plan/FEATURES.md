@@ -67,7 +67,6 @@
 - Anonymous token-backed `/manage/{id}` pages reuse the same album workspace UI and support title editing, append upload, reorder, cover selection, and deletion through the delete token.
 - The settings page auto-issues an API key for users who do not already have one so a newly registered browser-session user can immediately export ShareX config and test authenticated API access.
 - The admin page exposes utility-style controls for user management, album management, runtime config changes, and audit-log inspection so operational admin behaviors can be tested interactively.
-- The album-tools page provides token-based testing helpers for anonymous and public albums so delete-token workflows can be exercised without writing custom HTTP calls.
 - The app records audit log entries for relevant administrative and account actions and exposes filtered audit retrieval so end-to-end action tracing can be validated through the admin API.
 - Correlation IDs can be supplied by clients and are propagated through relevant flows, which allows E2E request tracing to be tested across normal API and admin interactions.
 - Session cookie `Secure` handling automatically follows `BASE_URL` by default but can be overridden explicitly, so both HTTPS and plain-HTTP development scenarios can be tested.

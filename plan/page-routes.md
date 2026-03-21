@@ -324,7 +324,7 @@ Should include:
 3. Keep current utility pages during transition.
 4. Keep `/dashboard` as a real page and stop treating it as a temporary redirect target.
 5. Let `/admin` become an overview/index page instead of a giant all-in-one screen.
-6. Keep `/album-tools` as a hidden utility for now or fold it into the new UI later.
+6. Retire dev-only utility pages once the real user-facing flow replaces them.
 7. Normalize auth redirect behavior with shared helpers for user and admin page routes.
 8. Preserve `/a/{album_id}` and `/u/{username}` as stable public URLs.
 
@@ -357,7 +357,6 @@ The remaining gaps are mostly frontend design and implementation decisions:
 8. `/admin/albums`
 9. `/admin/config`
 10. `/admin/ops`
-11. Simplify or retire `/album-tools`.
 
 ## UI Priorities
 

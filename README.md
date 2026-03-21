@@ -66,8 +66,6 @@ The current UI is template-backed and centered on the upload, album, and public-
   - album management
   - runtime config
   - audit log
-- `/album-tools`:
-  - token-based management for anonymous/public albums
 
 ## Docker Setup
 

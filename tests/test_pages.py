@@ -217,7 +217,7 @@ def test_template_shell_wraps_phase_three_pages_and_private_pages(tmp_path, monk
     admin_id, _ = create_admin_and_api_key(capsys, username="uiadmin", email="uiadmin@example.com")
 
     with TestClient(app, base_url="https://testserver") as client:
-        for public_path in ("/", "/login", "/register", "/album-tools"):
+        for public_path in ("/", "/login", "/register"):
             response = client.get(public_path)
             assert response.status_code == 200
             assert '<link rel="stylesheet" href="/static/css/base.css">' in response.text
@@ -519,20 +519,6 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert "Audit Log" in page.text
         assert 'id="admin-users"' in page.text
         assert 'id="admin-albums"' in page.text
-
-
-def test_album_tools_page_includes_manual_album_controls(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "http://testserver")
-
-    with TestClient(app) as client:
-        page = client.get("/album-tools")
-        assert page.status_code == 200
-        assert "Album Tools" in page.text
-        assert "Load Album" in page.text
-        assert 'name="album_id"' in page.text
-        assert 'name="delete_token"' in page.text
-
 
 def test_public_user_album_list_page_shows_owned_albums_sorted_by_recent_update(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))

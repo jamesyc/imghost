@@ -121,8 +121,6 @@ It is no longer just an anonymous upload proof-of-concept.
   - admin user and album operations
   - runtime config
   - audit log
-- `/album-tools`
-  - manual token-based anonymous album operations
 - `/manage/{id}`
   - token-backed anonymous album workspace reusing the owner editor
 - shared browser UI infrastructure:

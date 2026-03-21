@@ -542,14 +542,12 @@ def nav_items(user: User | None, *, allow_registration: bool) -> list[dict[str, 
         links.append(("/login", "Login"))
         if allow_registration:
             links.append(("/register", "Register"))
-        links.append(("/album-tools", "Album Tools"))
     else:
         links.extend(
             [
                 ("/dashboard", "Dashboard"),
                 ("/albums", "Albums"),
                 ("/settings", "Settings"),
-                ("/album-tools", "Album Tools"),
             ]
         )
         if user.is_admin:
@@ -1341,152 +1339,6 @@ async def admin_page(request: Request) -> str:
     </script>
     """
     return await page_shell(request, "Admin", with_flash(body), user=user, script=script)
-
-
-@app.get("/album-tools", response_class=HTMLResponse)
-async def album_tools_page(request: Request) -> str:
-    user = await authenticated_user(request, required=False)
-    body = """
-      <section class="grid">
-        <section class="card">
-          <h1>Album Tools</h1>
-          <p>Manual tester for anonymous and public album operations. Load any album by ID, optionally provide a delete token, then edit metadata, reorder items, delete media, download the zip, or delete the album.</p>
-        </section>
-        <section class="card">
-          <h2>Load Album</h2>
-          <form id="album-tools-load-form">
-            <input type="text" name="album_id" placeholder="Album ID" required>
-            <input type="text" name="delete_token" placeholder="Delete token (optional, required for anonymous mutations)">
-            <button type="submit">Load Album</button>
-          </form>
-        </section>
-      </section>
-      <section class="card">
-        <div id="album-tools-result" class="stack"></div>
-      </section>
-    """
-    script = """
-    <script>
-      const flash = document.getElementById("flash");
-      const root = document.getElementById("album-tools-result");
-      let currentAccess = { albumId: null, deleteToken: "" };
-      const showMessage = (message) => { flash.textContent = message || ""; };
-      const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-      const requestJson = async (url, options = {}) => {
-        const response = await fetch(url, options);
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.detail || `Request failed (${response.status}).`);
-        return data;
-      };
-      const withToken = (path) => {
-        if (!currentAccess.deleteToken) return path;
-        const glue = path.includes("?") ? "&" : "?";
-        return `${path}${glue}delete_token=${encodeURIComponent(currentAccess.deleteToken)}`;
-      };
-      const renderAlbum = (album) => {
-        const orderValue = album.items.map((item) => `${item.id}:${item.position}`).join("\\n");
-        root.innerHTML = `
-          <section class="album-card" data-album-id="${album.id}">
-            <h2>${escapeHtml(album.title || "Untitled album")}</h2>
-            <p class="hint">album=${escapeHtml(album.id)} · <a class="inline-link" href="/a/${album.id}" target="_blank">public page</a> · <a class="inline-link" href="/api/v1/album/${album.id}/zip" target="_blank">zip</a></p>
-            <form class="album-edit-form">
-              <input type="text" name="title" placeholder="Album title" value="${escapeHtml(album.title || "")}">
-              <input type="text" name="cover_media_id" placeholder="Cover media ID (blank to clear)" value="${escapeHtml(album.cover_media_id || "")}">
-              <button type="submit">Save Album Metadata</button>
-            </form>
-            <form class="album-order-form">
-              <textarea name="order">${escapeHtml(orderValue)}</textarea>
-              <button type="submit" class="secondary">Reorder Album</button>
-            </form>
-            <div class="item-list">
-              ${album.items.map((item) => `
-                <div class="item">
-                  <p><strong>${escapeHtml(item.filename)}</strong> · ${escapeHtml(item.id)}</p>
-                  <p class="hint"><a class="inline-link" href="${item.media_url}" target="_blank">media</a> · <a class="inline-link" href="${item.thumb_url}" target="_blank">thumb</a></p>
-                  <button type="button" class="danger media-delete" data-media-id="${item.id}">Delete Media</button>
-                </div>
-              `).join("")}
-            </div>
-            <button type="button" class="danger album-delete">Delete Album</button>
-          </section>
-        `;
-      };
-      const loadAlbum = async () => {
-        const album = await requestJson(`/api/v1/album/${currentAccess.albumId}`);
-        renderAlbum(album);
-      };
-      document.getElementById("album-tools-load-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const form = new FormData(event.currentTarget);
-        currentAccess = {
-          albumId: String(form.get("album_id")).trim(),
-          deleteToken: String(form.get("delete_token") || "").trim(),
-        };
-        try {
-          await loadAlbum();
-          showMessage("Album loaded.");
-        } catch (error) {
-          root.innerHTML = "";
-          showMessage(error.message);
-        }
-      });
-      root.addEventListener("submit", async (event) => {
-        const albumId = currentAccess.albumId;
-        if (!albumId) return;
-        event.preventDefault();
-        try {
-          if (event.target.matches(".album-edit-form")) {
-            const form = new FormData(event.target);
-            await requestJson(withToken(`/api/v1/album/${albumId}`), {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                title: form.get("title") || null,
-                cover_media_id: form.get("cover_media_id") || null,
-              }),
-            });
-            showMessage("Album metadata updated.");
-          } else if (event.target.matches(".album-order-form")) {
-            const raw = new FormData(event.target).get("order");
-            const payload = String(raw || "").split("\\n").map((line) => line.trim()).filter(Boolean).map((line) => {
-              const [media_id, position] = line.split(":");
-              return { media_id: media_id.trim(), position: Number(position.trim()) };
-            });
-            await requestJson(withToken(`/api/v1/album/${albumId}/order`), {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
-            showMessage("Album order updated.");
-          }
-          await loadAlbum();
-        } catch (error) {
-          showMessage(error.message);
-        }
-      });
-      root.addEventListener("click", async (event) => {
-        const albumId = currentAccess.albumId;
-        if (!albumId) return;
-        try {
-          if (event.target.matches(".album-delete")) {
-            if (!window.confirm(`Delete album ${albumId}?`)) return;
-            await requestJson(withToken(`/api/v1/album/${albumId}`), { method: "DELETE" });
-            root.innerHTML = "";
-            showMessage("Album deleted.");
-          } else if (event.target.matches(".media-delete")) {
-            const mediaId = event.target.dataset.mediaId;
-            if (!window.confirm(`Delete media ${mediaId}?`)) return;
-            await requestJson(withToken(`/api/v1/media/${mediaId}`), { method: "DELETE" });
-            await loadAlbum();
-            showMessage("Media deleted.");
-          }
-        } catch (error) {
-          showMessage(error.message);
-        }
-      });
-    </script>
-    """
-    return await page_shell(request, "Album Tools", with_flash(body), user=user, script=script)
 
 
 @app.post("/api/v1/upload")
