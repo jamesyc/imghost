@@ -133,7 +133,8 @@ class StaticPillowProcessor(PillowProcessor):
             if self.save_format == "JPEG":
                 save_kwargs["quality"] = 95
             converted.save(output, format=self.save_format, **save_kwargs)
-        return SanitizedFile(data=output.getvalue(), mime_type=self.mime_type, format=metadata.format)
+        normalized_format = "jpeg" if metadata.format in {"jpeg", "jpg", "mpo"} else metadata.format
+        return SanitizedFile(data=output.getvalue(), mime_type=self.mime_type, format=normalized_format)
 
     async def generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
         with self._open_image(payload) as image:
@@ -152,7 +153,7 @@ class JpegProcessor(StaticPillowProcessor):
 
     @staticmethod
     def supported_formats() -> list[str]:
-        return ["jpeg", "jpg"]
+        return ["jpeg", "jpg", "mpo"]
 
 
 class PngProcessor(StaticPillowProcessor):

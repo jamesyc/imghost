@@ -314,12 +314,14 @@ def upload_rate_limit_key(request: Request, user: User | None) -> str:
 
 
 def media_url(base_url: str, media_id: str, fmt: str) -> str:
-    ext = f".{fmt}" if fmt else ""
+    normalized = "jpg" if fmt == "jpeg" else fmt
+    ext = f".{normalized}" if normalized else ""
     return f"{base_url}/i/{media_id}{ext}"
 
 
 def thumb_url(base_url: str, media_id: str, fmt: str) -> str:
-    ext = f".{fmt}" if fmt else ""
+    normalized = "jpg" if fmt == "jpeg" else fmt
+    ext = f".{normalized}" if normalized else ""
     return f"{base_url}/t/{media_id}{ext}"
 
 

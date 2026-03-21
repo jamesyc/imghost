@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
@@ -148,6 +149,50 @@ def test_invalid_image_upload_is_rejected(tmp_path, monkeypatch) -> None:
 
         assert response.status_code == 415
         assert response.json()["detail"] == "Unsupported or invalid image file."
+
+
+def test_mpo_backed_jpeg_upload_is_normalized_to_jpg_and_thumbnails_succeed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    sample_path = Path(__file__).resolve().parents[1] / "plan" / "IMG_1238.jpg"
+    payload_bytes = sample_path.read_bytes()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("IMG_1238.jpg", BytesIO(payload_bytes), "image/jpeg"))],
+            data={"title": "MPO-backed JPEG"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        media_id = payload["items"][0]["media_id"]
+        media_url = payload["items"][0]["media_url"]
+        assert media_url.endswith(".jpg")
+        assert payload["items"][0]["thumb_status"] == "done"
+
+        album_response = client.get(f"/api/v1/album/{payload['album_id']}")
+        assert album_response.status_code == 200
+        item = album_response.json()["items"][0]
+        assert item["media_url"].endswith(".jpg")
+        assert item["thumb_status"] == "done"
+
+        state = client.app.state.imghost
+        media = client.portal.call(state.repository.get_media, media_id)
+        assert media is not None
+        assert media.format == "jpeg"
+        assert media.mime_type == "image/jpeg"
+        assert item["thumb_url"].endswith(".jpg")
+
+        media_response = client.get(f"/i/{media_id}.jpg")
+        assert media_response.status_code == 200
+        assert media_response.headers["content-type"] == "image/jpeg"
+
+        thumb_response = client.get(f"/t/{media_id}.jpg")
+        assert thumb_response.status_code == 200
+        assert thumb_response.headers["content-type"] == "image/jpeg"
 
 
 def test_album_payload_and_page_show_video_compatibility_warning(tmp_path, monkeypatch) -> None:
