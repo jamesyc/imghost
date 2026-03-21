@@ -268,6 +268,21 @@ class PostgresRepository:
             )
         return [_row_to_album(row) for row in rows], int(total or 0)
 
+    async def list_media_for_album_ids(self, album_ids: list[str]) -> dict[str, list[Media]]:
+        grouped: dict[str, list[Media]] = {album_id: [] for album_id in album_ids}
+        if not album_ids:
+            return grouped
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM media WHERE album_id = ANY($1::text[]) ORDER BY album_id, position",
+                album_ids,
+            )
+        for row in rows:
+            media = _row_to_media(row)
+            grouped.setdefault(media.album_id, []).append(media)
+        return grouped
+
     async def list_users(self) -> list[User]:
         pool = self.database.require_pool()
         async with pool.acquire() as conn:

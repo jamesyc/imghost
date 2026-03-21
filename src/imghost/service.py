@@ -35,6 +35,7 @@ from .processors import ProcessorRegistry
 from .rate_limits import RateLimiter
 from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
+from .payloads import album_to_payload
 from .storage import StorageBackend
 from .zip_streaming import AsyncIterableBridge
 
@@ -704,6 +705,25 @@ class UploadService:
             "has_api_key": api_key is not None,
             "api_key_created_at": api_key.created_at.isoformat() if api_key else None,
             "api_key_last_used_at": api_key.last_used_at.isoformat() if api_key and api_key.last_used_at else None,
+        }
+
+    async def get_current_user_albums_page(
+        self,
+        user: User,
+        *,
+        base_url: str,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> dict[str, object]:
+        albums, total = await self.repository.list_user_albums_page(user.id, limit=limit, offset=offset)
+        media_by_album = await self.repository.list_media_for_album_ids([album.id for album in albums])
+        items = [album_to_payload(base_url, album, media_by_album.get(album.id, [])) for album in albums]
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
         }
 
     async def issue_api_key(self, user: User) -> ApiKeyIssueResult:

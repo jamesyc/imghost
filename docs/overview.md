@@ -14,6 +14,7 @@
 - Admin APIs and utility UI
 - Background thumbnail processing
 - ZIP streaming for album downloads
+- Health and runtime-status endpoints with degraded-mode readiness behavior
 
 ## Main moving parts
 
@@ -23,6 +24,7 @@
 - Background jobs: in-process async, sync, or Redis-backed task queue via [`src/imghost/tasks.py`](/home/james/imghost/src/imghost/tasks.py)
 - Sessions: signed-cookie fallback with Redis-backed session records when available via [`src/imghost/sessions.py`](/home/james/imghost/src/imghost/sessions.py)
 - Rate limits: in-memory fallback with optional Redis-backed counters via [`src/imghost/rate_limits.py`](/home/james/imghost/src/imghost/rate_limits.py)
+- Shared JSON payload helpers via [`src/imghost/payloads.py`](/home/james/imghost/src/imghost/payloads.py)
 
 ## Deployment model
 
@@ -37,4 +39,3 @@ See:
 - [configuration.md](/home/james/imghost/docs/configuration.md)
 - [docker-deployment.md](/home/james/imghost/docs/docker-deployment.md)
 - [reverse-proxy.md](/home/james/imghost/docs/reverse-proxy.md)
-

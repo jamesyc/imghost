@@ -38,6 +38,23 @@ Before uvicorn starts, the app container entrypoint script also runs:
 
 This behavior comes from [`docker/scripts/start-app.sh`](/home/james/imghost/docker/scripts/start-app.sh) and means web-container startup has a storage-bootstrap side effect in Garage mode.
 
+## Health probe guidance
+
+For container orchestration and reverse proxies:
+
+- use `GET /health/live` as the liveness probe
+- use `GET /health/ready` as the readiness probe
+
+Expected readiness behavior:
+
+- `200` when database and storage are healthy and any required Redis dependency is reachable
+- `503` when database is unhealthy
+- `503` when storage is unhealthy
+- `503` when `REDIS_MODE=required` and Redis is configured but unreachable
+- `200` when Redis is unreachable but Redis is optional and the app is running in degraded fallback mode
+
+This matches the application’s current fallback model rather than treating every Redis outage as a full traffic blocker.
+
 ## Volumes
 
 - `../postgres-data`

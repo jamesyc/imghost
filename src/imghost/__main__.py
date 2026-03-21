@@ -4,8 +4,8 @@ import argparse
 import asyncio
 from uuid import uuid4
 
+from .app_state import AppState
 from .config import load_settings
-from .main import AppState
 from .models import User, utcnow
 
 

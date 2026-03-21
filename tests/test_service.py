@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from imghost.config import Settings
 from imghost.models import Album, User, utcnow
 from imghost.storage import StorageStream
-from imghost.main import album_to_payload
+from imghost.payloads import album_to_payload
 from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UploadService
 
 

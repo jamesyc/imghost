@@ -157,6 +157,109 @@ def test_current_user_albums_endpoint_supports_pagination(tmp_path, monkeypatch,
         assert second_payload["has_more"] is False
 
 
+def test_current_user_albums_endpoint_returns_empty_page_beyond_total(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="albumsempty", email="albumsempty@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Only Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert created.status_code == 200
+
+        listed = client.get(
+            "/api/v1/user/me/albums",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"limit": 10, "offset": 10},
+        )
+        assert listed.status_code == 200
+        payload = listed.json()
+        assert payload["total"] == 1
+        assert payload["limit"] == 10
+        assert payload["offset"] == 10
+        assert payload["items"] == []
+        assert payload["has_more"] is False
+
+
+def test_current_user_albums_endpoint_preserves_item_order_after_reorder(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="albumsorder", email="albumsorder@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("three.png", BytesIO(PNG_1X1), "image/png")),
+            ],
+            data={"title": "Ordered Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+        media_ids = [item["media_id"] for item in payload["items"]]
+
+        reordered = client.patch(
+            f"/api/v1/album/{album_id}/order",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=[
+                {"media_id": media_ids[2], "position": 100},
+                {"media_id": media_ids[0], "position": 200},
+                {"media_id": media_ids[1], "position": 300},
+            ],
+        )
+        assert reordered.status_code == 200
+
+        listed = client.get("/api/v1/user/me/albums", headers={"Authorization": f"Bearer {api_key}"})
+        assert listed.status_code == 200
+        album_payload = listed.json()["items"][0]
+        assert album_payload["id"] == album_id
+        assert [item["id"] for item in album_payload["items"]] == [media_ids[2], media_ids[0], media_ids[1]]
+        assert [item["position"] for item in album_payload["items"]] == [100, 200, 300]
+        assert album_payload["cover_url"].endswith(f"/i/{media_ids[2]}.png")
+
+
+def test_current_user_albums_endpoint_rejects_invalid_pagination_values(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="albumspagination", email="albumspagination@example.com")
+
+    with TestClient(app) as client:
+        zero_limit = client.get(
+            "/api/v1/user/me/albums",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"limit": 0},
+        )
+        assert zero_limit.status_code == 400
+        assert zero_limit.json()["detail"] == "limit must be between 1 and 200."
+
+        large_limit = client.get(
+            "/api/v1/user/me/albums",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"limit": 201},
+        )
+        assert large_limit.status_code == 400
+        assert large_limit.json()["detail"] == "limit must be between 1 and 200."
+
+        negative_offset = client.get(
+            "/api/v1/user/me/albums",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"offset": -1},
+        )
+        assert negative_offset.status_code == 400
+        assert negative_offset.json()["detail"] == "offset must be non-negative."
+
+
 def test_api_key_upload_can_create_multi_file_album_and_append_to_existing_owned_album(
     tmp_path, monkeypatch, capsys
 ) -> None:

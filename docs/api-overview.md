@@ -6,11 +6,18 @@ This is a human-oriented map of the main routes. It is not meant to replace gene
 
 - `GET /`
 - `GET /dashboard`
+- `GET /albums`
+- `GET /albums/{album_id}`
 - `GET /settings`
 - `GET /admin`
-- `GET /album-tools`
+- `GET /admin/users`
+- `GET /admin/users/new`
+- `GET /admin/albums`
+- `GET /admin/config`
+- `GET /admin/ops`
 - `GET /a/{album_id}`
 - `GET /u/{username}`
+- `GET /manage/{album_id}`
 
 ## Auth
 
@@ -43,6 +50,14 @@ Anonymous/public mutation rules:
 - `PATCH /api/v1/user/me/password`
 - `GET /api/v1/user/me/sharex-config`
 - `DELETE /api/v1/user/me`
+
+`GET /api/v1/user/me/albums` returns a paginated envelope:
+
+- `items`
+- `total`
+- `limit`
+- `offset`
+- `has_more`
 
 ## Media serving
 
@@ -92,5 +107,6 @@ Anonymous/public mutation rules:
 Some important API behaviors worth knowing:
 
 - `POST /api/v1/upload` can return `400`, `413`, `415`, or `429` for invalid uploads, quota rejection, unsupported media, or rate limiting
+- `GET /api/v1/user/me/albums` validates `limit` as `1..200` and requires non-negative `offset`
 - protected endpoints return `401` for missing or invalid authentication
 - mutation endpoints return `403` for failed owner/admin/delete-token authorization

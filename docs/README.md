@@ -35,7 +35,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   Task queue modes, worker behavior, Redis fallback semantics, and thumbnail recovery.
 
 - [operations.md](/home/james/imghost/docs/operations.md)
-  Health endpoints, runtime status, low-noise logging model, and degraded-mode operational behavior.
+  Health endpoint contract, runtime status, probe semantics, low-noise logging model, and degraded-mode operational behavior.
 
 - [testing.md](/home/james/imghost/docs/testing.md)
   Test command, test database safety model, and what the suite expects from the local environment.

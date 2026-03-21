@@ -1,6 +1,6 @@
 # UI Surfaces
 
-The browser UI is intentionally utility-oriented and mainly exists to exercise backend flows.
+The browser UI is now a real template-backed product/admin surface, though it still leans practical over polished.
 
 ## `/`
 
@@ -15,11 +15,36 @@ Purpose:
 Purpose:
 
 - authenticated upload
-- owned album inspection
-- owned album mutation
-- API-key-driven testing mode for dashboard actions
+- recent owned album inspection
+- quick navigation into albums and settings
 
 This page is no longer the home for account settings.
+
+## `/albums`
+
+Purpose:
+
+- owned album list
+- resume work on existing albums
+- owner actions like public-link access, ZIP access, and deletion
+
+## `/albums/{album_id}`
+
+Purpose:
+
+- owner album workspace
+- metadata editing
+- reorder
+- append upload
+- media deletion
+- cover selection
+
+## `/manage/{album_id}`
+
+Purpose:
+
+- token-backed anonymous album workspace
+- same general album-management surface, but authorized by token instead of owner auth
 
 ## `/settings`
 
@@ -40,10 +65,3 @@ Purpose:
 - runtime config
 - audit log
 - runtime/ops inspection
-
-## `/album-tools`
-
-Purpose:
-
-- token-based operations for anonymous/public albums without writing manual HTTP requests
-

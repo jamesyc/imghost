@@ -6,6 +6,10 @@
 uv run pytest -q
 ```
 
+Current full-suite baseline:
+
+- 152 passing tests
+
 ## Test database safety
 
 The test harness forces the process to use a dedicated test database.
@@ -33,16 +37,17 @@ Current tests cover:
 - uploads and album behavior
 - auth and sessions
 - stale-session cleanup
+- auth redirect normalization
 - API keys and ShareX behavior
 - Redis fallback behavior
 - proxy/origin handling
 - media processors
 - storage backends
 - ZIP streaming
+- liveness and readiness health endpoints
 - runtime status
 - admin operations
 
 ## Important warning
 
 Do not point tests at the live `imghost` database.
-
