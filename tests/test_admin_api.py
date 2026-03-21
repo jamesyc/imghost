@@ -36,10 +36,53 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert payload["database"]["ok"] is True
         assert payload["storage"]["ok"] is True
         assert "tasks" in payload
+        assert payload["public_origin_enabled"] is True
+        assert payload["public_origin_mode"] == "strict"
         assert "trusted_public_origins" in payload
         assert payload["forwarded_headers_policy"] == "trusted_proxies_only"
+        assert payload["proxy_trust_warning"] is None
         assert payload["trusted_proxy_cidrs_enabled"] is True
         assert payload["trusted_proxy_cidrs"] == ["127.0.0.1/32", "172.16.0.0/12"]
+
+
+def test_admin_runtime_status_warns_when_proxy_trust_is_permissive(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.delenv("TRUSTED_PROXY_CIDRS_ENABLED", raising=False)
+    monkeypatch.delenv("TRUSTED_PROXY_CIDRS", raising=False)
+
+    _, admin_key = create_admin_and_api_key(capsys, username="proxywarnadmin", email="proxywarnadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["public_origin_enabled"] is True
+        assert payload["forwarded_headers_policy"] == "permissive"
+        assert payload["trusted_proxy_cidrs_enabled"] is False
+        assert "local development" in payload["proxy_trust_warning"]
+        assert "nginx" in payload["proxy_trust_warning"]
+
+
+def test_admin_runtime_status_reports_direct_request_public_origin_mode(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://192.168.0.100:8000")
+    monkeypatch.setenv("PUBLIC_ORIGIN_ENABLED", "false")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="originmodeadmin", email="originmodeadmin@example.com")
+
+    with TestClient(app, base_url="http://192.168.0.100:8000") as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["public_origin_enabled"] is False
+        assert payload["public_origin_mode"] == "direct_request"
 
 
 def test_admin_runtime_status_reports_redis_disabled_when_redis_queue_mode_is_not_backed_by_redis(

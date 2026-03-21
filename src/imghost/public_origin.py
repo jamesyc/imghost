@@ -96,6 +96,14 @@ def public_base_url(request: Request, settings: Settings) -> str:
                 "forwarded_headers_ignored_untrusted_proxy",
                 extra={"peer_host": peer_host, "path": request.url.path},
             )
+    if not settings.public_origin_enabled:
+        if forwarded is not None:
+            return forwarded
+        request_origin = _request_origin(request)
+        if request_origin is not None:
+            return request_origin
+        return fallback
+
     if forwarded is not None:
         if forwarded in trusted:
             return forwarded

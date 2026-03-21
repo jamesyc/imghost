@@ -11,7 +11,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   Opinionated step-by-step setup guide for a practical Docker plus reverse-proxy deployment.
 
 - [configuration.md](/home/james/imghost/docs/configuration.md)
-  Reference for the current env/config surface, including app settings, Docker settings, and runtime config stored in PostgreSQL.
+  Reference for the current env/config surface, including strict vs local public-origin behavior, Docker settings, and runtime config stored in PostgreSQL.
 
 - [cli.md](/home/james/imghost/docs/cli.md)
   Operational command reference for the current `python -m imghost` subcommands and how they are used.
@@ -23,7 +23,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   Practical notes on which secrets are easy to rotate in place and which behave more like bootstrap-time values.
 
 - [reverse-proxy.md](/home/james/imghost/docs/reverse-proxy.md)
-  How public-origin handling works, how trusted proxy CIDRs affect forwarded-header trust, and what a reverse proxy should send.
+  How public-origin handling works, how local direct-access differs from strict deployment mode, how trusted proxy CIDRs affect forwarded-header trust, and what a reverse proxy should send.
 
 - [authentication.md](/home/james/imghost/docs/authentication.md)
   Browser sessions, browser-session CSRF policy, API keys, ShareX export behavior, and the current auth model and caveats.

@@ -124,6 +124,13 @@ class AppState:
         redis_reachable = await self.redis.ping()
         redis_configured = self.redis.enabled
         tasks_configured = redis_configured and self.settings.task_queue_mode == "redis"
+        proxy_trust_warning = None
+        if not self.settings.trusted_proxy_cidrs_enabled:
+            proxy_trust_warning = (
+                "Forwarded proxy headers are currently trusted from any client. "
+                "This is fine for local development, but if you run imghost behind nginx, Caddy, Traefik, "
+                "or a cloud proxy, enable trusted proxy CIDRs so only that proxy can set the public host and protocol."
+            )
         return {
             "database": {"ok": database_ok},
             "storage": {"ok": storage_ok},
@@ -160,7 +167,10 @@ class AppState:
                 **(await self.tasks.runtime_status()),
             },
             "trusted_public_origins": list(self.settings.trusted_public_origins),
+            "public_origin_enabled": self.settings.public_origin_enabled,
+            "public_origin_mode": "strict" if self.settings.public_origin_enabled else "direct_request",
             "forwarded_headers_policy": "trusted_proxies_only" if self.settings.trusted_proxy_cidrs_enabled else "permissive",
+            "proxy_trust_warning": proxy_trust_warning,
             "trusted_proxy_cidrs_enabled": self.settings.trusted_proxy_cidrs_enabled,
             "trusted_proxy_cidrs": list(self.settings.trusted_proxy_cidrs),
         }

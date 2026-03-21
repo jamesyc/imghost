@@ -1,6 +1,8 @@
 import pytest
+from fastapi.testclient import TestClient
 
 from imghost.config import _resolve_redis_url, load_settings
+from imghost.main import app
 
 
 def test_load_settings_requires_cidrs_when_trusted_proxy_gate_enabled(monkeypatch, tmp_path) -> None:
@@ -11,6 +13,17 @@ def test_load_settings_requires_cidrs_when_trusted_proxy_gate_enabled(monkeypatc
 
     with pytest.raises(ValueError, match="TRUSTED_PROXY_CIDRS"):
         load_settings()
+
+
+def test_app_startup_fails_when_trusted_proxy_gate_enabled_without_cidrs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
+    monkeypatch.delenv("TRUSTED_PROXY_CIDRS", raising=False)
+
+    with pytest.raises(ValueError, match="TRUSTED_PROXY_CIDRS"):
+        with TestClient(app):
+            pass
 
 
 def test_resolve_redis_url_injects_password_when_url_has_no_credentials() -> None:

@@ -15,7 +15,14 @@ from fastapi.templating import Jinja2Templates
 from ..app_state import AppState
 from ..config import Settings
 from ..models import User, utcnow
-from ..public_origin import _normalize_origin, _trusted_origin_set, public_base_url
+from ..public_origin import (
+    _forwarded_origin,
+    _normalize_origin,
+    _request_origin,
+    _trusted_origin_set,
+    public_base_url,
+    request_uses_trusted_proxy_headers,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -61,6 +68,13 @@ def _referer_origin(referer: str | None) -> str | None:
 
 def _has_trusted_csrf_source(request: Request, settings: Settings) -> bool:
     trusted = _trusted_origin_set(settings)
+    if not settings.public_origin_enabled:
+        direct_request_origin = _request_origin(request)
+        if direct_request_origin is not None:
+            trusted.add(direct_request_origin)
+        forwarded_origin = _forwarded_origin(request) if request_uses_trusted_proxy_headers(request, settings) else None
+        if forwarded_origin is not None:
+            trusted.add(forwarded_origin)
     origin = _normalize_origin(request.headers.get("Origin", ""))
     if origin is not None:
         return origin in trusted

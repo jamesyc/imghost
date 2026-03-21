@@ -116,6 +116,7 @@ class DummyRuntimeConfig:
 def make_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "base_url": "https://testserver",
+        "public_origin_enabled": True,
         "trusted_public_origins": ("https://testserver",),
         "trusted_proxy_cidrs_enabled": False,
         "trusted_proxy_cidrs": (),

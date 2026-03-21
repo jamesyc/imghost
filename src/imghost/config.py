@@ -10,6 +10,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 @dataclass(frozen=True)
 class Settings:
     base_url: str
+    public_origin_enabled: bool
     trusted_public_origins: tuple[str, ...]
     trusted_proxy_cidrs_enabled: bool
     trusted_proxy_cidrs: tuple[str, ...]
@@ -79,11 +80,14 @@ def load_settings() -> Settings:
     data_dir = Path(os.getenv("IMGHOST_DATA_DIR", "data")).resolve()
     base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
     session_cookie_secure = _env_bool("SESSION_COOKIE_SECURE")
+    public_origin_enabled = _env_bool("PUBLIC_ORIGIN_ENABLED")
     trusted_proxy_cidrs_enabled = _env_bool("TRUSTED_PROXY_CIDRS_ENABLED")
     trusted_proxy_cidrs = _env_csv("TRUSTED_PROXY_CIDRS")
     redis_password = (os.getenv("REDIS_PASSWORD") or "").strip() or None
     if session_cookie_secure is None:
         session_cookie_secure = urlsplit(base_url).scheme == "https"
+    if public_origin_enabled is None:
+        public_origin_enabled = True
     if trusted_proxy_cidrs_enabled is None:
         trusted_proxy_cidrs_enabled = False
     if trusted_proxy_cidrs_enabled and not trusted_proxy_cidrs:
@@ -92,6 +96,7 @@ def load_settings() -> Settings:
         ip_network(cidr, strict=False)
     return Settings(
         base_url=base_url,
+        public_origin_enabled=public_origin_enabled,
         trusted_public_origins=_env_csv("TRUSTED_PUBLIC_ORIGINS"),
         trusted_proxy_cidrs_enabled=trusted_proxy_cidrs_enabled,
         trusted_proxy_cidrs=trusted_proxy_cidrs,

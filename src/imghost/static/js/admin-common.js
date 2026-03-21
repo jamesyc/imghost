@@ -105,10 +105,18 @@ window.renderAdminRuntimeCards = (payload) => {
         : `Last started ${window.adminFormatDateTime(payload.worker?.last_started_at)}`,
     },
     {
+      label: "Public origin mode",
+      status: payload.public_origin_mode || "Unknown",
+      tone: payload.public_origin_enabled ? "ok" : "neutral",
+      hint: payload.public_origin_enabled
+        ? "Only configured public origins are reflected into links and browser-session CSRF checks."
+        : "The app reflects the host the browser used. This is convenient for localhost or LAN testing.",
+    },
+    {
       label: "Proxy trust",
       status: payload.forwarded_headers_policy || "Unknown",
-      tone: payload.trusted_proxy_cidrs_enabled ? "ok" : "neutral",
-      hint: `${(payload.trusted_proxy_cidrs || []).length} trusted CIDR(s)`,
+      tone: payload.trusted_proxy_cidrs_enabled ? "ok" : "warn",
+      hint: payload.proxy_trust_warning || `${(payload.trusted_proxy_cidrs || []).length} trusted CIDR(s)`,
     },
   ];
 
@@ -138,6 +146,12 @@ window.renderAdminNetworkTrust = (payload) => `
     <div class="item-list">
       <article class="admin-list-row">
         <div>
+          <strong>Public origin mode</strong>
+          <p class="hint">${window.escapeAdminHtml(payload.public_origin_enabled ? "Strict allowlist mode" : "Direct request mode")}</p>
+        </div>
+      </article>
+      <article class="admin-list-row">
+        <div>
           <strong>Trusted public origins</strong>
           <p class="hint">${window.escapeAdminHtml((payload.trusted_public_origins || []).join(", ") || "None configured")}</p>
         </div>
@@ -148,6 +162,18 @@ window.renderAdminNetworkTrust = (payload) => `
           <p class="hint">${window.escapeAdminHtml((payload.trusted_proxy_cidrs || []).join(", ") || "None configured")}</p>
         </div>
       </article>
+      ${
+        payload.proxy_trust_warning
+          ? `
+            <article class="admin-list-row">
+              <div>
+                <strong>Proxy trust note</strong>
+                <p class="hint">${window.escapeAdminHtml(payload.proxy_trust_warning)}</p>
+              </div>
+            </article>
+          `
+          : ""
+      }
     </div>
   </section>
 `;

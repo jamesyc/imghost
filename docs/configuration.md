@@ -10,12 +10,28 @@ These are defined in [`.env.example`](/home/james/imghost/.env.example).
 
 - `BASE_URL`
   Canonical fallback public URL used when request-derived origin data is absent or rejected.
+- `PUBLIC_ORIGIN_ENABLED`
+  When `true`, only configured public origins and `BASE_URL` are trusted for reflected public URLs and browser-session origin checks. When `false`, the app reflects the direct browser-visible host for local/LAN access.
 - `TRUSTED_PUBLIC_ORIGINS`
   Exact allowlist of public origins that may be reflected into generated URLs.
 - `TRUSTED_PROXY_CIDRS_ENABLED`
   When `true`, forwarded headers are only trusted from peers inside `TRUSTED_PROXY_CIDRS`.
 - `TRUSTED_PROXY_CIDRS`
   CIDR list for the immediate reverse proxies trusted to supply `X-Forwarded-*` headers when the gate is enabled.
+
+Practical modes:
+
+- local mode:
+  - set `PUBLIC_ORIGIN_ENABLED=false`
+  - leave `TRUSTED_PROXY_CIDRS_ENABLED=false`
+  - use `BASE_URL` as fallback only
+  - best when you run the app directly on localhost or on a private machine without a separate reverse proxy
+- deployed mode:
+  - set `PUBLIC_ORIGIN_ENABLED=true`
+  - set `BASE_URL` to the public site URL
+  - list every browser-visible hostname in `TRUSTED_PUBLIC_ORIGINS`
+  - set `TRUSTED_PROXY_CIDRS_ENABLED=true`
+  - set `TRUSTED_PROXY_CIDRS` to only the proxy/container-network addresses that should be allowed to set `X-Forwarded-*`
 
 ### Core secrets and data stores
 
@@ -128,7 +144,7 @@ These can be environment-locked with:
 ## Resolution notes
 
 - `SESSION_COOKIE_SECURE` defaults from the scheme of `BASE_URL` when unset.
+- `PUBLIC_ORIGIN_ENABLED` defaults to `true`.
 - `TRUSTED_PROXY_CIDRS_ENABLED` defaults to `false`.
 - `TRUSTED_PROXY_CIDRS_ENABLED=true` requires a non-empty `TRUSTED_PROXY_CIDRS` list.
 - `REDIS_PASSWORD` is only injected when `REDIS_URL` does not already contain credentials.
-

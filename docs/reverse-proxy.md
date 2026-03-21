@@ -34,6 +34,33 @@ If you enable the gate:
 
 This is implemented in [`src/imghost/public_origin.py`](/home/james/imghost/src/imghost/public_origin.py).
 
+## Local mode vs deployed mode
+
+For self-hosted users, the simplest rule is:
+
+- if you open `imghost` directly on your machine or LAN, permissive forwarded-header trust is acceptable
+- if you put `imghost` behind nginx, Caddy, Traefik, Cloudflare Tunnel, or another reverse proxy, switch to explicit proxy trust
+
+Local mode:
+
+- `PUBLIC_ORIGIN_ENABLED=false`
+- `TRUSTED_PROXY_CIDRS_ENABLED=false`
+- low setup friction
+- appropriate when there is no separate proxy in front of the app
+
+Deployed mode:
+
+- `PUBLIC_ORIGIN_ENABLED=true`
+- `TRUSTED_PROXY_CIDRS_ENABLED=true`
+- `TRUSTED_PROXY_CIDRS` set to the proxy/container-network CIDRs that actually connect to the app
+- `TRUSTED_PUBLIC_ORIGINS` includes every public hostname users will visit
+
+Why this matters:
+
+- forwarded headers tell the app what public host and protocol to reflect into generated links
+- if you trust forwarded headers from arbitrary clients in a real deployment, a direct client can try to influence that public host/protocol view
+- the app still falls back safely, but explicit proxy trust is the right long-term deployment posture
+
 ## Recommended nginx headers
 
 Typical forwarded headers:
@@ -56,9 +83,10 @@ TRUSTED_PROXY_CIDRS_ENABLED=true
 TRUSTED_PROXY_CIDRS=127.0.0.1/32,172.16.0.0/12
 ```
 
+If you serve `https://photos.example.com` and `https://uploads.example.com`, both must be listed in `TRUSTED_PUBLIC_ORIGINS`. Unknown hosts are intentionally ignored and the app falls back to `BASE_URL`.
+
 ## Current limitations
 
 - exact origin matching only
 - no wildcard origin support
 - no deeper proxy-chain trust model beyond the immediate peer CIDR check
-

@@ -47,6 +47,7 @@ Current policy:
 
 - session-authenticated `POST`, `PATCH`, and `DELETE` requests require a trusted `Origin` or `Referer`
 - the trusted set comes from the same public-origin configuration used for generated URLs
+- when `PUBLIC_ORIGIN_ENABLED=false`, the app trusts the direct browser-visible host instead of requiring an explicit origin allowlist
 - bearer API-key requests are exempt from this browser-session check
 - `POST /api/v1/auth/login` and `POST /api/v1/auth/register` are intentionally exempt
 - `POST /api/v1/auth/logout` is protected

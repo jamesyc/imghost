@@ -78,6 +78,7 @@ def make_service(user: User | None = None, *, storage=None) -> tuple[UploadServi
     repository = DummyRepository(user)
     settings = Settings(
         base_url="http://testserver",
+        public_origin_enabled=True,
         trusted_public_origins=("http://testserver",),
         trusted_proxy_cidrs_enabled=False,
         trusted_proxy_cidrs=(),

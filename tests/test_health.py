@@ -33,6 +33,8 @@ def _runtime_status_payload(
             "last_task_failure": None,
         },
         "tasks": {"mode": task_mode, "queue_lengths": {"default": 0, "thumbnails": 0}},
+        "public_origin_enabled": True,
+        "public_origin_mode": "strict",
         "trusted_public_origins": [],
         "forwarded_headers_policy": "permissive",
         "trusted_proxy_cidrs_enabled": False,

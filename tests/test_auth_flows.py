@@ -480,6 +480,31 @@ def test_browser_session_mutation_allows_trusted_alternate_public_origin(tmp_pat
         assert rotated.json()["api_key"] != old_api_key
 
 
+def test_browser_session_mutation_allows_direct_lan_origin_when_public_origin_mode_is_disabled(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://192.168.0.100:8000")
+    monkeypatch.setenv("PUBLIC_ORIGIN_ENABLED", "false")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "http://localhost:8000")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, old_api_key = create_user_and_api_key(capsys, username="csrflanorigin", email="csrflanorigin@example.com")
+
+    with TestClient(app, base_url="http://192.168.0.55:8000") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrflanorigin@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        rotated = client.post(
+            "/api/v1/user/me/api-key",
+            headers=browser_session_headers("http://192.168.0.55:8000", "/settings"),
+        )
+        assert rotated.status_code == 200
+        assert rotated.json()["api_key"] != old_api_key
+
+
 def test_browser_session_mutation_rejects_malformed_referer_without_origin(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
