@@ -119,9 +119,17 @@ It is no longer just an anonymous upload proof-of-concept.
   - account deletion
   - inline action-local feedback instead of page-top flash for settings actions
 - `/admin`
-  - admin user and album operations
-  - runtime config
-  - audit log
+  - overview page with structured storage/runtime summary cards
+- `/admin/users`
+  - paginated user management index
+- `/admin/users/new`
+  - dedicated create-user page
+- `/admin/albums`
+  - paginated album operations page
+- `/admin/config`
+  - grouped runtime config editor with inline feedback
+- `/admin/ops`
+  - structured runtime status plus bounded audit log view
 - `/manage/{id}`
   - token-backed anonymous album workspace reusing the owner editor
 - shared browser UI infrastructure:
@@ -205,7 +213,7 @@ It is no longer just an anonymous upload proof-of-concept.
 - Public origin validation is exact-match allowlist based; there is no wildcard support and the trusted-proxy gate is still opt-in
 - Trusted-proxy enforcement exists but is opt-in and CIDR-list based, so the default behavior remains permissive unless explicitly enabled
 - Observability is intentionally low-noise and status-endpoint-oriented rather than a full metrics stack
-- Settings and admin pages are still utility-heavy compared to the now-redesigned signed-in and public album surfaces
+- Admin pages are split and much cleaner than the original utility screen, but still denser and more operational than the signed-in product pages
 
 ## Not Implemented
 

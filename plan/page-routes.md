@@ -41,12 +41,14 @@
   Admin overview or index page.
 - `/admin/users`
   User management page.
+- `/admin/users/new`
+  Dedicated create-user page.
 - `/admin/albums`
   Album moderation page.
 - `/admin/config`
   Runtime config page.
 - `/admin/ops`
-  Storage stats and runtime status page.
+  Runtime and audit operations page.
 
 ### Optional Later
 
@@ -229,15 +231,23 @@ Should include:
 
 Should include:
 
-- user table
+- paginated user table or list
 - per-user summary
-- links into user detail
-- create-user flow
+- link to `/admin/users/new`
 - suspend or unsuspend
 - quota editing
 - per-user rate-limit editing
 - reset password
 - delete user
+
+### `/admin/users/new`
+
+Should include:
+
+- create-user form
+- optional admin toggle
+- initial quota and per-user rate limit overrides
+- clear route back to `/admin/users`
 
 ### `/admin/albums`
 

@@ -411,8 +411,13 @@ JavaScript needed here:
 
 Status:
 
-- not started as a split admin redesign
-- existing `/admin` route now benefits from the shared page shell and admin redirect behavior, but it is still the earlier utility implementation
+- in progress
+- `/admin`, `/admin/users`, `/admin/users/new`, `/admin/albums`, `/admin/config`, and `/admin/ops` now exist as split template-backed pages
+- `/admin/users` and `/admin/albums` now use paginated listing surfaces rather than loading the full dataset at once
+- `/admin/config` is grouped into readable operational sections with inline save feedback and an optional debug payload view
+- `/admin/ops` now presents structured runtime health panels and a bounded audit list with a default page size instead of dumping an unbounded raw response
+- `/admin` overview now shows summary cards for storage and runtime instead of raw JSON blocks
+- remaining work is polish and any deeper admin interaction coverage, not the original split-page rewrite
 
 ## HTMX Strategy
 

@@ -531,7 +531,9 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert "Admin overview" in overview.text
         assert 'href="/admin/users"' in overview.text
         assert 'id="admin-overview-stats"' in overview.text
+        assert 'id="admin-overview-stats-status"' in overview.text
         assert 'id="admin-overview-runtime"' in overview.text
+        assert 'id="admin-overview-runtime-status-text"' in overview.text
 
         users = client.get("/admin/users")
         assert users.status_code == 200
@@ -557,6 +559,7 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert config.status_code == 200
         assert "Runtime config" in config.text
         assert 'id="admin-config-form"' in config.text
+        assert "Debug payload" in config.text
         assert 'href="/admin/users/new"' in config.text
 
         ops = client.get("/admin/ops")
@@ -564,6 +567,9 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert "Operations" in ops.text
         assert 'id="admin-runtime-status"' in ops.text
         assert 'id="admin-audit-form"' in ops.text
+        assert 'value="25"' in ops.text
+        assert 'id="admin-audit-prev"' in ops.text
+        assert 'id="admin-audit-next"' in ops.text
         assert 'href="/admin/users/new"' in ops.text
 
 

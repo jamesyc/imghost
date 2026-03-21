@@ -12,7 +12,7 @@
 
   {% include "partials/admin-subnav.html" %}
 
-  <section class="grid admin-page-grid">
+  <section class="stack admin-page-stack">
     <section class="card admin-card">
       <div class="row row-actions">
         <div>
@@ -21,31 +21,58 @@
         </div>
         <button id="refresh-admin-runtime-status" type="button" class="secondary">Refresh Status</button>
       </div>
-      <pre id="admin-runtime-status" class="result"></pre>
+      <p id="admin-runtime-status-text" class="settings-inline-status hidden" aria-live="polite"></p>
+      <div id="admin-runtime-status" class="stack admin-runtime-layout"></div>
     </section>
 
     <section class="card admin-card">
       <p class="eyebrow">Audit log</p>
-      <h2>Query events</h2>
+      <h2>Recent events</h2>
       <form id="admin-audit-form" class="stack">
-        <div class="row">
-          <input type="text" name="event_type" placeholder="event_type">
-          <input type="text" name="actor_id" placeholder="actor_id">
-          <input type="text" name="user_id" placeholder="user_id">
-          <input type="text" name="correlation_id" placeholder="correlation_id">
+        <div class="form-grid">
+          <label>
+            <strong>Event type</strong>
+            <input type="text" name="event_type" placeholder="album_deleted">
+          </label>
+          <label>
+            <strong>Actor ID</strong>
+            <input type="text" name="actor_id" placeholder="User who triggered it">
+          </label>
+          <label>
+            <strong>User ID</strong>
+            <input type="text" name="user_id" placeholder="Impacted user">
+          </label>
+          <label>
+            <strong>Correlation ID</strong>
+            <input type="text" name="correlation_id" placeholder="Trace a request">
+          </label>
         </div>
-        <div class="row">
-          <input type="datetime-local" name="after">
-          <input type="datetime-local" name="before">
-          <input type="number" name="limit" placeholder="limit" value="100">
-          <input type="number" name="offset" placeholder="offset" value="0">
+        <div class="form-grid">
+          <label>
+            <strong>After</strong>
+            <input type="datetime-local" name="after">
+          </label>
+          <label>
+            <strong>Before</strong>
+            <input type="datetime-local" name="before">
+          </label>
+          <label>
+            <strong>Page size</strong>
+            <input type="number" name="limit" min="1" max="100" value="25">
+          </label>
+          <input id="admin-audit-offset" type="hidden" name="offset" value="0">
         </div>
         <div class="row row-actions">
           <button type="submit">Query Audit</button>
         </div>
       </form>
       <p id="admin-audit-status" class="settings-inline-status hidden" aria-live="polite"></p>
-      <pre id="admin-audit" class="result"></pre>
+      <p id="admin-audit-summary" class="hint"></p>
+      <div id="admin-audit" class="stack admin-audit-list"></div>
+      <div class="row row-actions">
+        <button id="admin-audit-prev" type="button" class="secondary">Previous</button>
+        <button id="admin-audit-next" type="button" class="secondary">Next</button>
+      </div>
     </section>
   </section>
 </section>
