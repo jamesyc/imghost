@@ -370,8 +370,11 @@ JavaScript needed here:
 
 Status:
 
-- not started as a redesign
-- existing `/settings` route now benefits from the shared page shell and login redirect behavior, but the page itself is still the earlier utility implementation
+- complete
+- `/settings` now uses the shared template/CSS/JS system instead of the earlier inline utility implementation
+- the page is split into account, API/ShareX, security, and danger-zone sections
+- API key and ShareX actions use inline warning/status messaging, and password/delete flows use local inline feedback rather than the page-top flash area
+- behavior coverage now includes browser-session API key rotation, password change, and account deletion flows in addition to page-shell checks
 
 ## Phase 9: Admin Surface
 

@@ -329,6 +329,116 @@ body::after {
   gap: 12px;
 }
 
+.settings-shell {
+  gap: 24px;
+}
+
+.settings-grid {
+  gap: 24px;
+}
+
+.settings-card {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.settings-action-row {
+  align-items: stretch;
+}
+
+.settings-action-row > * {
+  flex: 1 1 0;
+}
+
+.settings-summary-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.settings-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-summary-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.settings-summary-row dt {
+  margin: 0;
+  color: var(--fg-soft);
+}
+
+.settings-summary-row dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 600;
+}
+
+.settings-form {
+  gap: 14px;
+}
+
+.settings-warning-bubble {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(197, 74, 74, 0.42);
+  border-radius: var(--radius-panel);
+  background: rgba(139, 33, 33, 0.14);
+  color: #ffd2d2;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.settings-warning-bubble[data-tone="success"] {
+  border-color: rgba(55, 124, 78, 0.34);
+  background: rgba(42, 111, 76, 0.14);
+  color: #d8ffe5;
+}
+
+.settings-warning-bubble[data-tone="error"] {
+  border-color: rgba(197, 74, 74, 0.42);
+  background: rgba(139, 33, 33, 0.14);
+  color: #ffd2d2;
+}
+
+.settings-inline-status {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-input);
+  line-height: 1.5;
+}
+
+.settings-inline-status[data-tone="error"] {
+  background: rgba(210, 66, 79, 0.14);
+  border: 1px solid rgba(210, 66, 79, 0.26);
+  color: #b42318;
+}
+
+.settings-inline-status[data-tone="success"] {
+  background: rgba(42, 111, 76, 0.12);
+  border: 1px solid rgba(55, 124, 78, 0.26);
+  color: #17663b;
+}
+
+:root[data-theme="dark"] .settings-inline-status[data-tone="error"] {
+  background: rgba(209, 94, 103, 0.18);
+  border-color: rgba(229, 132, 132, 0.3);
+  color: #ffd5d9;
+}
+
+:root[data-theme="dark"] .settings-inline-status[data-tone="success"] {
+  background: rgba(58, 124, 87, 0.18);
+  border-color: rgba(101, 173, 129, 0.3);
+  color: #dbffe3;
+}
+
 .usage-meter {
   overflow: hidden;
   height: 14px;

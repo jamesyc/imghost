@@ -61,11 +61,13 @@
 - Public album delete URLs support ShareX-style GET deletion behavior for anonymous albums so tokenized deletion flows can be tested without a JavaScript client.
 - Public and owner album pages include direct media and ZIP actions so a manual tester can navigate through the full artifact surface from one place.
 - The intended product direction is for the dashboard page to be the signed-in home with authenticated upload, links into albums and settings, and lightweight account or recent-work panels, while the dedicated settings page owns account summary, API key reveal or rotation, ShareX export, password changes, and account deletion.
+- The settings page now uses the shared visual system and keeps API/ShareX messaging, password feedback, and delete-account errors inline near the relevant controls instead of relying on page-top status text.
 - The albums page should focus on owned album listing and navigation rather than duplicating the primary upload box from the dashboard.
 - The albums page now exposes owner-oriented album actions directly from the list, including public-link access, ZIP download, and whole-album deletion.
 - The owner album workspace supports inline title editing, append upload via modal, drag-and-drop reorder with fallback controls, media deletion, cover selection, and image lightbox preview.
 - Anonymous token-backed `/manage/{id}` pages reuse the same album workspace UI and support title editing, append upload, reorder, cover selection, and deletion through the delete token.
 - The settings page auto-issues an API key for users who do not already have one so a newly registered browser-session user can immediately export ShareX config and test authenticated API access.
+- Browser-session settings flows now have explicit behavior coverage for API key rotation, password changes, and account deletion, so the page is tested beyond simple shell rendering.
 - The admin page exposes utility-style controls for user management, album management, runtime config changes, and audit-log inspection so operational admin behaviors can be tested interactively.
 - The app records audit log entries for relevant administrative and account actions and exposes filtered audit retrieval so end-to-end action tracing can be validated through the admin API.
 - Correlation IDs can be supplied by clients and are propagated through relevant flows, which allows E2E request tracing to be tested across normal API and admin interactions.

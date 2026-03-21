@@ -117,6 +117,7 @@ It is no longer just an anonymous upload proof-of-concept.
   - ShareX download
   - password change
   - account deletion
+  - inline action-local feedback instead of page-top flash for settings actions
 - `/admin`
   - admin user and album operations
   - runtime config

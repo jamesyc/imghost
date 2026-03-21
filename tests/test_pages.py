@@ -489,11 +489,20 @@ def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path,
         page = client.get("/settings")
         assert page.status_code == 200
         assert "Settings" in page.text
+        assert "Profile summary" in page.text
+        assert "External tools" in page.text
+        assert "Change password" in page.text
+        assert "Danger Zone" in page.text
+        assert 'id="settings-api-warning"' in page.text
+        assert 'id="settings-api-warning" class="settings-warning-bubble hidden"' in page.text
         assert 'id="settings-account-summary"' in page.text
         assert 'id="reveal-api-key"' in page.text
         assert 'id="download-sharex-settings"' in page.text
         assert 'id="settings-password-form"' in page.text
+        assert 'id="settings-password-status"' in page.text
+        assert 'name="confirm_new_password"' in page.text
         assert 'id="settings-delete-account-form"' in page.text
+        assert 'id="settings-delete-status"' in page.text
 
 
 def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> None:

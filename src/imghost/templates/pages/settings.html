@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block content %}
+<script id="settings-bootstrap" type="application/json">{{ {"session_user": session_user}|tojson }}</script>
+<section class="stack settings-shell">
+  <section class="card hero-card settings-hero">
+    <div class="settings-hero-copy">
+      <p class="eyebrow">Settings</p>
+      <h1>Your account</h1>
+      <p class="lede">Manage your profile, API access, ShareX integration, and account security from one place.</p>
+    </div>
+  </section>
+
+  <section class="grid settings-grid">
+    <section class="card settings-card">
+      <p class="eyebrow">Account</p>
+      <h2>Profile summary</h2>
+      <dl class="settings-summary-list" id="settings-account-summary">
+        <div class="settings-summary-row">
+          <dt>Username</dt>
+          <dd id="settings-username">-</dd>
+        </div>
+        <div class="settings-summary-row">
+          <dt>Email</dt>
+          <dd id="settings-email">-</dd>
+        </div>
+        <div class="settings-summary-row">
+          <dt>Albums</dt>
+          <dd id="settings-album-count">-</dd>
+        </div>
+        <div class="settings-summary-row">
+          <dt>Files</dt>
+          <dd id="settings-media-count">-</dd>
+        </div>
+        <div class="settings-summary-row">
+          <dt>Storage Used</dt>
+          <dd id="settings-storage-used">-</dd>
+        </div>
+        <div class="settings-summary-row">
+          <dt>Quota</dt>
+          <dd id="settings-storage-quota">-</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="card settings-card">
+      <p class="eyebrow">API &amp; ShareX</p>
+      <h2>External tools</h2>
+      <p class="hint">Revealing an API key or downloading ShareX config rotates the key and invalidates the previous value.</p>
+      <div class="row row-actions settings-action-row">
+        <button id="reveal-api-key" type="button">Rotate And Reveal API Key</button>
+        <button id="download-sharex-settings" type="button" class="secondary">Download ShareX Config</button>
+      </div>
+      <p id="settings-api-warning" class="settings-warning-bubble hidden">Save or copy your new key right away. This is the only time you will see it.</p>
+      <pre id="settings-api-key-output" class="result hidden"></pre>
+    </section>
+  </section>
+
+  <section class="grid settings-grid">
+    <section class="card settings-card">
+      <p class="eyebrow">Security</p>
+      <h2>Change password</h2>
+      <form id="settings-password-form" class="stack settings-form">
+        <input type="password" name="current_password" placeholder="Current password" required>
+        <input type="password" name="new_password" placeholder="New password" required>
+        <input type="password" name="confirm_new_password" placeholder="Confirm new password" required>
+        <div class="row row-actions">
+          <button type="submit">Update Password</button>
+        </div>
+      </form>
+      <p id="settings-password-status" class="settings-inline-status hidden" aria-live="polite"></p>
+    </section>
+
+    <section class="card settings-card">
+      <p class="eyebrow">Danger Zone</p>
+      <h2>Delete account</h2>
+      <p class="hint">This permanently deletes your account and all owned albums and files.</p>
+      <form id="settings-delete-account-form" class="stack settings-form">
+        <div class="row row-actions">
+          <button type="submit" class="danger">Delete My Account</button>
+        </div>
+      </form>
+      <p id="settings-delete-status" class="settings-inline-status hidden" aria-live="polite"></p>
+    </section>
+  </section>
+</section>
+{% endblock %}

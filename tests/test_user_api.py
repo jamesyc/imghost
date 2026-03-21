@@ -10,6 +10,7 @@ from .helpers import (
     get_album_record,
     get_media_record,
     get_user_record,
+    set_user_password,
     wait_for_thumbnail,
 )
 
@@ -313,3 +314,111 @@ def test_delete_current_user_removes_content_and_invalidates_api_key(tmp_path, m
         assert get_album_record(client, payload["album_id"]) is None
         assert get_media_record(client, payload["media_id"]) is None
         assert client.get(f"/i/{payload['media_id']}.png").status_code == 404
+
+
+def test_browser_session_api_key_rotation_invalidates_previous_key(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, old_api_key = create_user_and_api_key(capsys, username="rotatebrowser", email="rotatebrowser@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "rotatebrowser@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        rotated = client.post("/api/v1/user/me/api-key")
+        assert rotated.status_code == 200
+        payload = rotated.json()
+        assert payload["api_key"] != old_api_key
+        assert payload["created_at"]
+
+        old_me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {old_api_key}"})
+        assert old_me.status_code == 401
+
+        new_me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {payload['api_key']}"})
+        assert new_me.status_code == 200
+        assert new_me.json()["username"] == "rotatebrowser"
+
+
+def test_browser_session_password_change_requires_old_password_and_enables_new_login(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="passwordbrowser", email="passwordbrowser@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "old-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "passwordbrowser@example.com", "password": "old-pass"},
+        )
+        assert login.status_code == 200
+
+        bad = client.patch(
+            "/api/v1/user/me/password",
+            json={"current_password": "wrong-pass", "new_password": "new-pass"},
+        )
+        assert bad.status_code == 403
+
+        good = client.patch(
+            "/api/v1/user/me/password",
+            json={"current_password": "old-pass", "new_password": "new-pass"},
+        )
+        assert good.status_code == 200
+        assert good.json()["updated"] is True
+
+        client.post("/api/v1/auth/logout")
+
+        old_login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "passwordbrowser@example.com", "password": "old-pass"},
+        )
+        assert old_login.status_code == 401
+
+        new_login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "passwordbrowser@example.com", "password": "new-pass"},
+        )
+        assert new_login.status_code == 200
+
+
+def test_browser_session_delete_current_user_clears_session_and_removes_content(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="deletebrowser", email="deletebrowser@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "deletebrowser@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+
+        deleted = client.delete("/api/v1/user/me")
+        assert deleted.status_code == 200
+        deleted_payload = deleted.json()
+        assert deleted_payload["deleted"] is True
+        assert deleted_payload["user_id"] == user_id
+
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 401
+
+        assert get_user_record(client, user_id) is None
+        assert get_album_record(client, payload["album_id"]) is None
+        assert get_media_record(client, payload["media_id"]) is None
