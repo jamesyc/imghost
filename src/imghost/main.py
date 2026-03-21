@@ -10,7 +10,7 @@ from .app_state import AppState
 from .config import load_settings
 from .web.admin_api import router as admin_api_router
 from .web.auth import router as auth_router
-from .web.context import clear_stale_session_cookie
+from .web.context import clear_stale_session_cookie, enforce_session_csrf
 from .web.health import router as health_router
 from .web.media import router as media_router
 from .web.pages import router as pages_router
@@ -30,6 +30,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="imghost V1", lifespan=lifespan)
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.middleware("http")(enforce_session_csrf)
 app.middleware("http")(clear_stale_session_cookie)
 
 app.include_router(pages_router)

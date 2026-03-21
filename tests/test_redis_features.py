@@ -17,6 +17,8 @@ from imghost.redis_support import RedisHandle
 from imghost.sessions import RedisBackedSessionBackend
 from imghost.tasks import RedisTaskQueue, TaskContext
 
+from .helpers import browser_session_headers
+
 
 class FakeRedis:
     def __init__(self) -> None:
@@ -350,7 +352,7 @@ def test_app_logout_still_clears_cookie_when_redis_delete_fails(tmp_path, monkey
         assert registered.status_code == 200
 
         fake.fail = True
-        logout = client.post("/api/v1/auth/logout")
+        logout = client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
         assert logout.status_code == 200
         assert "imghost_session=" in logout.headers["set-cookie"]
 

@@ -8,6 +8,7 @@ from imghost.models import utcnow
 
 from .helpers import (
     PNG_1X1,
+    browser_session_headers,
     create_admin_and_api_key,
     create_user_and_api_key,
     get_user_record,
@@ -105,6 +106,7 @@ def test_local_login_sets_session_cookie_and_authenticates_browser_flow(tmp_path
         upload = client.post(
             "/api/v1/upload",
             files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            headers=browser_session_headers("https://testserver", "/dashboard"),
         )
         assert upload.status_code == 200
         payload = upload.json()
@@ -117,7 +119,7 @@ def test_local_login_sets_session_cookie_and_authenticates_browser_flow(tmp_path
         assert album.expires_at is None
         assert album.delete_token is None
 
-        logout = client.post("/api/v1/auth/logout")
+        logout = client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
         assert logout.status_code == 200
         assert logout.json()["authenticated"] is False
         assert "Secure" in logout.headers["set-cookie"]
@@ -153,7 +155,7 @@ def test_local_http_login_uses_insecure_cookie_for_dev_refreshes(tmp_path, monke
         assert "Hello devcookie" in page.text
         assert "Signed in as <strong>devcookie</strong>." not in page.text
 
-        logout = client.post("/api/v1/auth/logout")
+        logout = client.post("/api/v1/auth/logout", headers=browser_session_headers("http://testserver", "/"))
         assert logout.status_code == 200
         assert "Secure" not in logout.headers["set-cookie"]
 
@@ -335,6 +337,7 @@ def test_admin_browser_session_can_mutate_user_and_album_routes_used_by_ui(tmp_p
         patch_user = client.patch(
             f"/api/v1/admin/users/{target_user_id}",
             json={"quota_bytes": 1234, "rate_limit_rpm": 9},
+            headers=browser_session_headers("https://testserver", f"/admin/users/{target_user_id}"),
         )
         assert patch_user.status_code == 200
         assert patch_user.json()["quota_bytes"] == 1234
@@ -343,6 +346,7 @@ def test_admin_browser_session_can_mutate_user_and_album_routes_used_by_ui(tmp_p
         reset_password = client.post(
             f"/api/v1/admin/users/{target_user_id}/reset-password",
             json={"new_password": "new-target-pass"},
+            headers=browser_session_headers("https://testserver", f"/admin/users/{target_user_id}"),
         )
         assert reset_password.status_code == 200
         assert reset_password.json() == {"reset": True, "user_id": target_user_id}
@@ -353,7 +357,7 @@ def test_admin_browser_session_can_mutate_user_and_album_routes_used_by_ui(tmp_p
         )
         assert target_login.status_code == 200
 
-        client.post("/api/v1/auth/logout")
+        client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
         relogin = client.post(
             "/api/v1/auth/login",
             json={"login": "csrfadmin@example.com", "password": "admin-pass"},
@@ -372,13 +376,185 @@ def test_admin_browser_session_can_mutate_user_and_album_routes_used_by_ui(tmp_p
         patch_album = client.patch(
             f"/api/v1/admin/albums/{album_id}",
             json={"expires_at": utcnow().replace(microsecond=0).isoformat()},
+            headers=browser_session_headers("https://testserver", "/admin/albums"),
         )
         assert patch_album.status_code == 200
         assert patch_album.json()["id"] == album_id
 
-        delete_album = client.delete(f"/api/v1/admin/albums/{album_id}")
+        delete_album = client.delete(
+            f"/api/v1/admin/albums/{album_id}",
+            headers=browser_session_headers("https://testserver", "/admin/albums"),
+        )
         assert delete_album.status_code == 200
         assert delete_album.json()["deleted"] is True
+
+
+def test_browser_session_mutation_rejects_cross_origin_password_change(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="csrfblocked", email="csrfblocked@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "old-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfblocked@example.com", "password": "old-pass"},
+        )
+        assert login.status_code == 200
+
+        blocked = client.patch(
+            "/api/v1/user/me/password",
+            headers={"Origin": "https://evil.example", "Referer": "https://evil.example/account"},
+            json={"current_password": "old-pass", "new_password": "new-pass"},
+        )
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == "CSRF protection blocked the request."
+
+
+def test_browser_session_mutation_allows_trusted_referer_without_origin(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, old_api_key = create_user_and_api_key(capsys, username="csrfreferer", email="csrfreferer@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfreferer@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        rotated = client.post(
+            "/api/v1/user/me/api-key",
+            headers={"Referer": "https://testserver/settings"},
+        )
+        assert rotated.status_code == 200
+        assert rotated.json()["api_key"] != old_api_key
+
+
+def test_browser_session_mutation_rejects_missing_origin_and_referer(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="csrfmissing", email="csrfmissing@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfmissing@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        blocked = client.delete("/api/v1/user/me")
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == "CSRF protection blocked the request."
+
+
+def test_browser_session_mutation_allows_trusted_alternate_public_origin(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://testserver,https://cdn.testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, old_api_key = create_user_and_api_key(capsys, username="csrfaltorigin", email="csrfaltorigin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfaltorigin@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        rotated = client.post(
+            "/api/v1/user/me/api-key",
+            headers=browser_session_headers("https://cdn.testserver", "/settings"),
+        )
+        assert rotated.status_code == 200
+        assert rotated.json()["api_key"] != old_api_key
+
+
+def test_browser_session_mutation_rejects_malformed_referer_without_origin(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="csrfbadreferer", email="csrfbadreferer@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfbadreferer@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        blocked = client.post("/api/v1/user/me/api-key", headers={"Referer": "/settings"})
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == "CSRF protection blocked the request."
+
+
+def test_bearer_mutation_bypasses_session_csrf_even_with_session_cookie_present(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    session_user_id, _ = create_user_and_api_key(capsys, username="csrfsession", email="csrfsession@example.com")
+    bearer_user_id, bearer_key = create_user_and_api_key(capsys, username="csrfbearer", email="csrfbearer@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, session_user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfsession@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        rotated = client.post(
+            "/api/v1/user/me/api-key",
+            headers={
+                "Authorization": f"Bearer {bearer_key}",
+                "Origin": "https://evil.example",
+                "Referer": "https://evil.example/settings",
+            },
+        )
+        assert rotated.status_code == 200
+
+        me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {rotated.json()['api_key']}"})
+        assert me.status_code == 200
+        assert me.json()["id"] == bearer_user_id
+
+
+def test_login_and_register_mutations_remain_exempt_without_csrf_headers(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "csrfexempt",
+                "email": "csrfexempt@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        logout = client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
+        assert logout.status_code == 200
+
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfexempt@example.com", "password": "secret-pass"},
+        )
+        assert login.status_code == 200
 
 
 def test_registration_respects_allow_registration_runtime_config(tmp_path, monkeypatch, capsys) -> None:

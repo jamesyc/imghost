@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from imghost.main import app
 
-from .helpers import PNG_1X1, create_admin_and_api_key, create_user_and_api_key
+from .helpers import PNG_1X1, browser_session_headers, create_admin_and_api_key, create_user_and_api_key
 
 
 def test_album_patch_reorder_and_media_delete_require_token(tmp_path, monkeypatch) -> None:
@@ -188,6 +188,7 @@ def test_browser_session_owner_can_append_reorder_and_delete_owned_album(tmp_pat
                 ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
             ],
             data={"title": "Workspace Album"},
+            headers=browser_session_headers("https://testserver", "/dashboard"),
         )
         assert created.status_code == 200
         created_payload = created.json()
@@ -198,6 +199,7 @@ def test_browser_session_owner_can_append_reorder_and_delete_owned_album(tmp_pat
             "/api/v1/upload",
             files=[("file", ("three.png", BytesIO(PNG_1X1), "image/png"))],
             data={"album_id": album_id},
+            headers=browser_session_headers("https://testserver", f"/albums/{album_id}"),
         )
         assert appended.status_code == 200
         appended_payload = appended.json()
@@ -206,6 +208,7 @@ def test_browser_session_owner_can_append_reorder_and_delete_owned_album(tmp_pat
         patched = client.patch(
             f"/api/v1/album/{album_id}",
             json={"title": "Workspace Album Edited", "cover_media_id": appended_payload["media_id"]},
+            headers=browser_session_headers("https://testserver", f"/albums/{album_id}"),
         )
         assert patched.status_code == 200
         assert patched.json()["title"] == "Workspace Album Edited"
@@ -218,6 +221,7 @@ def test_browser_session_owner_can_append_reorder_and_delete_owned_album(tmp_pat
                 {"media_id": media_ids[0], "position": 200},
                 {"media_id": media_ids[1], "position": 300},
             ],
+            headers=browser_session_headers("https://testserver", f"/albums/{album_id}"),
         )
         assert reordered.status_code == 200
         assert [item["id"] for item in reordered.json()["items"]] == [appended_payload["media_id"], media_ids[0], media_ids[1]]
@@ -233,7 +237,10 @@ def test_browser_session_owner_can_append_reorder_and_delete_owned_album(tmp_pat
         assert listed_payload["items"][0]["id"] == album_id
         assert listed_payload["items"][0]["item_count"] == 3
 
-        deleted = client.delete(f"/api/v1/album/{album_id}")
+        deleted = client.delete(
+            f"/api/v1/album/{album_id}",
+            headers=browser_session_headers("https://testserver", f"/albums/{album_id}"),
+        )
         assert deleted.status_code == 200
         assert deleted.json()["album_id"] == album_id
 

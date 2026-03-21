@@ -6,6 +6,7 @@ from imghost.main import app
 
 from .helpers import (
     PNG_1X1,
+    browser_session_headers,
     create_user_and_api_key,
     get_album_record,
     get_media_record,
@@ -577,7 +578,7 @@ def test_browser_session_api_key_rotation_invalidates_previous_key(tmp_path, mon
         )
         assert login.status_code == 200
 
-        rotated = client.post("/api/v1/user/me/api-key")
+        rotated = client.post("/api/v1/user/me/api-key", headers=browser_session_headers("https://testserver", "/settings"))
         assert rotated.status_code == 200
         payload = rotated.json()
         assert payload["api_key"] != old_api_key
@@ -609,17 +610,19 @@ def test_browser_session_password_change_requires_old_password_and_enables_new_l
         bad = client.patch(
             "/api/v1/user/me/password",
             json={"current_password": "wrong-pass", "new_password": "new-pass"},
+            headers=browser_session_headers("https://testserver", "/settings"),
         )
         assert bad.status_code == 403
 
         good = client.patch(
             "/api/v1/user/me/password",
             json={"current_password": "old-pass", "new_password": "new-pass"},
+            headers=browser_session_headers("https://testserver", "/settings"),
         )
         assert good.status_code == 200
         assert good.json()["updated"] is True
 
-        client.post("/api/v1/auth/logout")
+        client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
 
         old_login = client.post(
             "/api/v1/auth/login",
@@ -652,11 +655,12 @@ def test_browser_session_delete_current_user_clears_session_and_removes_content(
         upload = client.post(
             "/api/v1/upload",
             files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            headers=browser_session_headers("https://testserver", "/dashboard"),
         )
         assert upload.status_code == 200
         payload = upload.json()
 
-        deleted = client.delete("/api/v1/user/me")
+        deleted = client.delete("/api/v1/user/me", headers=browser_session_headers("https://testserver", "/settings"))
         assert deleted.status_code == 200
         deleted_payload = deleted.json()
         assert deleted_payload["deleted"] is True

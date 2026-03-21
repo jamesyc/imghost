@@ -4,7 +4,14 @@ from fastapi.testclient import TestClient
 
 from imghost.main import app
 
-from .helpers import PNG_1X1, create_admin_and_api_key, create_user_and_api_key, set_user_password, wait_for_thumbnail
+from .helpers import (
+    PNG_1X1,
+    browser_session_headers,
+    create_admin_and_api_key,
+    create_user_and_api_key,
+    set_user_password,
+    wait_for_thumbnail,
+)
 
 
 def test_smoke_anonymous_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
@@ -55,6 +62,7 @@ def test_smoke_browser_login_and_authenticated_upload(tmp_path, monkeypatch, cap
         upload = client.post(
             "/api/v1/upload",
             files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            headers=browser_session_headers("https://testserver", "/dashboard"),
         )
         assert upload.status_code == 200
         assert upload.json()["album_id"]

@@ -9,6 +9,7 @@ from imghost.models import utcnow
 
 from .helpers import (
     PNG_1X1,
+    browser_session_headers,
     create_admin_and_api_key,
     create_user_and_api_key,
     set_user_password,
@@ -281,7 +282,7 @@ def test_template_shell_wraps_phase_three_pages_and_private_pages(tmp_path, monk
         assert 'href="/dashboard"' in settings.text
         assert 'href="/admin"' not in dashboard.text
 
-        client.post("/api/v1/auth/logout")
+        client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
         set_user_password(client, admin_id, "admin-pass")
         admin_login = client.post("/api/v1/auth/login", json={"login": "uiadmin@example.com", "password": "admin-pass"})
         assert admin_login.status_code == 200
@@ -423,7 +424,7 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         assert owner_page.status_code == 200
         assert f'href="/albums/{upload.json()["album_id"]}"' in owner_page.text
         assert "Edit Album" in owner_page.text
-        client.post("/api/v1/auth/logout")
+        client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
 
         set_user_password(client, stranger_id, "stranger-pass")
         stranger_login = client.post(
@@ -641,7 +642,7 @@ def test_album_pages_include_pagination_controls(tmp_path, monkeypatch, capsys) 
         assert 'id="owned-albums-next"' in albums.text
         assert 'id="owned-albums-summary"' in albums.text
 
-        client.post("/api/v1/auth/logout")
+        client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
         set_user_password(client, admin_id, "admin-pass")
         admin_login = client.post("/api/v1/auth/login", json={"login": "pagealbumsadmin@example.com", "password": "admin-pass"})
         assert admin_login.status_code == 200

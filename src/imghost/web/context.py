@@ -9,13 +9,13 @@ from urllib.parse import urlencode, urlsplit
 from uuid import uuid4
 
 from fastapi import HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from ..app_state import AppState
 from ..config import Settings
 from ..models import User, utcnow
-from ..public_origin import public_base_url
+from ..public_origin import _normalize_origin, _trusted_origin_set, public_base_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -41,6 +41,33 @@ def get_state(request: Request) -> AppState:
 
 def correlation_id(request: Request) -> str:
     return request.headers.get("X-Correlation-ID") or str(uuid4())
+
+
+def _request_uses_bearer_auth(request: Request) -> bool:
+    header = request.headers.get("Authorization", "")
+    scheme, _, token = header.partition(" ")
+    return scheme.lower() == "bearer" and bool(token)
+
+
+def _referer_origin(referer: str | None) -> str | None:
+    candidate = (referer or "").strip()
+    if not candidate:
+        return None
+    parsed = urlsplit(candidate)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return _normalize_origin(f"{parsed.scheme}://{parsed.netloc}")
+
+
+def _has_trusted_csrf_source(request: Request, settings: Settings) -> bool:
+    trusted = _trusted_origin_set(settings)
+    origin = _normalize_origin(request.headers.get("Origin", ""))
+    if origin is not None:
+        return origin in trusted
+    referer_origin = _referer_origin(request.headers.get("Referer"))
+    if referer_origin is not None:
+        return referer_origin in trusted
+    return False
 
 
 def apply_session_cookie(response: Response, settings: Settings, token: str, *, expires_at) -> None:
@@ -214,3 +241,20 @@ async def clear_stale_session_cookie(request: Request, call_next):
         clear_session_cookie(response, get_state(request).settings)
         logging.getLogger(__name__).info("session_cookie_cleared", extra={"path": request.url.path})
     return response
+
+
+async def enforce_session_csrf(request: Request, call_next):
+    if request.method not in {"POST", "PATCH", "DELETE"}:
+        return await call_next(request)
+    if request.url.path in {"/api/v1/auth/login", "/api/v1/auth/register"}:
+        return await call_next(request)
+    state = getattr(request.app.state, "imghost", None)
+    if state is None:
+        return await call_next(request)
+    if _request_uses_bearer_auth(request):
+        return await call_next(request)
+    if not request.cookies.get(state.settings.session_cookie_name):
+        return await call_next(request)
+    if not _has_trusted_csrf_source(request, state.settings):
+        return JSONResponse({"detail": "CSRF protection blocked the request."}, status_code=403)
+    return await call_next(request)

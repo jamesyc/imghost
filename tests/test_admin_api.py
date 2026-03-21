@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from imghost.main import app
 from imghost.models import utcnow
 
-from .helpers import PNG_1X1, create_admin_and_api_key, create_user_and_api_key, set_user_password
+from .helpers import PNG_1X1, browser_session_headers, create_admin_and_api_key, create_user_and_api_key, set_user_password
 
 
 def assert_paginated_envelope(payload: dict, *, limit: int, offset: int, total: int, has_more: bool) -> None:
@@ -86,6 +86,7 @@ def test_admin_browser_session_can_patch_runtime_config_used_by_admin_ui(tmp_pat
                 "anon_upload_enabled": False,
                 "anon_expiry_hours": 72,
             },
+            headers=browser_session_headers("https://testserver", "/admin/config"),
         )
         assert patched.status_code == 200
         patched_payload = patched.json()

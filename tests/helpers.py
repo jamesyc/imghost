@@ -26,6 +26,15 @@ def wait_for_thumbnail(client: TestClient, media_id: str, *, suffix: str = "jpg"
     raise AssertionError(f"thumbnail for {media_id} was not ready within {timeout} seconds")
 
 
+def browser_session_headers(base_url: str = "https://testserver", path: str = "/") -> dict[str, str]:
+    origin = base_url.rstrip("/")
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    return {
+        "Origin": origin,
+        "Referer": f"{origin}{normalized_path}",
+    }
+
+
 def create_user_and_api_key(capsys, *, username: str, email: str) -> tuple[str, str]:
     assert cli_main(["create-user", "--username", username, "--email", email]) == 0
     create_output = capsys.readouterr().out.strip().splitlines()
