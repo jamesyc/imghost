@@ -226,6 +226,24 @@ async def admin_users_new_page(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/admin/users/{user_id}", response_class=HTMLResponse)
+async def admin_user_detail_page(request: Request, user_id: str) -> HTMLResponse:
+    state = get_state(request)
+    user_or_redirect = await require_page_admin(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    admin_user = await state.uploads.get_user_with_usage_for_admin(user_id)
+    return await render_template_page(
+        request,
+        "pages/admin-user-detail.html",
+        f"Admin User {admin_user['username']}",
+        user=user,
+        extra_context={"admin_user_bootstrap": {"user_id": user_id, "username": admin_user["username"]}},
+        script_paths=["js/admin-common.js", "js/album-cards.js", "js/admin-user-detail.js"],
+    )
+
+
 @router.get("/admin/albums", response_class=HTMLResponse)
 async def admin_albums_page(request: Request) -> HTMLResponse:
     user_or_redirect = await require_page_admin(request)

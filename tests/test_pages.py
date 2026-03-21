@@ -576,6 +576,18 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert 'id="admin-users"' in users.text
         assert 'href="/admin/users/new"' in users.text
 
+        detail = client.get(f"/admin/users/{admin_id}")
+        assert detail.status_code == 200
+        assert "Admin user detail" in detail.text
+        assert 'id="admin-user-detail-root"' in detail.text
+        assert 'id="admin-user-detail-summary"' in detail.text
+        assert 'id="admin-user-detail-stats"' in detail.text
+        assert 'id="admin-user-albums"' in detail.text
+        assert 'id="admin-user-albums-prev"' in detail.text
+        assert 'id="admin-user-albums-next"' in detail.text
+        assert '<script src="/static/js/album-cards.js" defer></script>' in detail.text
+        assert '<script src="/static/js/admin-user-detail.js" defer></script>' in detail.text
+
         new_user = client.get("/admin/users/new")
         assert new_user.status_code == 200
         assert "Create user" in new_user.text
@@ -639,6 +651,54 @@ def test_album_pages_include_pagination_controls(tmp_path, monkeypatch, capsys) 
         assert 'id="admin-albums-prev"' in admin_albums.text
         assert 'id="admin-albums-next"' in admin_albums.text
         assert 'id="admin-albums-summary"' in admin_albums.text
+
+
+def test_admin_users_page_links_to_detail_page_and_detail_requires_real_user(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    admin_id, _ = create_admin_and_api_key(capsys, username="detailadmin", email="detailadmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="detailtarget", email="detailtarget@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, admin_id, "admin-pass")
+        login = client.post("/api/v1/auth/login", json={"login": "detailadmin@example.com", "password": "admin-pass"})
+        assert login.status_code == 200
+
+        users = client.get("/admin/users")
+        assert users.status_code == 200
+        assert '<script src="/static/js/admin-users.js" defer></script>' in users.text
+
+        detail = client.get(f"/admin/users/{user_id}")
+        assert detail.status_code == 200
+        assert 'id="admin-user-detail-patch-form"' in detail.text
+        assert 'id="admin-user-detail-reset-form"' in detail.text
+        assert 'id="admin-user-detail-delete"' in detail.text
+
+        missing = client.get("/admin/users/00000000-0000-0000-0000-000000000000")
+        assert missing.status_code == 404
+
+
+def test_admin_user_detail_page_renders_for_user_with_no_albums(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    admin_id, _ = create_admin_and_api_key(capsys, username="emptydetailadmin", email="emptydetailadmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="emptydetailuser", email="emptydetailuser@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, admin_id, "admin-pass")
+        login = client.post("/api/v1/auth/login", json={"login": "emptydetailadmin@example.com", "password": "admin-pass"})
+        assert login.status_code == 200
+
+        detail = client.get(f"/admin/users/{user_id}")
+        assert detail.status_code == 200
+        assert 'id="admin-user-albums"' in detail.text
+        assert 'id="admin-user-albums-summary"' in detail.text
+        assert 'href="/admin/users"' in detail.text
+        assert '<script src="/static/js/album-cards.js" defer></script>' in detail.text
 
 def test_public_user_album_list_page_shows_owned_albums_sorted_by_recent_update(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))

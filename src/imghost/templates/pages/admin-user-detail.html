@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block content %}
+<script id="admin-user-detail-bootstrap" type="application/json">{{ admin_user_bootstrap|tojson }}</script>
+<section class="stack admin-shell">
+  <section class="card hero-card admin-hero">
+    <div class="admin-hero-copy">
+      <p class="eyebrow">Admin</p>
+      <h1>Admin user detail</h1>
+      <p class="lede">Inspect one account in depth, review its storage footprint, and page through owned albums without going back to the broad user list.</p>
+    </div>
+  </section>
+
+  {% include "partials/admin-subnav.html" %}
+
+  <section id="admin-user-detail-root" class="grid" data-user-id="{{ admin_user_bootstrap.user_id }}">
+    <section class="card admin-card admin-overview-half">
+      <div class="row row-actions">
+        <div>
+          <p class="eyebrow">Account</p>
+          <h2 id="admin-user-detail-name">{{ admin_user_bootstrap.username }}</h2>
+        </div>
+        <a class="button-link secondary-link" href="/admin/users">Back to users</a>
+      </div>
+      <p id="admin-user-detail-status" class="settings-inline-status hidden" aria-live="polite"></p>
+      <div id="admin-user-detail-summary" class="stack admin-overview-metrics"></div>
+    </section>
+
+    <section class="card admin-card admin-overview-half">
+      <div class="row row-actions">
+        <div>
+          <p class="eyebrow">Usage</p>
+          <h2>Storage stats</h2>
+        </div>
+        <button id="admin-user-detail-refresh" type="button" class="secondary">Refresh</button>
+      </div>
+      <p id="admin-user-stats-status" class="settings-inline-status hidden" aria-live="polite"></p>
+      <div id="admin-user-detail-stats" class="stack admin-overview-metrics"></div>
+    </section>
+
+    <section class="card admin-card admin-overview-half">
+      <div class="admin-record-header">
+        <div>
+          <p class="eyebrow">Manage</p>
+          <h2>Update account</h2>
+        </div>
+      </div>
+      <form id="admin-user-detail-patch-form" class="stack">
+        <label class="check"><input id="admin-user-detail-suspended" type="checkbox" name="suspended"> Suspended</label>
+        <input id="admin-user-detail-quota" type="number" name="quota_bytes" placeholder="Quota bytes">
+        <input id="admin-user-detail-rpm" type="number" name="rate_limit_rpm" placeholder="Requests per minute override">
+        <input id="admin-user-detail-bph" type="number" name="rate_limit_bph" placeholder="Bytes per hour override">
+        <div class="row row-actions">
+          <button type="submit">Patch User</button>
+        </div>
+      </form>
+      <form id="admin-user-detail-reset-form" class="stack">
+        <input id="admin-user-detail-reset-password" type="password" name="new_password" placeholder="New password" required>
+        <div class="row row-actions">
+          <button type="submit" class="secondary">Reset Password</button>
+        </div>
+      </form>
+      <div class="row row-actions admin-delete-row">
+        <button id="admin-user-detail-delete" type="button" class="danger">Delete User</button>
+      </div>
+    </section>
+
+    <section class="card admin-card admin-overview-full">
+      <div class="row row-actions admin-users-toolbar">
+        <div>
+          <p class="eyebrow">Albums</p>
+          <h2>Owned albums</h2>
+        </div>
+        <p id="admin-user-albums-summary" class="hint"></p>
+      </div>
+      <div id="admin-user-albums" class="stack albums-list-results"></div>
+      <div class="row row-actions admin-pagination">
+        <button id="admin-user-albums-prev" type="button" class="secondary">Previous</button>
+        <button id="admin-user-albums-next" type="button" class="secondary">Next</button>
+      </div>
+    </section>
+  </section>
+</section>
+{% endblock %}

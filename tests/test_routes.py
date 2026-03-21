@@ -26,6 +26,7 @@ def test_expected_routes_are_registered() -> None:
         "/settings": {"GET"},
         "/admin": {"GET"},
         "/admin/users": {"GET"},
+        "/admin/users/{user_id}": {"GET"},
         "/admin/users/new": {"GET"},
         "/admin/albums": {"GET"},
         "/admin/config": {"GET"},

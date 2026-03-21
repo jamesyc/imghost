@@ -32,8 +32,11 @@ if (adminUsersRoot) {
         <section class="admin-card" data-user-id="${user.id}">
           <div class="admin-record-header">
             <div>
-              <h3>${window.escapeAdminHtml(user.username)}${user.is_admin ? " (admin)" : ""}</h3>
+              <h3><a href="/admin/users/${user.id}">${window.escapeAdminHtml(user.username)}</a>${user.is_admin ? " (admin)" : ""}</h3>
               <p class="hint">${window.escapeAdminHtml(user.email)} · suspended=${user.suspended} · storage=${user.storage_used_bytes} · media=${user.media_count}</p>
+            </div>
+            <div class="row row-actions">
+              <a class="button-link secondary-link" href="/admin/users/${user.id}">Open</a>
             </div>
           </div>
           <form class="admin-user-patch-form stack">

@@ -67,13 +67,15 @@ const albumCardPublicLinkControl = (album) => {
 window.renderAlbumCard = (album, options = {}) => {
   const metaText = options.metaText ? options.metaText(album) : `${album.item_count} item(s)`;
   const actions = options.actions ? options.actions(album) : albumCardPublicLinkControl(album);
+  const openUrl = options.openUrl ? options.openUrl(album) : albumCardPrivatePath(album.id);
+  const thumbHref = options.thumbHref ? options.thumbHref(album) : openUrl;
+  const interactiveAttrs = openUrl
+    ? ` role="link" tabindex="0" data-album-open-url="${albumCardEscapeHtml(openUrl)}" aria-label="Open album ${albumCardEscapeHtml(album.title || album.id)}"`
+    : "";
   return `
     <section
       class="album-card album-list-card dashboard-recent-album-card"
-      role="link"
-      tabindex="0"
-      data-album-open-url="${albumCardPrivatePath(album.id)}"
-      aria-label="Open album ${albumCardEscapeHtml(album.title || album.id)}"
+      ${interactiveAttrs}
     >
       <div class="dashboard-recent-album-copy">
         <div>
@@ -84,7 +86,7 @@ window.renderAlbumCard = (album, options = {}) => {
           ${actions}
         </div>
       </div>
-      <a class="dashboard-recent-album-thumb" href="${albumCardPrivatePath(album.id)}" aria-label="Open private album ${albumCardEscapeHtml(album.title || album.id)}">
+      <a class="dashboard-recent-album-thumb" href="${albumCardEscapeHtml(thumbHref)}" aria-label="Open album ${albumCardEscapeHtml(album.title || album.id)}">
         ${albumCardThumbMarkup(album)}
       </a>
     </section>

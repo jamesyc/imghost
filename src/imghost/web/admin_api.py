@@ -96,10 +96,19 @@ async def admin_get_user_stats(request: Request, user_id: str) -> JSONResponse:
 
 
 @router.get("/api/v1/admin/users/{user_id}/albums")
-async def admin_list_user_albums(request: Request, user_id: str) -> JSONResponse:
+async def admin_list_user_albums(request: Request, user_id: str, limit: int = 10, offset: int = 0) -> JSONResponse:
     state = get_state(request)
     await require_admin_user(request)
-    payload = await state.uploads.list_albums_for_user_admin_view(user_id)
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200.")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    payload = await state.uploads.list_albums_for_user_admin_page(
+        user_id,
+        base_url=public_base_url(request, state.settings),
+        limit=limit,
+        offset=offset,
+    )
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 

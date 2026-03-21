@@ -1052,28 +1052,37 @@ class UploadService:
         }
 
     async def list_albums_for_user_admin_view(self, user_id: str) -> list[dict[str, object]]:
+        page = await self.list_albums_for_user_admin_page(user_id, base_url="", limit=1000, offset=0)
+        return page["items"]
+
+    async def list_albums_for_user_admin_page(
+        self,
+        user_id: str,
+        *,
+        base_url: str,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> dict[str, object]:
         user = await self.repository.get_user(user_id)
         if user is None:
             raise HTTPException(status_code=404, detail="User not found.")
 
-        albums = await self.repository.list_user_albums(user.id)
+        albums, total = await self.repository.list_user_albums_page(user.id, limit=limit, offset=offset)
+        media_by_album = await self.repository.list_media_for_album_ids([album.id for album in albums])
         payload: list[dict[str, object]] = []
         for album in albums:
-            items = await self.repository.list_album_media(album.id)
-            payload.append(
-                {
-                    "id": album.id,
-                    "title": album.title,
-                    "user_id": album.user_id,
-                    "owner_username": user.username,
-                    "item_count": len(items),
-                    "total_size": self._storage_bytes_for_media(items),
-                    "created_at": album.created_at.isoformat(),
-                    "updated_at": album.updated_at.isoformat(),
-                    "expires_at": album.expires_at.isoformat() if album.expires_at else None,
-                }
-            )
-        return payload
+            items = media_by_album.get(album.id, [])
+            album_payload = album_to_payload(base_url, album, items)
+            album_payload["user_id"] = album.user_id
+            album_payload["owner_username"] = user.username
+            payload.append(album_payload)
+        return {
+            "items": payload,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(payload) < total,
+        }
 
     async def list_public_albums_for_username(self, username: str) -> tuple[User, list[dict[str, object]]]:
         user = await self.repository.get_user_by_username(username)
