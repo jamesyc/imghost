@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="stack admin-shell">
+  <section class="card hero-card admin-hero">
+    <div class="admin-hero-copy">
+      <p class="eyebrow">Admin</p>
+      <h1>Album operations</h1>
+      <p class="lede">Review ownership, update expiry, and remove albums without opening the public or owner views.</p>
+    </div>
+  </section>
+
+  {% include "partials/admin-subnav.html" %}
+
+  <section class="card admin-card admin-list-card">
+    <form id="admin-album-search-form" class="stack">
+      <div class="row">
+        <input type="search" name="q" placeholder="Search by album title or album ID">
+        <input type="search" name="owner" placeholder="Owner username or email">
+        <select name="anonymous">
+          <option value="">All albums</option>
+          <option value="false">Owned only</option>
+          <option value="true">Anonymous only</option>
+        </select>
+      </div>
+      <div class="row row-actions">
+        <button type="submit">Search Albums</button>
+        <button id="refresh-admin-albums" type="button" class="secondary">Refresh Albums</button>
+      </div>
+    </form>
+    <div class="row row-actions admin-users-toolbar">
+      <div>
+        <p class="eyebrow">Albums</p>
+        <h2>Album results</h2>
+      </div>
+      <p id="admin-albums-summary" class="hint"></p>
+    </div>
+    <div id="admin-albums" class="stack"></div>
+    <div class="row row-actions admin-pagination">
+      <button id="admin-albums-prev" type="button" class="secondary">Previous</button>
+      <button id="admin-albums-next" type="button" class="secondary">Next</button>
+    </div>
+  </section>
+</section>
+{% endblock %}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from .db import Database
 from .models import Album, ApiKey, Media, User
@@ -255,17 +256,156 @@ class PostgresRepository:
             )
         return [_row_to_album(row) for row in rows]
 
+    async def list_user_albums_page(self, user_id: str, *, limit: int = 10, offset: int = 0) -> tuple[list[Album], int]:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            total = await conn.fetchval("SELECT COUNT(*) FROM albums WHERE user_id = $1::uuid", user_id)
+            rows = await conn.fetch(
+                "SELECT * FROM albums WHERE user_id = $1::uuid ORDER BY updated_at DESC, id DESC LIMIT $2 OFFSET $3",
+                user_id,
+                limit,
+                offset,
+            )
+        return [_row_to_album(row) for row in rows], int(total or 0)
+
     async def list_users(self) -> list[User]:
         pool = self.database.require_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(f"{USER_SELECT} ORDER BY users.created_at")
         return [_row_to_user(row) for row in rows]
 
+    async def list_users_filtered(
+        self,
+        *,
+        q: str | None = None,
+        is_admin: bool | None = None,
+        suspended: bool | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[User], int]:
+        filters: list[str] = []
+        params: list[Any] = []
+
+        if q:
+            params.append(f"%{q.lower()}%")
+            placeholder = f"${len(params)}"
+            filters.append(
+                f"(LOWER(users.username) LIKE {placeholder} OR LOWER(users.email) LIKE {placeholder} OR users.id::text LIKE {placeholder})"
+            )
+        if is_admin is not None:
+            params.append(is_admin)
+            filters.append(f"users.is_admin = ${len(params)}")
+        if suspended is not None:
+            params.append(suspended)
+            filters.append(f"users.is_suspended = ${len(params)}")
+
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+
+        count_sql = f"SELECT COUNT(*) FROM users {where_clause}"
+
+        params.extend([limit, offset])
+        paged_sql = (
+            f"{USER_SELECT} {where_clause} ORDER BY users.created_at DESC, users.id DESC "
+            f"LIMIT ${len(params) - 1} OFFSET ${len(params)}"
+        )
+
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            total = await conn.fetchval(count_sql, *params[:-2])
+            rows = await conn.fetch(paged_sql, *params)
+        return [_row_to_user(row) for row in rows], int(total or 0)
+
+    async def summarize_users(self, user_ids: list[str]) -> dict[str, dict[str, int]]:
+        if not user_ids:
+            return {}
+        pool = self.database.require_pool()
+        summary: dict[str, dict[str, int]] = {
+            user_id: {"album_count": 0, "media_count": 0, "storage_used_bytes": 0} for user_id in user_ids
+        }
+        async with pool.acquire() as conn:
+            album_rows = await conn.fetch(
+                """
+                SELECT user_id::text AS user_id, COUNT(*)::int AS album_count
+                FROM albums
+                WHERE user_id = ANY($1::uuid[])
+                GROUP BY user_id
+                """,
+                user_ids,
+            )
+            media_rows = await conn.fetch(
+                """
+                SELECT
+                  user_id::text AS user_id,
+                  COUNT(*)::int AS media_count,
+                  COALESCE(
+                    SUM(
+                      file_size +
+                      CASE
+                        WHEN thumb_key IS NOT NULL AND thumb_key <> storage_key THEN COALESCE(thumb_size, 0)
+                        ELSE 0
+                      END
+                    ),
+                    0
+                  )::bigint AS storage_used_bytes
+                FROM media
+                WHERE user_id = ANY($1::uuid[])
+                GROUP BY user_id
+                """,
+                user_ids,
+            )
+        for row in album_rows:
+            summary[row["user_id"]]["album_count"] = row["album_count"]
+        for row in media_rows:
+            summary[row["user_id"]]["media_count"] = row["media_count"]
+            summary[row["user_id"]]["storage_used_bytes"] = int(row["storage_used_bytes"] or 0)
+        return summary
+
     async def list_all_media(self) -> list[Media]:
         pool = self.database.require_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM media ORDER BY created_at")
         return [_row_to_media(row) for row in rows]
+
+    async def list_albums_page(
+        self,
+        *,
+        q: str | None = None,
+        owner: str | None = None,
+        anonymous: bool | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> tuple[list[Album], int]:
+        filters: list[str] = []
+        params: list[Any] = []
+
+        if q:
+            params.append(f"%{q.lower()}%")
+            placeholder = f"${len(params)}"
+            filters.append(f"(LOWER(albums.title) LIKE {placeholder} OR albums.id LIKE {placeholder})")
+        if owner:
+            params.append(f"%{owner.lower()}%")
+            placeholder = f"${len(params)}"
+            filters.append(
+                f"""albums.user_id IN (
+                    SELECT id FROM users
+                    WHERE LOWER(username) LIKE {placeholder} OR LOWER(email) LIKE {placeholder}
+                )"""
+            )
+        if anonymous is True:
+            filters.append("albums.user_id IS NULL")
+        elif anonymous is False:
+            filters.append("albums.user_id IS NOT NULL")
+
+        where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+        count_sql = f"SELECT COUNT(*) FROM albums {where_clause}"
+        params.extend([limit, offset])
+        query_sql = f"SELECT * FROM albums {where_clause} ORDER BY updated_at DESC, id DESC LIMIT ${len(params) - 1} OFFSET ${len(params)}"
+
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            total = await conn.fetchval(count_sql, *params[:-2])
+            rows = await conn.fetch(query_sql, *params)
+        return [_row_to_album(row) for row in rows], int(total or 0)
 
     async def delete_user(self, user_id: str) -> tuple[User | None, list[Album], list[Media]]:
         pool = self.database.require_pool()

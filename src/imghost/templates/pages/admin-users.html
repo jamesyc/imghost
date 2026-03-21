@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="stack admin-shell">
+  <section class="card hero-card admin-hero">
+    <div class="admin-hero-copy">
+      <p class="eyebrow">Admin</p>
+      <h1>User management</h1>
+      <p class="lede">Search and page through existing accounts, then update limits, reset passwords, or delete users.</p>
+    </div>
+  </section>
+
+  {% include "partials/admin-subnav.html" %}
+
+  <section class="card admin-card admin-list-card">
+    <form id="admin-user-search-form" class="stack">
+      <div class="row">
+        <input type="search" name="q" placeholder="Search by username, email, or user ID">
+        <select name="is_admin">
+          <option value="">All roles</option>
+          <option value="true">Admins only</option>
+          <option value="false">Non-admins only</option>
+        </select>
+        <select name="suspended">
+          <option value="">All statuses</option>
+          <option value="true">Suspended only</option>
+          <option value="false">Active only</option>
+        </select>
+      </div>
+      <div class="row row-actions">
+        <button type="submit">Search Users</button>
+        <button id="refresh-admin-users" type="button" class="secondary">Refresh</button>
+        <a class="button-link secondary-link" href="/admin/users/new">New User</a>
+      </div>
+    </form>
+    <div class="row row-actions admin-users-toolbar">
+      <div>
+        <p class="eyebrow">Users</p>
+        <h2>Account results</h2>
+      </div>
+      <p id="admin-users-summary" class="hint"></p>
+    </div>
+    <div id="admin-users" class="stack"></div>
+    <div class="row row-actions admin-pagination">
+      <button id="admin-users-prev" type="button" class="secondary">Previous</button>
+      <button id="admin-users-next" type="button" class="secondary">Next</button>
+    </div>
+  </section>
+</section>
+{% endblock %}

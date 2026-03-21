@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="stack admin-shell">
+  <section class="card hero-card admin-hero">
+    <div class="admin-hero-copy">
+      <p class="eyebrow">Admin</p>
+      <h1>Operations</h1>
+      <p class="lede">Inspect runtime status and query audit history from a dedicated operational surface.</p>
+    </div>
+  </section>
+
+  {% include "partials/admin-subnav.html" %}
+
+  <section class="grid admin-page-grid">
+    <section class="card admin-card">
+      <div class="row row-actions">
+        <div>
+          <p class="eyebrow">Runtime</p>
+          <h2>Status</h2>
+        </div>
+        <button id="refresh-admin-runtime-status" type="button" class="secondary">Refresh Status</button>
+      </div>
+      <pre id="admin-runtime-status" class="result"></pre>
+    </section>
+
+    <section class="card admin-card">
+      <p class="eyebrow">Audit log</p>
+      <h2>Query events</h2>
+      <form id="admin-audit-form" class="stack">
+        <div class="row">
+          <input type="text" name="event_type" placeholder="event_type">
+          <input type="text" name="actor_id" placeholder="actor_id">
+          <input type="text" name="user_id" placeholder="user_id">
+          <input type="text" name="correlation_id" placeholder="correlation_id">
+        </div>
+        <div class="row">
+          <input type="datetime-local" name="after">
+          <input type="datetime-local" name="before">
+          <input type="number" name="limit" placeholder="limit" value="100">
+          <input type="number" name="offset" placeholder="offset" value="0">
+        </div>
+        <div class="row row-actions">
+          <button type="submit">Query Audit</button>
+        </div>
+      </form>
+      <p id="admin-audit-status" class="settings-inline-status hidden" aria-live="polite"></p>
+      <pre id="admin-audit" class="result"></pre>
+    </section>
+  </section>
+</section>
+{% endblock %}

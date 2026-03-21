@@ -11,11 +11,16 @@
       </div>
       <button id="refresh-albums" type="button" class="secondary">Refresh Albums</button>
     </div>
+    <p id="owned-albums-summary" class="hint albums-list-summary"></p>
     <div id="owned-albums-empty" class="albums-empty-state hidden">
       <h3>No albums yet.</h3>
       <p class="hint">Use the dashboard upload box to create your first album.</p>
     </div>
-    <div id="owned-albums" class="stack"></div>
+    <div id="owned-albums" class="stack albums-list-results"></div>
+    <div class="row row-actions admin-pagination albums-list-pagination">
+      <button id="owned-albums-prev" type="button" class="secondary">Previous</button>
+      <button id="owned-albums-next" type="button" class="secondary">Next</button>
+    </div>
   </section>
 </section>
 {% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="stack admin-shell">
+  <section class="card hero-card admin-hero">
+    <div class="admin-hero-copy">
+      <p class="eyebrow">Admin</p>
+      <h1>Create user</h1>
+      <p class="lede">Create a new account with optional password, admin status, quota override, and rate-limit overrides.</p>
+    </div>
+  </section>
+
+  {% include "partials/admin-subnav.html" %}
+
+  <section class="card admin-card">
+    <p class="eyebrow">New account</p>
+    <h2>Create user</h2>
+    <form id="admin-create-user-form" class="stack">
+      <input type="text" name="username" placeholder="Username" required>
+      <input type="email" name="email" placeholder="Email" required>
+      <input type="password" name="password" placeholder="Password (optional)">
+      <label class="check"><input type="checkbox" name="is_admin"> Admin</label>
+      <input type="number" name="quota_bytes" placeholder="Quota bytes">
+      <input type="number" name="rate_limit_rpm" placeholder="Requests per minute override">
+      <input type="number" name="rate_limit_bph" placeholder="Bytes per hour override">
+      <div class="row row-actions">
+        <button type="submit">Create User</button>
+      </div>
+    </form>
+    <p id="admin-create-user-status" class="settings-inline-status hidden" aria-live="polite"></p>
+  </section>
+</section>
+{% endblock %}

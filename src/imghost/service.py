@@ -743,6 +743,50 @@ class UploadService:
             for user in users
         ]
 
+    async def list_users_with_usage_page(
+        self,
+        *,
+        q: str | None = None,
+        is_admin: bool | None = None,
+        suspended: bool | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, object]:
+        users, total = await self.repository.list_users_filtered(
+            q=q,
+            is_admin=is_admin,
+            suspended=suspended,
+            limit=limit,
+            offset=offset,
+        )
+        summaries = await self.repository.summarize_users([user.id for user in users])
+        items = []
+        for user in users:
+            summary = summaries.get(user.id, {})
+            items.append(
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "is_admin": user.is_admin,
+                    "suspended": user.suspended,
+                    "quota_bytes": user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes,
+                    "rate_limit_rpm": user.rate_limit_rpm,
+                    "rate_limit_bph": user.rate_limit_bph,
+                    "album_count": summary.get("album_count", 0),
+                    "storage_used_bytes": summary.get("storage_used_bytes", 0),
+                    "media_count": summary.get("media_count", 0),
+                    "created_at": user.created_at.isoformat(),
+                }
+            )
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+        }
+
     async def get_user_with_usage_for_admin(self, user_id: str) -> dict[str, object]:
         user = await self.repository.get_user(user_id)
         if user is None:
@@ -933,6 +977,48 @@ class UploadService:
                 }
             )
         return payload
+
+    async def list_albums_for_admin_page(
+        self,
+        *,
+        q: str | None = None,
+        owner: str | None = None,
+        anonymous: bool | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> dict[str, object]:
+        albums, total = await self.repository.list_albums_page(
+            q=q,
+            owner=owner,
+            anonymous=anonymous,
+            limit=limit,
+            offset=offset,
+        )
+        users = {user.id: user for user in await self.repository.list_users()}
+        items = []
+        for album in albums:
+            media_items = await self.repository.list_album_media(album.id)
+            owner_user = users.get(album.user_id) if album.user_id else None
+            items.append(
+                {
+                    "id": album.id,
+                    "title": album.title,
+                    "user_id": album.user_id,
+                    "owner_username": owner_user.username if owner_user else None,
+                    "item_count": len(media_items),
+                    "total_size": self._storage_bytes_for_media(media_items),
+                    "created_at": album.created_at.isoformat(),
+                    "updated_at": album.updated_at.isoformat(),
+                    "expires_at": album.expires_at.isoformat() if album.expires_at else None,
+                }
+            )
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(items) < total,
+        }
 
     async def list_albums_for_user_admin_view(self, user_id: str) -> list[dict[str, object]]:
         user = await self.repository.get_user(user_id)

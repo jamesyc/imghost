@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block content %}
+<script id="admin-bootstrap" type="application/json">{{ {"session_user": session_user}|tojson }}</script>
+<section class="stack admin-shell">
+  <section class="card hero-card admin-hero">
+    <div class="admin-hero-copy">
+      <p class="eyebrow">Admin</p>
+      <h1>Admin overview</h1>
+      <p class="lede">Jump into user management, album operations, runtime config, and operational status.</p>
+    </div>
+  </section>
+
+  {% include "partials/admin-subnav.html" %}
+
+  <section class="grid admin-overview-grid">
+    <section class="card admin-card admin-overview-half">
+      <p class="eyebrow">Account</p>
+      <h2>{{ session_user.username }}</h2>
+      <p class="hint">{{ session_user.email }}</p>
+      <p class="hint">{{ session_user.album_count }} albums · {{ session_user.media_count }} files</p>
+    </section>
+    <section class="card admin-card admin-overview-half">
+      <div class="row row-actions">
+        <div>
+          <p class="eyebrow">Storage stats</p>
+          <h2>Global usage</h2>
+        </div>
+        <button id="admin-overview-refresh-stats" type="button" class="secondary">Refresh</button>
+      </div>
+      <pre id="admin-overview-stats" class="result"></pre>
+    </section>
+    <section class="card admin-card admin-overview-full">
+      <div class="row row-actions">
+        <div>
+          <p class="eyebrow">Runtime</p>
+          <h2>System status</h2>
+        </div>
+        <button id="admin-overview-refresh-runtime" type="button" class="secondary">Refresh</button>
+      </div>
+      <pre id="admin-overview-runtime" class="result"></pre>
+    </section>
+  </section>
+</section>
+{% endblock %}

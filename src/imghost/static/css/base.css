@@ -278,8 +278,82 @@ body::after {
   margin-bottom: 18px;
 }
 
+.albums-list-summary {
+  margin: 0 0 18px;
+}
+
+.albums-list-results {
+  margin-bottom: 18px;
+}
+
+.albums-list-pagination {
+  margin-top: 18px;
+}
+
 .dashboard-shell {
   gap: 24px;
+}
+
+.admin-shell {
+  gap: 24px;
+}
+
+.admin-hero {
+  display: grid;
+  gap: 18px;
+  align-items: end;
+}
+
+.admin-hero-copy {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-subnav {
+  padding-block: 18px;
+}
+
+.admin-subnav-links {
+  justify-content: flex-start;
+}
+
+.admin-overview-grid,
+.admin-page-grid {
+  gap: 24px;
+}
+
+.admin-page-stack {
+  gap: 24px;
+}
+
+.admin-overview-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-overview-half {
+  min-width: 0;
+}
+
+.admin-overview-full {
+  grid-column: 1 / -1;
+}
+
+.admin-list-card {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-record-header {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-item-status {
+  margin-top: 8px;
+}
+
+.admin-delete-row {
+  margin-top: 10px;
 }
 
 .dashboard-hero {
@@ -1536,6 +1610,14 @@ a.inline-link {
   .card,
   .auth-card {
     padding: 22px;
+  }
+
+  .admin-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-overview-full {
+    grid-column: auto;
   }
 }
 

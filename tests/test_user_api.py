@@ -72,10 +72,11 @@ def test_current_user_albums_endpoint_lists_owned_albums_for_dashboard(tmp_path,
         listed = client.get("/api/v1/user/me/albums", headers={"Authorization": f"Bearer {api_key}"})
         assert listed.status_code == 200
         payload = listed.json()
-        assert len(payload) == 1
-        assert payload[0]["id"] == album_id
-        assert payload[0]["title"] == "Owned One"
-        assert payload[0]["item_count"] == 1
+        assert payload["total"] == 1
+        assert len(payload["items"]) == 1
+        assert payload["items"][0]["id"] == album_id
+        assert payload["items"][0]["title"] == "Owned One"
+        assert payload["items"][0]["item_count"] == 1
 
 
 def test_current_user_albums_endpoint_returns_recent_first_with_preview_items(tmp_path, monkeypatch, capsys) -> None:
@@ -107,12 +108,53 @@ def test_current_user_albums_endpoint_returns_recent_first_with_preview_items(tm
         listed = client.get("/api/v1/user/me/albums", headers={"Authorization": f"Bearer {api_key}"})
         assert listed.status_code == 200
         payload = listed.json()
-        assert [entry["title"] for entry in payload] == ["Newer Album", "Older Album"]
-        assert payload[0]["item_count"] == 2
-        assert len(payload[0]["items"]) == 2
-        assert payload[0]["cover_url"].endswith(f'/i/{payload[0]["items"][0]["id"]}.png')
-        assert payload[1]["item_count"] == 1
-        assert len(payload[1]["items"]) == 1
+        assert [entry["title"] for entry in payload["items"]] == ["Newer Album", "Older Album"]
+        assert payload["items"][0]["item_count"] == 2
+        assert len(payload["items"][0]["items"]) == 2
+        assert payload["items"][0]["cover_url"].endswith(f'/i/{payload["items"][0]["items"][0]["id"]}.png')
+        assert payload["items"][1]["item_count"] == 1
+        assert len(payload["items"][1]["items"]) == 1
+
+
+def test_current_user_albums_endpoint_supports_pagination(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="albumspage", email="albumspage@example.com")
+
+    with TestClient(app) as client:
+        for index in range(12):
+            created = client.post(
+                "/api/v1/upload",
+                files=[("file", (f"{index}.png", BytesIO(PNG_1X1), "image/png"))],
+                data={"title": f"Album {index}"},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            assert created.status_code == 200
+
+        first_page = client.get(
+            "/api/v1/user/me/albums",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"limit": 10, "offset": 0},
+        )
+        assert first_page.status_code == 200
+        first_payload = first_page.json()
+        assert first_payload["limit"] == 10
+        assert first_payload["offset"] == 0
+        assert first_payload["total"] == 12
+        assert len(first_payload["items"]) == 10
+        assert first_payload["has_more"] is True
+
+        second_page = client.get(
+            "/api/v1/user/me/albums",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={"limit": 10, "offset": 10},
+        )
+        assert second_page.status_code == 200
+        second_payload = second_page.json()
+        assert second_payload["offset"] == 10
+        assert len(second_payload["items"]) == 2
+        assert second_payload["has_more"] is False
 
 
 def test_api_key_upload_can_create_multi_file_album_and_append_to_existing_owned_album(

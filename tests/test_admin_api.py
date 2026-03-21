@@ -53,7 +53,8 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
 
         users = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_key}"})
         assert users.status_code == 200
-        listed = {item["id"]: item for item in users.json()}
+        users_payload = users.json()
+        listed = {item["id"]: item for item in users_payload["items"]}
         assert listed[user_id]["storage_used_bytes"] > 0
         assert listed[user_id]["album_count"] == 1
         assert listed[user_id]["suspended"] is False
@@ -124,7 +125,7 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
 
         refreshed_users = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_key}"})
         assert refreshed_users.status_code == 200
-        refreshed_list = {item["id"]: item for item in refreshed_users.json()}
+        refreshed_list = {item["id"]: item for item in refreshed_users.json()["items"]}
         assert refreshed_list[created_user["id"]]["rate_limit_rpm"] == 12
         assert refreshed_list[created_user["id"]]["rate_limit_bph"] == 34567
 
@@ -140,7 +141,7 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
 
         refreshed_users = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_key}"})
         assert refreshed_users.status_code == 200
-        refreshed_list = {item["id"]: item for item in refreshed_users.json()}
+        refreshed_list = {item["id"]: item for item in refreshed_users.json()["items"]}
         assert refreshed_list[created_user["id"]]["rate_limit_rpm"] == 7
 
         stats = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {admin_key}"})
@@ -158,6 +159,94 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
 
         forbidden = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {user_key}"})
         assert forbidden.status_code == 403
+
+
+def test_admin_user_listing_supports_search_filters_and_pagination(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="adminsearch", email="adminsearch@example.com")
+    create_user_and_api_key(capsys, username="alphauser", email="alpha@example.com")
+    create_admin_and_api_key(capsys, username="betadmin", email="beta@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={
+                "username": "suspendeduser",
+                "email": "suspended@example.com",
+                "password": "secret",
+            },
+        )
+        assert created.status_code == 201
+        suspended_user_id = created.json()["id"]
+        suspended_patch = client.patch(
+            f"/api/v1/admin/users/{suspended_user_id}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"suspended": True},
+        )
+        assert suspended_patch.status_code == 200
+
+        first_page = client.get(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"limit": 1, "offset": 0},
+        )
+        assert first_page.status_code == 200
+        first_payload = first_page.json()
+        assert first_payload["limit"] == 1
+        assert first_payload["offset"] == 0
+        assert first_payload["total"] >= 3
+        assert len(first_payload["items"]) == 1
+        assert first_payload["has_more"] is True
+
+        second_page = client.get(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"limit": 1, "offset": 1},
+        )
+        assert second_page.status_code == 200
+        second_payload = second_page.json()
+        assert second_payload["offset"] == 1
+        assert len(second_payload["items"]) == 1
+        assert second_payload["items"][0]["id"] != first_payload["items"][0]["id"]
+
+        search = client.get(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"q": "alpha"},
+        )
+        assert search.status_code == 200
+        search_payload = search.json()
+        assert any(item["username"] == "alphauser" for item in search_payload["items"])
+
+        admins_only = client.get(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"is_admin": True},
+        )
+        assert admins_only.status_code == 200
+        assert admins_only.json()["items"]
+        assert all(item["is_admin"] is True for item in admins_only.json()["items"])
+
+        suspended_only = client.get(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"suspended": True},
+        )
+        assert suspended_only.status_code == 200
+        suspended_payload = suspended_only.json()
+        assert suspended_payload["items"]
+        assert any(item["id"] == suspended_user_id for item in suspended_payload["items"])
+        assert all(item["suspended"] is True for item in suspended_payload["items"])
+
+        bad_limit = client.get(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"limit": 5000},
+        )
+        assert bad_limit.status_code == 400
 
 
 def test_admin_album_management_lists_sets_expiry_and_deletes(tmp_path, monkeypatch, capsys) -> None:
@@ -179,7 +268,7 @@ def test_admin_album_management_lists_sets_expiry_and_deletes(tmp_path, monkeypa
 
         albums = client.get("/api/v1/admin/albums", headers={"Authorization": f"Bearer {admin_key}"})
         assert albums.status_code == 200
-        album = next(item for item in albums.json() if item["id"] == payload["album_id"])
+        album = next(item for item in albums.json()["items"] if item["id"] == payload["album_id"])
         assert album["owner_username"] == "jules"
         assert album["user_id"] == user_id
         assert album["item_count"] == 1
@@ -209,6 +298,54 @@ def test_admin_album_management_lists_sets_expiry_and_deletes(tmp_path, monkeypa
         assert deleted.json()["deleted"] is True
 
         assert client.get("/api/v1/admin/albums", headers={"Authorization": f"Bearer {user_key}"}).status_code == 403
+
+
+def test_admin_album_listing_supports_pagination_and_filters(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="adminalbums", email="adminalbums@example.com")
+    _, owner_key = create_user_and_api_key(capsys, username="ownersearch", email="ownersearch@example.com")
+
+    with TestClient(app) as client:
+        for index in range(12):
+            created = client.post(
+                "/api/v1/upload",
+                files=[("file", (f"{index}.png", BytesIO(PNG_1X1), "image/png"))],
+                data={"title": f"Managed Album {index}"},
+                headers={"Authorization": f"Bearer {owner_key}"},
+            )
+            assert created.status_code == 200
+
+        first_page = client.get(
+            "/api/v1/admin/albums",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"limit": 10, "offset": 0},
+        )
+        assert first_page.status_code == 200
+        first_payload = first_page.json()
+        assert first_payload["total"] == 12
+        assert len(first_payload["items"]) == 10
+        assert first_payload["has_more"] is True
+
+        second_page = client.get(
+            "/api/v1/admin/albums",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"limit": 10, "offset": 10},
+        )
+        assert second_page.status_code == 200
+        second_payload = second_page.json()
+        assert len(second_payload["items"]) == 2
+        assert second_payload["has_more"] is False
+
+        owner_filtered = client.get(
+            "/api/v1/admin/albums",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"owner": "ownersearch"},
+        )
+        assert owner_filtered.status_code == 200
+        assert owner_filtered.json()["items"]
+        assert all(item["owner_username"] == "ownersearch" for item in owner_filtered.json()["items"])
 
 
 def test_admin_audit_log_tracks_events_and_supports_filters(tmp_path, monkeypatch, capsys) -> None:

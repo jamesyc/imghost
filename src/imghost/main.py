@@ -804,382 +804,96 @@ async def settings_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request) -> str:
+async def admin_page(request: Request) -> HTMLResponse:
     state = get_state(request)
     user_or_redirect = await require_page_admin(request)
     if isinstance(user_or_redirect, RedirectResponse):
         return user_or_redirect
     user = user_or_redirect
     session_user = await state.uploads.get_current_user_summary(user)
-    bootstrap = json.dumps({"session_user": session_user})
-    body = """
-      <section class="grid">
-        <section class="card">
-          <h1>Admin Dashboard</h1>
-          <p>Basic browser UI over the admin APIs: users, albums, runtime config, stats, and audit log.</p>
-        </section>
-        <section class="card">
-          <h2>API Key Mode</h2>
-          <form id="admin-api-key-form">
-            <input id="admin-api-key-input" type="text" placeholder="Admin API key">
-            <div class="row">
-              <button type="submit">Use Admin API Key</button>
-              <button id="admin-clear-api-key" type="button" class="secondary">Clear</button>
-            </div>
-          </form>
-        </section>
-      </section>
-      <section id="admin-locked" class="card">
-        <h2>Admin Access Needed</h2>
-        <p>Sign in as an admin or provide an admin API key.</p>
-      </section>
-      <section id="admin-panel" class="stack hidden">
-        <section class="grid">
-          <section class="card">
-            <h2>Create User</h2>
-            <form id="admin-create-user-form">
-              <input type="text" name="username" placeholder="Username" required>
-              <input type="email" name="email" placeholder="Email" required>
-              <input type="password" name="password" placeholder="Password (optional)">
-              <div class="row">
-                <label class="check"><input type="checkbox" name="is_admin"> Admin</label>
-                <input type="number" name="quota_bytes" placeholder="Quota bytes">
-                <input type="number" name="rate_limit_rpm" placeholder="RPM override">
-                <input type="number" name="rate_limit_bph" placeholder="BPH override">
-              </div>
-              <button type="submit">Create User</button>
-            </form>
-          </section>
-          <section class="card">
-            <div class="row">
-              <h2>Stats</h2>
-              <button id="refresh-admin-stats" type="button">Refresh Stats</button>
-            </div>
-            <pre id="admin-stats" class="result"></pre>
-          </section>
-        </section>
-        <section class="card">
-          <div class="row">
-            <h2>Runtime Config</h2>
-            <button id="refresh-admin-config" type="button">Refresh Config</button>
-          </div>
-          <form id="admin-config-form"></form>
-          <pre id="admin-config-json" class="result"></pre>
-        </section>
-        <section class="card">
-          <div class="row">
-            <h2>Users</h2>
-            <button id="refresh-admin-users" type="button">Refresh Users</button>
-          </div>
-          <div id="admin-users" class="stack"></div>
-        </section>
-        <section class="card">
-          <div class="row">
-            <h2>Albums</h2>
-            <button id="refresh-admin-albums" type="button">Refresh Albums</button>
-          </div>
-          <div id="admin-albums" class="stack"></div>
-        </section>
-        <section class="card">
-          <h2>Audit Log</h2>
-          <form id="admin-audit-form">
-            <div class="row">
-              <input type="text" name="event_type" placeholder="event_type">
-              <input type="text" name="actor_id" placeholder="actor_id">
-              <input type="text" name="user_id" placeholder="user_id">
-              <input type="text" name="correlation_id" placeholder="correlation_id">
-            </div>
-            <div class="row">
-              <input type="datetime-local" name="after">
-              <input type="datetime-local" name="before">
-              <input type="number" name="limit" placeholder="limit" value="100">
-              <input type="number" name="offset" placeholder="offset" value="0">
-            </div>
-            <button type="submit">Query Audit</button>
-          </form>
-          <pre id="admin-audit" class="result"></pre>
-        </section>
-      </section>
-    """
-    script = f"""
-    <script>
-      const boot = {bootstrap};
-      const state = {{
-        apiKey: window.localStorage.getItem("imghost_admin_api_key") || "",
-        user: boot.session_user,
-        config: null,
-      }};
-      const flash = document.getElementById("flash");
-      const lockPanel = document.getElementById("admin-locked");
-      const adminPanel = document.getElementById("admin-panel");
-      const usersRoot = document.getElementById("admin-users");
-      const albumsRoot = document.getElementById("admin-albums");
-      const statsRoot = document.getElementById("admin-stats");
-      const auditRoot = document.getElementById("admin-audit");
-      const configForm = document.getElementById("admin-config-form");
-      const configJson = document.getElementById("admin-config-json");
-      const apiKeyInput = document.getElementById("admin-api-key-input");
-      apiKeyInput.value = state.apiKey;
+    return await render_template_page(
+        request,
+        "pages/admin.html",
+        "Admin",
+        user=user,
+        extra_context={"session_user": session_user},
+        script_paths=["js/admin-common.js", "js/admin-index.js"],
+    )
 
-      const showMessage = (message) => {{ flash.textContent = message || ""; }};
-      const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
-      const authHeaders = (headers = {{}}) => {{
-        const resolved = new Headers(headers);
-        if (state.apiKey) resolved.set("Authorization", `Bearer ${{state.apiKey}}`);
-        return resolved;
-      }};
-      const requestJson = async (url, options = {{}}) => {{
-        const response = await fetch(url, {{ ...options, headers: authHeaders(options.headers || {{}}) }});
-        const data = await response.json().catch(() => ({{}}));
-        if (!response.ok) throw new Error(data.detail || `Request failed (${{response.status}}).`);
-        return data;
-      }};
-      const parseOptionalNumber = (value) => value === "" ? null : Number(value);
-      const parseOptionalDate = (value) => value === "" ? null : new Date(value).toISOString();
-      const renderAccess = () => {{
-        const isAdmin = !!(state.user && state.user.is_admin);
-        lockPanel.classList.toggle("hidden", isAdmin);
-        adminPanel.classList.toggle("hidden", !isAdmin);
-      }};
-      const refreshContext = async () => {{
-        try {{
-          state.user = await requestJson("/api/v1/user/me");
-        }} catch {{
-          state.user = null;
-        }}
-        renderAccess();
-        if (state.user && state.user.is_admin) {{
-          await Promise.all([refreshUsers(), refreshAlbums(), refreshStats(), refreshConfig(), refreshAudit()]);
-        }}
-      }};
-      const refreshUsers = async () => {{
-        const users = await requestJson("/api/v1/admin/users");
-        usersRoot.innerHTML = users.map((user) => `
-          <section class="user-card" data-user-id="${{user.id}}">
-            <h3>${{escapeHtml(user.username)}}${{user.is_admin ? " (admin)" : ""}}</h3>
-            <p class="hint">${{escapeHtml(user.email)}} · suspended=${{user.suspended}} · storage=${{user.storage_used_bytes}} · media=${{user.media_count}}</p>
-            <form class="admin-user-patch-form">
-              <div class="row">
-                <label class="check"><input type="checkbox" name="suspended" ${{user.suspended ? "checked" : ""}}> Suspended</label>
-                <input type="number" name="quota_bytes" placeholder="Quota bytes" value="${{user.quota_bytes ?? ""}}">
-                <input type="number" name="rate_limit_rpm" placeholder="RPM override" value="${{user.rate_limit_rpm ?? ""}}">
-                <input type="number" name="rate_limit_bph" placeholder="BPH override" value="${{user.rate_limit_bph ?? ""}}">
-              </div>
-              <button type="submit">Patch User</button>
-            </form>
-            <form class="admin-user-reset-form">
-              <input type="password" name="new_password" placeholder="New password" required>
-              <button type="submit" class="secondary">Reset Password</button>
-            </form>
-            <button type="button" class="danger admin-user-delete">Delete User</button>
-          </section>
-        `).join("");
-      }};
-      const refreshAlbums = async () => {{
-        const albums = await requestJson("/api/v1/admin/albums");
-        albumsRoot.innerHTML = albums.map((album) => `
-          <section class="admin-card" data-album-id="${{album.id}}">
-            <h3>${{escapeHtml(album.title || "Untitled album")}}</h3>
-            <p class="hint">album=${{album.id}} · owner=${{escapeHtml(album.owner_username || "anonymous")}} · items=${{album.item_count}}</p>
-            <form class="admin-album-patch-form">
-              <input type="datetime-local" name="expires_at" value="${{album.expires_at ? album.expires_at.slice(0, 16) : ""}}">
-              <button type="submit">Set/Clear Expiry</button>
-            </form>
-            <button type="button" class="danger admin-album-delete">Delete Album</button>
-          </section>
-        `).join("");
-      }};
-      const refreshStats = async () => {{
-        statsRoot.textContent = JSON.stringify(await requestJson("/api/v1/admin/stats"), null, 2);
-      }};
-      const renderConfigForm = (config) => {{
-        configForm.innerHTML = Object.values(config).map((entry) => {{
-          const isBool = typeof entry.value === "boolean";
-          return `
-            <label>
-              <strong>${{escapeHtml(entry.key)}}</strong> <span class="hint">source=${{escapeHtml(entry.source)}}${{entry.locked ? " · locked" : ""}}</span>
-              ${{
-                isBool
-                  ? `<select name="${{entry.key}}" ${{entry.locked ? "disabled" : ""}}>
-                       <option value="true" ${{entry.value ? "selected" : ""}}>true</option>
-                       <option value="false" ${{!entry.value ? "selected" : ""}}>false</option>
-                     </select>`
-                  : `<input type="number" name="${{entry.key}}" value="${{entry.value}}" ${{entry.locked ? "disabled" : ""}}>`
-              }}
-            </label>
-          `;
-        }}).join("") + '<button type="submit">Save Config</button>';
-      }};
-      const refreshConfig = async () => {{
-        state.config = await requestJson("/api/v1/admin/config");
-        renderConfigForm(state.config);
-        configJson.textContent = JSON.stringify(state.config, null, 2);
-      }};
-      const refreshAudit = async () => {{
-        const params = new URLSearchParams();
-        params.set("limit", "100");
-        auditRoot.textContent = JSON.stringify(await requestJson(`/api/v1/admin/audit?${{params.toString()}}`), null, 2);
-      }};
 
-      document.getElementById("admin-api-key-form").addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        state.apiKey = apiKeyInput.value.trim();
-        if (state.apiKey) window.localStorage.setItem("imghost_admin_api_key", state.apiKey);
-        else window.localStorage.removeItem("imghost_admin_api_key");
-        await refreshContext();
-        showMessage(state.user && state.user.is_admin ? "Admin authentication active." : "Admin authentication failed.");
-      }});
-      document.getElementById("admin-clear-api-key").addEventListener("click", async () => {{
-        state.apiKey = "";
-        apiKeyInput.value = "";
-        window.localStorage.removeItem("imghost_admin_api_key");
-        await refreshContext();
-        showMessage("Admin API key cleared.");
-      }});
-      document.getElementById("admin-create-user-form").addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        try {{
-          const form = new FormData(event.currentTarget);
-          await requestJson("/api/v1/admin/users", {{
-            method: "POST",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{
-              username: form.get("username"),
-              email: form.get("email"),
-              password: form.get("password") || null,
-              is_admin: form.get("is_admin") === "on",
-              quota_bytes: parseOptionalNumber(form.get("quota_bytes")),
-              rate_limit_rpm: parseOptionalNumber(form.get("rate_limit_rpm")),
-              rate_limit_bph: parseOptionalNumber(form.get("rate_limit_bph")),
-            }}),
-          }});
-          event.currentTarget.reset();
-          await refreshUsers();
-          showMessage("Admin user created.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      document.getElementById("refresh-admin-users").addEventListener("click", refreshUsers);
-      document.getElementById("refresh-admin-albums").addEventListener("click", refreshAlbums);
-      document.getElementById("refresh-admin-stats").addEventListener("click", refreshStats);
-      document.getElementById("refresh-admin-config").addEventListener("click", refreshConfig);
-      configForm.addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        try {{
-          const form = new FormData(event.currentTarget);
-          const payload = {{}};
-          for (const [key, value] of form.entries()) {{
-            const current = state.config[key];
-            payload[key] = typeof current.value === "boolean" ? value === "true" : Number(value);
-          }}
-          await requestJson("/api/v1/admin/config", {{
-            method: "PATCH",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify(payload),
-          }});
-          await refreshConfig();
-          showMessage("Runtime config updated.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      usersRoot.addEventListener("submit", async (event) => {{
-        const card = event.target.closest("[data-user-id]");
-        if (!card) return;
-        event.preventDefault();
-        const userId = card.dataset.userId;
-        try {{
-          if (event.target.matches(".admin-user-patch-form")) {{
-            const form = new FormData(event.target);
-            await requestJson(`/api/v1/admin/users/${{userId}}`, {{
-              method: "PATCH",
-              headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify({{
-                suspended: form.get("suspended") === "on",
-                quota_bytes: parseOptionalNumber(form.get("quota_bytes")),
-                rate_limit_rpm: parseOptionalNumber(form.get("rate_limit_rpm")),
-                rate_limit_bph: parseOptionalNumber(form.get("rate_limit_bph")),
-              }}),
-            }});
-            showMessage("User updated.");
-          }} else if (event.target.matches(".admin-user-reset-form")) {{
-            const form = new FormData(event.target);
-            await requestJson(`/api/v1/admin/users/${{userId}}/reset-password`, {{
-              method: "POST",
-              headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify({{ new_password: form.get("new_password") }}),
-            }});
-            showMessage("Password reset.");
-          }}
-          await refreshUsers();
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      usersRoot.addEventListener("click", async (event) => {{
-        const card = event.target.closest("[data-user-id]");
-        if (!card || !event.target.matches(".admin-user-delete")) return;
-        const userId = card.dataset.userId;
-        if (!window.confirm(`Delete user ${{userId}}?`)) return;
-        try {{
-          await requestJson(`/api/v1/admin/users/${{userId}}`, {{ method: "DELETE" }});
-          await refreshUsers();
-          showMessage("User deleted.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      albumsRoot.addEventListener("submit", async (event) => {{
-        const card = event.target.closest("[data-album-id]");
-        if (!card) return;
-        event.preventDefault();
-        const albumId = card.dataset.albumId;
-        try {{
-          const form = new FormData(event.target);
-          await requestJson(`/api/v1/admin/albums/${{albumId}}`, {{
-            method: "PATCH",
-            headers: {{ "Content-Type": "application/json" }},
-            body: JSON.stringify({{ expires_at: parseOptionalDate(form.get("expires_at")) }}),
-          }});
-          await refreshAlbums();
-          showMessage("Album admin metadata updated.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      albumsRoot.addEventListener("click", async (event) => {{
-        const card = event.target.closest("[data-album-id]");
-        if (!card || !event.target.matches(".admin-album-delete")) return;
-        const albumId = card.dataset.albumId;
-        if (!window.confirm(`Delete album ${{albumId}}?`)) return;
-        try {{
-          await requestJson(`/api/v1/admin/albums/${{albumId}}`, {{ method: "DELETE" }});
-          await refreshAlbums();
-          showMessage("Album deleted.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      document.getElementById("admin-audit-form").addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        try {{
-          const form = new FormData(event.currentTarget);
-          const params = new URLSearchParams();
-          for (const [key, value] of form.entries()) {{
-            if (value !== "") params.set(key, value);
-          }}
-          auditRoot.textContent = JSON.stringify(await requestJson(`/api/v1/admin/audit?${{params.toString()}}`), null, 2);
-          showMessage("Audit log refreshed.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_page(request: Request) -> HTMLResponse:
+    user_or_redirect = await require_page_admin(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    return await render_template_page(
+        request,
+        "pages/admin-users.html",
+        "Admin Users",
+        user=user,
+        script_paths=["js/admin-common.js", "js/admin-users.js"],
+    )
 
-      refreshContext();
-    </script>
-    """
-    return await page_shell(request, "Admin", with_flash(body), user=user, script=script)
+
+@app.get("/admin/users/new", response_class=HTMLResponse)
+async def admin_users_new_page(request: Request) -> HTMLResponse:
+    user_or_redirect = await require_page_admin(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    return await render_template_page(
+        request,
+        "pages/admin-users-new.html",
+        "Admin New User",
+        user=user,
+        script_paths=["js/admin-common.js", "js/admin-users-new.js"],
+    )
+
+
+@app.get("/admin/albums", response_class=HTMLResponse)
+async def admin_albums_page(request: Request) -> HTMLResponse:
+    user_or_redirect = await require_page_admin(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    return await render_template_page(
+        request,
+        "pages/admin-albums.html",
+        "Admin Albums",
+        user=user,
+        script_paths=["js/admin-common.js", "js/admin-albums.js"],
+    )
+
+
+@app.get("/admin/config", response_class=HTMLResponse)
+async def admin_config_page(request: Request) -> HTMLResponse:
+    user_or_redirect = await require_page_admin(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    return await render_template_page(
+        request,
+        "pages/admin-config.html",
+        "Admin Config",
+        user=user,
+        script_paths=["js/admin-common.js", "js/admin-config.js"],
+    )
+
+
+@app.get("/admin/ops", response_class=HTMLResponse)
+async def admin_ops_page(request: Request) -> HTMLResponse:
+    user_or_redirect = await require_page_admin(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    return await render_template_page(
+        request,
+        "pages/admin-ops.html",
+        "Admin Ops",
+        user=user,
+        script_paths=["js/admin-common.js", "js/admin-ops.js"],
+    )
 
 
 @app.post("/api/v1/upload")
@@ -1448,17 +1162,29 @@ async def get_current_user(request: Request) -> JSONResponse:
 
 
 @app.get("/api/v1/user/me/albums")
-async def get_current_user_albums(request: Request) -> JSONResponse:
+async def get_current_user_albums(request: Request, limit: int = 10, offset: int = 0) -> JSONResponse:
     state = get_state(request)
     base_url = public_base_url(request, state.settings)
     user = await authenticated_user(request, required=True)
-    albums = await state.repository.list_user_albums(user.id)
-    albums.sort(key=lambda album: album.updated_at, reverse=True)
-    payload = []
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200.")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    albums, total = await state.repository.list_user_albums_page(user.id, limit=limit, offset=offset)
+    payload_items = []
     for album in albums:
-        items = await state.repository.list_album_media(album.id)
-        payload.append(album_to_payload(base_url, album, items))
-    return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
+        album_items = await state.repository.list_album_media(album.id)
+        payload_items.append(album_to_payload(base_url, album, album_items))
+    return JSONResponse(
+        {
+            "items": payload_items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(payload_items) < total,
+        },
+        headers={"X-Correlation-ID": correlation_id(request)},
+    )
 
 
 @app.post("/api/v1/user/me/api-key")
@@ -1542,10 +1268,27 @@ async def delete_current_user(request: Request) -> JSONResponse:
 
 
 @app.get("/api/v1/admin/users")
-async def admin_list_users(request: Request) -> JSONResponse:
+async def admin_list_users(
+    request: Request,
+    q: str | None = None,
+    is_admin: bool | None = None,
+    suspended: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> JSONResponse:
     state = get_state(request)
     await require_admin_user(request)
-    payload = await state.uploads.list_users_with_usage()
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200.")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    payload = await state.uploads.list_users_with_usage_page(
+        q=(q or "").strip() or None,
+        is_admin=is_admin,
+        suspended=suspended,
+        limit=limit,
+        offset=offset,
+    )
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
@@ -1574,10 +1317,27 @@ async def admin_list_user_albums(request: Request, user_id: str) -> JSONResponse
 
 
 @app.get("/api/v1/admin/albums")
-async def admin_list_albums(request: Request) -> JSONResponse:
+async def admin_list_albums(
+    request: Request,
+    q: str | None = None,
+    owner: str | None = None,
+    anonymous: bool | None = None,
+    limit: int = 10,
+    offset: int = 0,
+) -> JSONResponse:
     state = get_state(request)
     await require_admin_user(request)
-    payload = await state.uploads.list_albums_for_admin()
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200.")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    payload = await state.uploads.list_albums_for_admin_page(
+        q=(q or "").strip() or None,
+        owner=(owner or "").strip() or None,
+        anonymous=anonymous,
+        limit=limit,
+        offset=offset,
+    )
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 

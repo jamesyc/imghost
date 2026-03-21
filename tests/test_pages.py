@@ -176,6 +176,11 @@ def test_login_and_register_redirect_authenticated_users_to_dashboard(tmp_path, 
         ("/albums", "/login?next=%2Falbums"),
         ("/settings", "/login?next=%2Fsettings"),
         ("/admin", "/login?next=%2Fadmin"),
+        ("/admin/users", "/login?next=%2Fadmin%2Fusers"),
+        ("/admin/users/new", "/login?next=%2Fadmin%2Fusers%2Fnew"),
+        ("/admin/albums", "/login?next=%2Fadmin%2Falbums"),
+        ("/admin/config", "/login?next=%2Fadmin%2Fconfig"),
+        ("/admin/ops", "/login?next=%2Fadmin%2Fops"),
     ],
 )
 def test_private_pages_redirect_logged_out_users_to_login(tmp_path, monkeypatch, path: str, expected_next: str) -> None:
@@ -188,7 +193,8 @@ def test_private_pages_redirect_logged_out_users_to_login(tmp_path, monkeypatch,
         assert response.headers["location"] == expected_next
 
 
-def test_non_admin_user_gets_forbidden_on_admin_page(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("path", ["/admin", "/admin/users", "/admin/users/new", "/admin/albums", "/admin/config", "/admin/ops"])
+def test_non_admin_user_gets_forbidden_on_admin_page(tmp_path, monkeypatch, path: str) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
 
@@ -203,7 +209,7 @@ def test_non_admin_user_gets_forbidden_on_admin_page(tmp_path, monkeypatch) -> N
         )
         assert registered.status_code == 200
 
-        response = client.get("/admin")
+        response = client.get(path)
         assert response.status_code == 403
         assert response.json()["detail"] == "Admin access required."
 
@@ -250,7 +256,7 @@ def test_template_shell_wraps_phase_three_pages_and_private_pages(tmp_path, monk
 
         admin_page = client.get("/admin")
         assert admin_page.status_code == 200
-        assert "Admin Dashboard" in admin_page.text
+        assert "Admin overview" in admin_page.text
         assert 'href="/admin"' in admin_page.text
 
 
@@ -520,14 +526,76 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         )
         assert login.status_code == 200
 
-        page = client.get("/admin")
-        assert page.status_code == 200
-        assert "Admin Dashboard" in page.text
-        assert "Create User" in page.text
-        assert "Runtime Config" in page.text
-        assert "Audit Log" in page.text
-        assert 'id="admin-users"' in page.text
-        assert 'id="admin-albums"' in page.text
+        overview = client.get("/admin")
+        assert overview.status_code == 200
+        assert "Admin overview" in overview.text
+        assert 'href="/admin/users"' in overview.text
+        assert 'id="admin-overview-stats"' in overview.text
+        assert 'id="admin-overview-runtime"' in overview.text
+
+        users = client.get("/admin/users")
+        assert users.status_code == 200
+        assert "User management" in users.text
+        assert 'id="admin-user-search-form"' in users.text
+        assert 'id="admin-users"' in users.text
+        assert 'href="/admin/users/new"' in users.text
+
+        new_user = client.get("/admin/users/new")
+        assert new_user.status_code == 200
+        assert "Create user" in new_user.text
+        assert 'id="admin-create-user-form"' in new_user.text
+        assert 'href="/admin/users/new"' in new_user.text
+
+        albums = client.get("/admin/albums")
+        assert albums.status_code == 200
+        assert "Album operations" in albums.text
+        assert 'id="admin-album-search-form"' in albums.text
+        assert 'id="admin-albums"' in albums.text
+        assert 'href="/admin/users/new"' in albums.text
+
+        config = client.get("/admin/config")
+        assert config.status_code == 200
+        assert "Runtime config" in config.text
+        assert 'id="admin-config-form"' in config.text
+        assert 'href="/admin/users/new"' in config.text
+
+        ops = client.get("/admin/ops")
+        assert ops.status_code == 200
+        assert "Operations" in ops.text
+        assert 'id="admin-runtime-status"' in ops.text
+        assert 'id="admin-audit-form"' in ops.text
+        assert 'href="/admin/users/new"' in ops.text
+
+
+def test_album_pages_include_pagination_controls(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="pagealbums", email="pagealbums@example.com")
+    admin_id, _ = create_admin_and_api_key(capsys, username="pagealbumsadmin", email="pagealbumsadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post("/api/v1/auth/login", json={"login": "pagealbums@example.com", "password": "open-sesame"})
+        assert login.status_code == 200
+
+        albums = client.get("/albums")
+        assert albums.status_code == 200
+        assert 'id="owned-albums-prev"' in albums.text
+        assert 'id="owned-albums-next"' in albums.text
+        assert 'id="owned-albums-summary"' in albums.text
+
+        client.post("/api/v1/auth/logout")
+        set_user_password(client, admin_id, "admin-pass")
+        admin_login = client.post("/api/v1/auth/login", json={"login": "pagealbumsadmin@example.com", "password": "admin-pass"})
+        assert admin_login.status_code == 200
+
+        admin_albums = client.get("/admin/albums")
+        assert admin_albums.status_code == 200
+        assert 'id="admin-albums-prev"' in admin_albums.text
+        assert 'id="admin-albums-next"' in admin_albums.text
+        assert 'id="admin-albums-summary"' in admin_albums.text
 
 def test_public_user_album_list_page_shows_owned_albums_sorted_by_recent_update(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))

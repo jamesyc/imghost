@@ -55,8 +55,8 @@ const refreshUser = async () => {
 };
 
 const refreshRecentAlbums = async () => {
-  const albums = await requestJson("/api/v1/user/me/albums");
-  const recentAlbums = albums.slice(0, 5);
+  const payload = await requestJson("/api/v1/user/me/albums?limit=5&offset=0");
+  const recentAlbums = payload.items || [];
   recentAlbumsRoot.innerHTML = recentAlbums.length ? recentAlbums.map((album) => window.renderAlbumCard(album)).join("") : "";
   emptyState?.classList.toggle("hidden", recentAlbums.length > 0);
 };

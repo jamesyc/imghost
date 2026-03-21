@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="stack admin-shell">
+  <section class="card hero-card admin-hero">
+    <div class="admin-hero-copy">
+      <p class="eyebrow">Admin</p>
+      <h1>Runtime config</h1>
+      <p class="lede">Adjust the live runtime controls without dropping into the older all-in-one admin screen.</p>
+    </div>
+  </section>
+
+  {% include "partials/admin-subnav.html" %}
+
+  <section class="card admin-card">
+    <div class="row row-actions">
+      <div>
+        <p class="eyebrow">Config</p>
+        <h2>Effective values</h2>
+      </div>
+      <button id="refresh-admin-config" type="button" class="secondary">Refresh Config</button>
+    </div>
+    <form id="admin-config-form" class="stack"></form>
+    <p id="admin-config-status" class="settings-inline-status hidden" aria-live="polite"></p>
+    <pre id="admin-config-json" class="result"></pre>
+  </section>
+</section>
+{% endblock %}
