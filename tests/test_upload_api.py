@@ -151,6 +151,21 @@ def test_invalid_image_upload_is_rejected(tmp_path, monkeypatch) -> None:
         assert response.json()["detail"] == "Unsupported or invalid image file."
 
 
+def test_upload_over_limit_is_rejected_without_processing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("MAX_UPLOAD_BYTES", "8")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("too-big.bin", BytesIO(b"0123456789"), "application/octet-stream"))],
+        )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == "Upload exceeds V1 size limit."
+
+
 def test_mpo_backed_jpeg_upload_is_normalized_to_jpg_and_thumbnails_succeed(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

@@ -113,6 +113,24 @@ def test_login_page_renders_form_and_register_link(tmp_path, monkeypatch) -> Non
         assert '<script src="/static/js/auth.js" defer></script>' in response.text
 
 
+def test_login_page_normalizes_next_to_internal_paths(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        valid = client.get("/login", params={"next": "/albums?view=recent"})
+        assert valid.status_code == 200
+        assert 'data-success-url="/albums?view=recent"' in valid.text
+
+        absolute = client.get("/login", params={"next": "https://evil.example/phish"})
+        assert absolute.status_code == 200
+        assert 'data-success-url="/dashboard"' in absolute.text
+
+        protocol_relative = client.get("/login", params={"next": "//evil.example/phish"})
+        assert protocol_relative.status_code == 200
+        assert 'data-success-url="/dashboard"' in protocol_relative.text
+
+
 def test_register_page_renders_form_when_enabled(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -123,6 +141,20 @@ def test_register_page_renders_form_when_enabled(tmp_path, monkeypatch) -> None:
         assert 'id="register-form"' in response.text
         assert 'data-auth-form' in response.text
         assert 'href="/login"' in response.text
+
+
+def test_register_page_normalizes_next_to_internal_paths(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        valid = client.get("/register", params={"next": "/settings"})
+        assert valid.status_code == 200
+        assert 'data-success-url="/settings"' in valid.text
+
+        external = client.get("/register", params={"next": "https://evil.example/register"})
+        assert external.status_code == 200
+        assert 'data-success-url="/dashboard"' in external.text
 
 
 def test_register_page_shows_disabled_state_when_registration_is_off(tmp_path, monkeypatch, capsys) -> None:

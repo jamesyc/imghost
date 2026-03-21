@@ -146,7 +146,8 @@ def test_local_http_login_uses_insecure_cookie_for_dev_refreshes(tmp_path, monke
 
         page = client.get("/")
         assert page.status_code == 200
-        assert "Signed in as <strong>devcookie</strong>." in page.text
+        assert "Hello devcookie" in page.text
+        assert "Signed in as <strong>devcookie</strong>." not in page.text
 
         logout = client.post("/api/v1/auth/logout")
         assert logout.status_code == 200

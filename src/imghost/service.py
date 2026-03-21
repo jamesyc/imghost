@@ -144,11 +144,9 @@ class UploadService:
         delete_token: str | None = None,
         rate_limit_key: str | None = None,
     ) -> UploadResult:
-        payload = await file.read()
+        payload = await self._read_bounded_upload(file)
         if not payload:
             raise HTTPException(status_code=400, detail="Empty file upload.")
-        if len(payload) > self.settings.max_upload_bytes:
-            raise HTTPException(status_code=413, detail="Upload exceeds V1 size limit.")
 
         actor = actor or CurrentActor(user=None, source="web")
         if rate_limit_key:
@@ -173,6 +171,19 @@ class UploadService:
             album.title = title
         await self.repository.update_album(album)
         return UploadResult(album=album, media=media)
+
+    async def _read_bounded_upload(self, file: UploadFile) -> bytes:
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > self.settings.max_upload_bytes:
+                raise HTTPException(status_code=413, detail="Upload exceeds V1 size limit.")
+            chunks.append(chunk)
+        return b"".join(chunks)
 
     async def _get_or_create_album(
         self,

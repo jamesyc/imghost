@@ -225,13 +225,17 @@ def test_browser_session_owner_can_append_reorder_and_delete_owned_album(tmp_pat
         listed = client.get("/api/v1/user/me/albums")
         assert listed.status_code == 200
         listed_payload = listed.json()
-        assert len(listed_payload) == 1
-        assert listed_payload[0]["id"] == album_id
-        assert listed_payload[0]["item_count"] == 3
+        assert listed_payload["total"] == 1
+        assert listed_payload["limit"] == 10
+        assert listed_payload["offset"] == 0
+        assert listed_payload["has_more"] is False
+        assert len(listed_payload["items"]) == 1
+        assert listed_payload["items"][0]["id"] == album_id
+        assert listed_payload["items"][0]["item_count"] == 3
 
         deleted = client.delete(f"/api/v1/album/{album_id}")
         assert deleted.status_code == 200
         assert deleted.json()["album_id"] == album_id
 
         assert client.get(f"/api/v1/album/{album_id}").status_code == 404
-        assert client.get("/api/v1/user/me/albums").json() == []
+        assert client.get("/api/v1/user/me/albums").json()["items"] == []

@@ -41,7 +41,7 @@
       </div>
       <button type="button" class="secondary" id="album-upload-modal-close">Close</button>
     </div>
-    <form id="album-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="true">
+    <form id="album-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="true" data-max-upload-bytes="{{ runtime_flags.max_upload_bytes if runtime_flags.max_upload_bytes is defined else '' }}">
       <div class="upload-dropzone">
         <span class="upload-title-wrap">
           <input type="text" name="title" placeholder="Album title (optional)">

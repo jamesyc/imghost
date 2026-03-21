@@ -129,7 +129,33 @@ window.attachUploadBox = ({
   const uploadInput = uploadForm.querySelector('input[type="file"][name="file"]');
   const uploadPicker = uploadForm.querySelector(".upload-picker");
   const uploadStatus = window.createUploadStatusController?.(uploadForm);
+  const maxUploadBytes = Number.parseInt(uploadForm.dataset.maxUploadBytes || "", 10);
   let uploadInFlight = false;
+
+  const humanizeBytes = (value) => {
+    if (!Number.isFinite(value) || value < 0) {
+      return "";
+    }
+    const units = ["bytes", "KB", "MB", "GB"];
+    let size = value;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
+  };
+
+  const validateFileSizes = (fileList) => {
+    if (!Number.isFinite(maxUploadBytes) || maxUploadBytes <= 0) {
+      return null;
+    }
+    const oversizedFile = Array.from(fileList || []).find((file) => file.size > maxUploadBytes);
+    if (!oversizedFile) {
+      return null;
+    }
+    return `${oversizedFile.name} exceeds the ${humanizeBytes(maxUploadBytes)} upload limit.`;
+  };
 
   const setUploadingState = (isUploading) => {
     uploadInFlight = isUploading;
@@ -182,6 +208,11 @@ window.attachUploadBox = ({
 
   const submitUpload = async (fileList, statusMessage) => {
     if (!fileList?.length) {
+      return;
+    }
+    const sizeError = validateFileSizes(fileList);
+    if (sizeError) {
+      uploadStatus?.setError(sizeError);
       return;
     }
     if (uploadInFlight) {

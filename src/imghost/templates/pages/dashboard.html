@@ -8,7 +8,7 @@
     <div class="dashboard-hero-copy">
       <p class="eyebrow">Signed-in home</p>
       <h1>Your dashboard</h1>
-      <p class="lede">Upload into a new album, jump back into recent work, and move into your albums or settings without bouncing around utility screens.</p>
+      <p class="lede">Upload into a new album, jump back into recent work, and move into your albums or settings.</p>
     </div>
     <div class="dashboard-hero-actions row row-actions">
       <a class="button-link secondary-link" href="/albums">All albums</a>
@@ -33,9 +33,8 @@
         <p class="eyebrow">Upload</p>
         <h2>Start a new album.</h2>
       </div>
-      <p class="hint upload-note">This is the primary signed-in upload surface. Successful uploads open the new owner album immediately.</p>
     </div>
-    <form id="dashboard-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="true">
+    <form id="dashboard-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="true" data-max-upload-bytes="{{ runtime_flags.max_upload_bytes if runtime_flags.max_upload_bytes is defined else '' }}">
       <div class="upload-dropzone">
         <span class="upload-title-wrap">
           <input type="text" name="title" placeholder="Album title (optional)">

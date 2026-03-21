@@ -29,7 +29,7 @@
       </div>
       <p class="hint upload-note">{% if current_user %}Upload one or more files to create a new album in your account.{% else %}Upload one or more files to make a simple shareable album.{% endif %}</p>
     </div>
-    <form id="upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="{{ 'true' if current_user else 'false' }}">
+    <form id="upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="{{ 'true' if current_user else 'false' }}" data-max-upload-bytes="{{ runtime_flags.max_upload_bytes if runtime_flags.max_upload_bytes is defined else '' }}">
       <div class="upload-dropzone">
         <span class="upload-title-wrap">
           <input type="text" name="title" placeholder="Album title (optional)">

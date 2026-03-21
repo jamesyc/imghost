@@ -11,7 +11,7 @@ from math import ceil
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
@@ -440,6 +440,7 @@ class PageRuntimeFlags:
     allow_registration: bool
     anon_upload_enabled: bool
     anon_expiry_hours: int
+    max_upload_bytes: int
 
 def apply_session_cookie(response: Response, settings: Settings, token: str, *, expires_at: datetime | None) -> None:
     max_age = None
@@ -562,6 +563,7 @@ async def runtime_flags(request: Request) -> PageRuntimeFlags:
         allow_registration=bool(await state.runtime_config.get_value("allow_registration")),
         anon_upload_enabled=bool(await state.runtime_config.get_value("anon_upload_enabled")),
         anon_expiry_hours=int(await state.runtime_config.get_value("anon_expiry_hours")),
+        max_upload_bytes=state.settings.max_upload_bytes,
     )
 
 
@@ -588,6 +590,20 @@ def login_redirect(next_path: str | None = None) -> RedirectResponse:
     if next_path:
         location = f"{location}?{urlencode({'next': next_path})}"
     return RedirectResponse(url=location, status_code=303)
+
+
+def normalize_next_path(next_path: str | None, *, default: str = "/dashboard") -> str:
+    candidate = (next_path or "").strip()
+    if not candidate:
+        return default
+    if not candidate.startswith("/"):
+        return default
+    if candidate.startswith("//"):
+        return default
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        return default
+    return candidate
 
 
 async def require_page_user(request: Request) -> User | RedirectResponse:
@@ -668,7 +684,7 @@ async def login_page(request: Request) -> HTMLResponse:
     user = await authenticated_user(request, required=False)
     if user is not None:
         return RedirectResponse(url="/dashboard", status_code=303)
-    next_path = request.query_params.get("next") or "/dashboard"
+    next_path = normalize_next_path(request.query_params.get("next"))
     return await render_template_page(
         request,
         "pages/login.html",
@@ -683,7 +699,7 @@ async def register_page(request: Request) -> HTMLResponse:
     user = await authenticated_user(request, required=False)
     if user is not None:
         return RedirectResponse(url="/dashboard", status_code=303)
-    next_path = request.query_params.get("next") or "/dashboard"
+    next_path = normalize_next_path(request.query_params.get("next"))
     return await render_template_page(
         request,
         "pages/register.html",
