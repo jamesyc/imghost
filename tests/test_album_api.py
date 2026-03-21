@@ -163,3 +163,75 @@ def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
         assert delete_response.json()["album_deleted"] is True
 
         assert client.get(f"/api/v1/album/{album_id}").status_code == 404
+
+
+def test_browser_session_owner_can_append_reorder_and_delete_owned_album(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "browserowner",
+                "email": "browserowner@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        created = client.post(
+            "/api/v1/upload",
+            files=[
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
+            ],
+            data={"title": "Workspace Album"},
+        )
+        assert created.status_code == 200
+        created_payload = created.json()
+        album_id = created_payload["album_id"]
+        media_ids = [item["media_id"] for item in created_payload["items"]]
+
+        appended = client.post(
+            "/api/v1/upload",
+            files=[("file", ("three.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"album_id": album_id},
+        )
+        assert appended.status_code == 200
+        appended_payload = appended.json()
+        assert appended_payload["album_id"] == album_id
+
+        patched = client.patch(
+            f"/api/v1/album/{album_id}",
+            json={"title": "Workspace Album Edited", "cover_media_id": appended_payload["media_id"]},
+        )
+        assert patched.status_code == 200
+        assert patched.json()["title"] == "Workspace Album Edited"
+        assert patched.json()["cover_media_id"] == appended_payload["media_id"]
+
+        reordered = client.patch(
+            f"/api/v1/album/{album_id}/order",
+            json=[
+                {"media_id": appended_payload["media_id"], "position": 100},
+                {"media_id": media_ids[0], "position": 200},
+                {"media_id": media_ids[1], "position": 300},
+            ],
+        )
+        assert reordered.status_code == 200
+        assert [item["id"] for item in reordered.json()["items"]] == [appended_payload["media_id"], media_ids[0], media_ids[1]]
+
+        listed = client.get("/api/v1/user/me/albums")
+        assert listed.status_code == 200
+        listed_payload = listed.json()
+        assert len(listed_payload) == 1
+        assert listed_payload[0]["id"] == album_id
+        assert listed_payload[0]["item_count"] == 3
+
+        deleted = client.delete(f"/api/v1/album/{album_id}")
+        assert deleted.status_code == 200
+        assert deleted.json()["album_id"] == album_id
+
+        assert client.get(f"/api/v1/album/{album_id}").status_code == 404
+        assert client.get("/api/v1/user/me/albums").json() == []

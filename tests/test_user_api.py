@@ -29,6 +29,7 @@ def test_api_key_upload_creates_user_album_and_current_user_view(tmp_path, monke
         assert response.status_code == 200
         payload = response.json()
         assert "delete_token=" not in payload["delete_url"]
+        assert payload["manage_url"] is None
         wait_for_thumbnail(client, payload["media_id"])
 
         me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {api_key}"})
@@ -74,6 +75,43 @@ def test_current_user_albums_endpoint_lists_owned_albums_for_dashboard(tmp_path,
         assert payload[0]["id"] == album_id
         assert payload[0]["title"] == "Owned One"
         assert payload[0]["item_count"] == 1
+
+
+def test_current_user_albums_endpoint_returns_recent_first_with_preview_items(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="albumsfeed2", email="albumsfeed2@example.com")
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("older.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Older Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[
+                ("file", ("newer-a.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("newer-b.png", BytesIO(PNG_1X1), "image/png")),
+            ],
+            data={"title": "Newer Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert second.status_code == 200
+
+        listed = client.get("/api/v1/user/me/albums", headers={"Authorization": f"Bearer {api_key}"})
+        assert listed.status_code == 200
+        payload = listed.json()
+        assert [entry["title"] for entry in payload] == ["Newer Album", "Older Album"]
+        assert payload[0]["item_count"] == 2
+        assert len(payload[0]["items"]) == 2
+        assert payload[0]["cover_url"].endswith(f'/i/{payload[0]["items"][0]["id"]}.png')
+        assert payload[1]["item_count"] == 1
+        assert len(payload[1]["items"]) == 1
 
 
 def test_api_key_upload_can_create_multi_file_album_and_append_to_existing_owned_album(

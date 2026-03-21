@@ -141,6 +141,7 @@ class UploadService:
         correlation_id: str,
         *,
         actor: CurrentActor | None = None,
+        delete_token: str | None = None,
         rate_limit_key: str | None = None,
     ) -> UploadResult:
         payload = await file.read()
@@ -162,6 +163,7 @@ class UploadService:
             title=title,
             correlation_id=correlation_id,
             actor=actor,
+            delete_token=delete_token,
         )
         if len(await self.repository.list_album_media(album.id)) >= MAX_ALBUM_ITEMS:
             raise HTTPException(status_code=413, detail="Album item limit reached.")
@@ -179,13 +181,17 @@ class UploadService:
         correlation_id: str,
         *,
         actor: CurrentActor,
+        delete_token: str | None = None,
     ) -> Album:
         if album_id:
             album = await self.repository.get_album(album_id)
             if album is None:
                 raise HTTPException(status_code=404, detail="Album not found.")
-            if actor.user is not None and album.user_id != actor.user.id:
-                raise HTTPException(status_code=403, detail="Album does not belong to authenticated user.")
+            if actor.user is not None:
+                if album.user_id != actor.user.id:
+                    raise HTTPException(status_code=403, detail="Album does not belong to authenticated user.")
+            else:
+                self._require_album_access(album, delete_token, actor.user)
             return album
 
         now = utcnow()

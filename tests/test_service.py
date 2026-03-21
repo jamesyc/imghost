@@ -10,7 +10,8 @@ from fastapi import HTTPException
 from imghost.config import Settings
 from imghost.models import Album, User, utcnow
 from imghost.storage import StorageStream
-from imghost.service import LocalLoginInput, PasswordChangeInput, UploadService
+from imghost.main import album_to_payload
+from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UploadService
 
 
 class DummyRepository:
@@ -226,6 +227,86 @@ def test_require_album_access_allows_owner_admin_or_valid_token() -> None:
     with pytest.raises(HTTPException) as bad_token:
         service._require_album_access(anon_album, "wrong", None)
     assert bad_token.value.status_code == 403
+
+
+def test_get_or_create_album_requires_delete_token_for_anonymous_append() -> None:
+    service, repository = make_service()
+    repository.album = Album(
+        id="album-2",
+        title="Anon",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="secret-token",
+        created_at=utcnow(),
+        updated_at=utcnow(),
+        expires_at=None,
+    )
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(
+            service._get_or_create_album(
+                album_id="album-2",
+                title=None,
+                correlation_id="cid-1",
+                actor=CurrentActor(user=None, source="web"),
+                delete_token=None,
+            )
+        )
+    assert denied.value.status_code == 403
+
+    album = asyncio.run(
+        service._get_or_create_album(
+            album_id="album-2",
+            title=None,
+            correlation_id="cid-2",
+            actor=CurrentActor(user=None, source="web"),
+            delete_token="secret-token",
+        )
+    )
+    assert album.id == "album-2"
+
+
+def test_album_to_payload_omits_delete_token_by_default() -> None:
+    album = Album(
+        id="album-3",
+        title="Anon",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="secret-token",
+        created_at=utcnow(),
+        updated_at=utcnow(),
+        expires_at=None,
+    )
+    media_item = type(
+        "MediaStub",
+        (),
+        {
+            "id": "media-1",
+            "filename_orig": "sample.png",
+            "media_type": "image",
+            "mime_type": "image/png",
+            "format": "png",
+            "thumb_is_orig": False,
+            "thumb_key": None,
+            "position": 1000,
+            "file_size": 123,
+            "thumb_status": "done",
+            "codec_hint": None,
+        },
+    )()
+
+    payload = album_to_payload("http://testserver", album, [media_item])
+    assert payload["delete_url"] == "http://testserver/api/v1/album/album-3/delete"
+
+    payload_with_token = album_to_payload(
+        "http://testserver",
+        album,
+        [media_item],
+        include_delete_token=True,
+    )
+    assert payload_with_token["delete_url"] == (
+        "http://testserver/api/v1/album/album-3/delete?delete_token=secret-token"
+    )
 
 
 def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -> None:

@@ -365,11 +365,19 @@ def humanize_expiry(expires_at: datetime | None) -> str | None:
     return f"This album expires in {days} day(s)."
 
 
-def album_delete_url(base_url: str, album: Any) -> str | None:
+def album_delete_url(base_url: str, album: Any, *, include_token: bool = False) -> str | None:
     path = f"{base_url}/api/v1/album/{album.id}/delete"
-    if not album.delete_token:
+    if not album.delete_token or not include_token:
         return path
     query = urlencode({"delete_token": album.delete_token})
+    return f"{path}?{query}"
+
+
+def album_manage_url(base_url: str, album: Any, *, include_token: bool = False) -> str:
+    path = f"{base_url}/manage/{album.id}"
+    if not album.delete_token or not include_token:
+        return path
+    query = urlencode({"token": album.delete_token})
     return f"{path}?{query}"
 
 
@@ -381,7 +389,13 @@ def resolve_cover_media(album: Any, media_items: list[Any]) -> Any | None:
     return media_items[0] if media_items else None
 
 
-def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[str, Any]:
+def album_to_payload(
+    base_url: str,
+    album: Any,
+    media_items: list[Any],
+    *,
+    include_delete_token: bool = False,
+) -> dict[str, Any]:
     cover = resolve_cover_media(album, media_items)
     return {
         "id": album.id,
@@ -390,7 +404,7 @@ def album_to_payload(base_url: str, album: Any, media_items: list[Any]) -> dict[
         "created_at": album.created_at.isoformat(),
         "updated_at": album.updated_at.isoformat(),
         "expires_at": album.expires_at.isoformat() if album.expires_at else None,
-        "delete_url": album_delete_url(base_url, album),
+        "delete_url": album_delete_url(base_url, album, include_token=include_delete_token),
         "item_count": len(media_items),
         "total_size": sum(item.file_size for item in media_items),
         "cover_url": media_url(base_url, cover.id, cover.format) if cover else None,
@@ -518,8 +532,12 @@ def humanize_bytes(byte_count: int) -> str:
     return f"{size:.1f} {unit}"
 
 
+def display_timestamp(value: str) -> str:
+    return datetime.fromisoformat(value).strftime("%-m/%-d/%Y, %-I:%M:%S %p")
+
+
 def nav_items(user: User | None, *, allow_registration: bool) -> list[dict[str, str]]:
-    links = [("/", "Home")]
+    links: list[tuple[str, str]] = []
     if user is None:
         links.append(("/login", "Login"))
         if allow_registration:
@@ -725,8 +743,47 @@ async def album_detail_page(request: Request, album_id: str) -> HTMLResponse:
         "pages/album-detail.html",
         "Album",
         user=user,
-        extra_context={"album_id": album_id},
-        script_paths=["js/album-detail.js"],
+        extra_context={
+            "workspace_bootstrap": {
+                "album_id": album_id,
+                "access_mode": "owner",
+                "workspace_label": "Owner view",
+                "post_delete_url": "/albums",
+                "delete_token": None,
+            }
+        },
+        script_paths=["js/upload-box.js", "js/album-detail.js"],
+    )
+
+
+@app.get("/manage/{album_id}", response_class=HTMLResponse)
+async def manage_album_page(request: Request, album_id: str, token: str | None = None) -> HTMLResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    if not token:
+        raise HTTPException(status_code=403, detail="Missing manage token.")
+    state = get_state(request)
+    viewer = await authenticated_user(request, required=False)
+    album = await state.repository.get_album(album_id)
+    if album is None or is_expired(album.expires_at) or album.delete_token is None:
+        raise HTTPException(status_code=404)
+    if token != album.delete_token:
+        raise HTTPException(status_code=403, detail="Invalid manage token.")
+    return await render_template_page(
+        request,
+        "pages/album-detail.html",
+        "Manage Album",
+        user=viewer,
+        extra_context={
+            "workspace_bootstrap": {
+                "album_id": album_id,
+                "access_mode": "token",
+                "workspace_label": "Manage view",
+                "post_delete_url": "/",
+                "delete_token": token,
+            }
+        },
+        script_paths=["js/upload-box.js", "js/album-detail.js"],
     )
 
 
@@ -1438,6 +1495,7 @@ async def upload(
     file: list[UploadFile] = File(...),
     album_id: str | None = Form(default=None),
     title: str | None = Form(default=None),
+    delete_token: str | None = Form(default=None),
 ) -> JSONResponse:
     state = get_state(request)
     base_url = public_base_url(request, state.settings)
@@ -1448,6 +1506,7 @@ async def upload(
     actor = CurrentActor(user=user, source="api" if user else "web")
     results = []
     active_album_id = album_id
+    active_delete_token = delete_token
     for item in file:
         result = await state.uploads.upload(
             item,
@@ -1455,9 +1514,12 @@ async def upload(
             title,
             cid,
             actor=actor,
+            delete_token=active_delete_token,
             rate_limit_key=upload_rate_limit_key(request, user),
         )
         active_album_id = result.album.id
+        if result.album.delete_token:
+            active_delete_token = result.album.delete_token
         results.append(result)
 
     primary = results[0]
@@ -1467,7 +1529,8 @@ async def upload(
         "media_id": primary.media.id,
         "media_url": media_url(base_url, primary.media.id, primary.media.format),
         "thumb_url": thumb_url(base_url, primary.media.id, primary.media.format),
-        "delete_url": album_delete_url(base_url, primary.album),
+        "delete_url": album_delete_url(base_url, primary.album, include_token=True),
+        "manage_url": album_manage_url(base_url, primary.album, include_token=True) if primary.album.delete_token else None,
         "expires_at": primary.album.expires_at.isoformat() if primary.album.expires_at else None,
         "items": [
             {
@@ -1552,176 +1615,53 @@ async def get_album(request: Request, album_id: str) -> JSONResponse:
 
 
 @app.get("/a/{album_id}", response_class=HTMLResponse)
-async def album_page(request: Request, album_id: str) -> str:
+async def album_page(request: Request, album_id: str) -> HTMLResponse:
     if not is_valid_id(album_id, ALBUM_ID_LENGTH):
         raise HTTPException(status_code=404)
     state = get_state(request)
-    base_url = public_base_url(request, state.settings)
+    user = await authenticated_user(request, required=False)
     album = await state.repository.get_album(album_id)
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
     items = await state.repository.list_album_media(album_id)
-    expiry_hint = humanize_expiry(album.expires_at)
-    compat_warnings = [warning for warning in dict.fromkeys(compatibility_warning(item) for item in items) if warning]
-    cards = []
-    for item in items:
-        preview_url = thumb_url(base_url, item.id, item.format)
-        preview_url = thumb_url(base_url, item.id, thumb_format(item))
-        if item.media_type == "video":
-            poster_attr = f' poster="{preview_url}"' if item.thumb_status == "done" else ""
-            media_tag = f'<video controls preload="metadata" src="{media_url(base_url, item.id, item.format)}"{poster_attr}></video>'
-        else:
-            if item.thumb_status == "done":
-                media_tag = f'<img src="{preview_url}" alt="{item.filename_orig}">'
-            elif item.thumb_status == "failed":
-                media_tag = '<div class="placeholder">Thumbnail failed</div>'
-            else:
-                media_tag = f'<img data-thumb-src="{preview_url}" data-media-id="{item.id}" data-thumb-status="{item.thumb_status}" alt="{item.filename_orig}">'
-        cards.append(
-            f"""
-            <article class="item">
-              {media_tag}
-              <input type="text" readonly value="{media_url(base_url, item.id, item.format)}">
-            </article>
-            """
-        )
-
-    return f"""
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{album.title or album.id}</title>
-    <style>
-      body {{ margin: 0; font-family: Georgia, serif; background: #f4f1ea; color: #18212f; }}
-      main {{ max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; }}
-      .hero {{ margin-bottom: 24px; }}
-      .grid {{ display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }}
-      .item {{ background: #fffdf8; border: 1px solid #e3d6be; border-radius: 18px; padding: 12px; }}
-      img, video, .placeholder {{ width: 100%; display: block; border-radius: 12px; background: #ebe6dc; }}
-      .placeholder {{ min-height: 220px; display: grid; place-items: center; color: #786b57; font-style: italic; }}
-      input {{ width: 100%; margin-top: 12px; padding: 10px; border-radius: 10px; border: 1px solid #d5c6ab; }}
-      .hint {{ color: #786b57; }}
-      .banner {{ background: #fff2d8; border: 1px solid #e6c88f; color: #7c5414; border-radius: 14px; padding: 10px 14px; margin: 12px 0 0; }}
-      .actions {{ margin-top: 16px; }}
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="hero">
-        <p class="hint">V1.1 public album view.</p>
-        <h1>{album.title or "Untitled album"}</h1>
-        <p>{len(items)} item(s) · Created {album.created_at.isoformat()}</p>
-        {f'<p class="banner">{expiry_hint}</p>' if expiry_hint else ''}
-        {''.join(f'<p class="banner">{warning}</p>' for warning in compat_warnings)}
-        <p class="actions"><a href="/api/v1/album/{album.id}/zip">Download as ZIP</a></p>
-      </section>
-      <section class="grid">
-        {''.join(cards)}
-      </section>
-    </main>
-    <script>
-      const pending = document.querySelectorAll('img[data-thumb-status="pending"], img[data-thumb-status="processing"]');
-      for (const img of pending) {{
-        const poll = async () => {{
-          try {{
-            const response = await fetch(img.dataset.thumbSrc, {{ method: 'GET', cache: 'no-store' }});
-            if (response.status === 200) {{
-              img.removeAttribute('data-thumb-status');
-              img.src = img.dataset.thumbSrc;
-              return;
-            }}
-            if (response.status === 202) {{
-              setTimeout(poll, 1000);
-              return;
-            }}
-            img.outerHTML = '<div class="placeholder">Thumbnail failed</div>';
-          }} catch {{
-            setTimeout(poll, 1500);
-          }}
-        }};
-        poll();
-      }}
-    </script>
-  </body>
-</html>
-"""
+    album_payload = album_to_payload(public_base_url(request, state.settings), album, items)
+    album_payload["total_size_display"] = humanize_bytes(int(album_payload["total_size"]))
+    album_payload["updated_at_display"] = display_timestamp(album_payload["updated_at"])
+    for item in album_payload["items"]:
+        item["file_size_display"] = humanize_bytes(int(item["file_size"]))
+    return await render_template_page(
+        request,
+        "pages/public-album.html",
+        album.title or "Untitled album",
+        user=user,
+        extra_context={
+            "album_payload": album_payload,
+            "expiry_hint": humanize_expiry(album.expires_at),
+            "compat_warnings": [warning for warning in dict.fromkeys(compatibility_warning(item) for item in items) if warning],
+            "is_owner_viewer": user is not None and album.user_id == user.id,
+        },
+        script_paths=["js/public-album.js"],
+    )
 
 
 @app.get("/u/{username}", response_class=HTMLResponse)
-async def user_album_list_page(request: Request, username: str) -> str:
+async def user_album_list_page(request: Request, username: str) -> HTMLResponse:
     state = get_state(request)
-    base_url = public_base_url(request, state.settings)
+    viewer = await authenticated_user(request, required=False)
     user, albums = await state.uploads.list_public_albums_for_username(username)
-
-    cards = []
     for album in albums:
-        if album["cover_media_id"] is not None and album["cover_thumb_format"] is not None:
-            if album["cover_thumb_status"] == "done":
-                preview = (
-                    f'<img src="{thumb_url(base_url, album["cover_media_id"], album["cover_thumb_format"])}" '
-                    f'alt="{escape(album["title"] or "Untitled album")}">'
-                )
-            else:
-                preview = '<div class="placeholder">Thumbnail pending</div>'
-        else:
-            preview = '<div class="placeholder">No media</div>'
-        cards.append(
-            f"""
-            <a class="album-card" href="/a/{album["id"]}">
-              {preview}
-              <div class="meta">
-                <h2>{escape(album["title"] or "Untitled album")}</h2>
-                <p>{album["item_count"]} item(s) · {humanize_bytes(int(album["total_size"]))}</p>
-                <p class="hint">Created {escape(str(album["created_at"]))}</p>
-              </div>
-            </a>
-            """
-        )
-
-    empty_state = (
-        '<p class="empty">This user has no public albums yet.</p>'
-        if not cards
-        else "".join(cards)
+        album["total_size_display"] = humanize_bytes(int(album["total_size"]))
+        album["created_at_display"] = display_timestamp(str(album["created_at"]))
+    return await render_template_page(
+        request,
+        "pages/public-user-albums.html",
+        f"{user.username} albums",
+        user=viewer,
+        extra_context={
+            "public_user": user,
+            "public_albums": albums,
+        },
     )
-
-    return f"""
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{escape(user.username)} albums</title>
-    <style>
-      body {{ margin: 0; font-family: Georgia, serif; background: #f4f1ea; color: #18212f; }}
-      main {{ max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; }}
-      .hero {{ margin-bottom: 24px; }}
-      .grid {{ display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }}
-      .album-card {{ display: block; text-decoration: none; color: inherit; background: #fffdf8; border: 1px solid #e3d6be; border-radius: 18px; overflow: hidden; box-shadow: 0 10px 24px rgba(24,33,47,.06); }}
-      .album-card img, .placeholder {{ width: 100%; aspect-ratio: 16 / 10; display: block; background: #ebe6dc; object-fit: cover; }}
-      .placeholder {{ display: grid; place-items: center; color: #786b57; font-style: italic; }}
-      .meta {{ padding: 14px; }}
-      h1, h2 {{ margin: 0 0 8px; }}
-      p {{ margin: 0; line-height: 1.5; }}
-      .hint {{ color: #786b57; }}
-      .empty {{ color: #786b57; font-style: italic; }}
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="hero">
-        <p class="hint">Public user album list.</p>
-        <h1>{escape(user.username)}</h1>
-        <p>{len(albums)} public album(s), sorted by most recently modified.</p>
-      </section>
-      <section class="grid">
-        {empty_state}
-      </section>
-    </main>
-  </body>
-</html>
-"""
 
 
 async def stream_media(request: Request, raw_id: str, thumb: bool) -> StreamingResponse:

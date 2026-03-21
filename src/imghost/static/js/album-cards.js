@@ -51,7 +51,7 @@ const albumCardPublicLinkControl = (album) => {
   const publicUrl = albumCardPublicUrl(album.id);
   return `
     <div class="split-link-control">
-      <a class="split-link-action" href="${publicUrl}" target="_blank" rel="noreferrer">Public Page</a>
+      <a class="split-link-action" href="${publicUrl}">Public Page</a>
       <input
         class="split-link-value"
         type="text"

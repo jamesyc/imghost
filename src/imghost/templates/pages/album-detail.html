@@ -2,43 +2,78 @@
 
 {% block content %}
 {% include "partials/flash.html" %}
-<script id="album-detail-bootstrap" type="application/json">{{ {"album_id": album_id}|tojson }}</script>
+<script id="album-detail-bootstrap" type="application/json">{{ workspace_bootstrap|tojson }}</script>
 <section class="stack albums-shell">
-  <section class="card hero-card albums-hero">
-    <div class="albums-hero-copy">
-      <p class="eyebrow">Private album</p>
-      <h1>Manage album</h1>
-      <p class="lede">Review the files you just uploaded, adjust the title or cover, and jump out to the public page when you need to verify what viewers will see.</p>
-    </div>
-    <div class="albums-hero-actions row row-actions">
-      <a class="button-link secondary-link" href="/dashboard">Dashboard</a>
-      <a class="button-link secondary-link" href="/albums">All albums</a>
-      <a class="button-link secondary-link" href="/settings">Settings</a>
-    </div>
-  </section>
-
   <section class="card album-workspace" id="album-detail-root">
-    <div class="albums-section-header row">
-      <div>
-        <p class="eyebrow">Owner view</p>
-        <h2 id="album-detail-title">Loading album...</h2>
+    <div class="album-detail-header">
+      <div class="album-detail-heading">
+        <p class="eyebrow">{{ workspace_bootstrap.workspace_label }}</p>
+        <div class="album-detail-title-editor">
+          <button type="button" class="album-detail-title-button" id="album-detail-title">Loading album...</button>
+          <input id="album-detail-title-input" class="hidden" type="text" name="title" placeholder="Album title" aria-label="Album title">
+        </div>
+        <p class="hint" id="album-detail-summary">Loading album details.</p>
       </div>
-      <div class="row row-actions" id="album-detail-actions"></div>
+      <div class="row row-actions album-detail-actions" id="album-detail-actions"></div>
     </div>
-    <p class="hint" id="album-detail-summary">Loading album details.</p>
 
     <form id="album-detail-metadata-form" class="hidden">
-      <div class="form-grid">
-        <input id="album-detail-title-input" type="text" name="title" placeholder="Album title">
-        <input id="album-detail-cover-input" type="text" name="cover_media_id" placeholder="Cover media ID">
-      </div>
-      <div class="row row-actions">
-        <button type="submit">Save Album Metadata</button>
-        <button id="album-detail-delete" type="button" class="danger">Delete Album</button>
+      <div class="row row-actions" id="album-detail-metadata-actions">
+        <button type="submit">Update Album Title</button>
       </div>
     </form>
 
     <div id="album-detail-items" class="album-item-list"></div>
+
+    <div class="row row-actions album-detail-footer-actions">
+      <button type="button" id="album-detail-add-images-button">Add Images</button>
+    </div>
   </section>
+</section>
+
+<section id="album-upload-modal" class="upload-modal hidden" aria-hidden="true">
+  <button type="button" class="upload-modal-backdrop" id="album-upload-modal-backdrop" aria-label="Close add images dialog"></button>
+  <div class="card upload-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="album-upload-modal-title">
+    <div class="upload-modal-header row row-actions">
+      <div>
+        <p class="eyebrow">Album upload</p>
+        <h2 id="album-upload-modal-title">Add images to this album.</h2>
+      </div>
+      <button type="button" class="secondary" id="album-upload-modal-close">Close</button>
+    </div>
+    <form id="album-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="true">
+      <div class="upload-dropzone">
+        <span class="upload-title-wrap">
+          <input type="text" name="title" placeholder="Album title (optional)">
+        </span>
+        <label class="upload-stage" for="album-upload-file-input">
+          <span class="upload-stage-frame">
+            <span class="upload-dropzone-title">Drop images here</span>
+            <span class="upload-dropzone-copy">Or pick files from your device. New files will be added to this album.</span>
+          </span>
+        </label>
+        <div class="upload-actions-panel">
+          <span class="upload-divider" aria-hidden="true"></span>
+          <label class="upload-picker" for="album-upload-file-input">
+            <span class="upload-picker-icon" aria-hidden="true">▣</span>
+            <span class="upload-picker-label">Choose Photo/Video</span>
+          </label>
+          <span class="upload-or">or</span>
+          <label class="upload-paste-box">
+            <span class="upload-paste-label">Paste image URL or raw image</span>
+            <textarea
+              id="album-upload-paste-input"
+              class="upload-paste-input"
+              rows="1"
+              placeholder="Paste an image link, or paste an image from your clipboard"
+              spellcheck="false"
+            ></textarea>
+          </label>
+          <span class="upload-file-summary" aria-live="polite"></span>
+        </div>
+        <input id="album-upload-file-input" type="file" name="file" required multiple>
+      </div>
+    </form>
+  </div>
 </section>
 {% endblock %}

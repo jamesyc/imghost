@@ -31,11 +31,11 @@
     <div class="upload-card-header">
       <div>
         <p class="eyebrow">Upload</p>
-        <h2>Start a new album or append to an existing one.</h2>
+        <h2>Start a new album.</h2>
       </div>
-      <p class="hint upload-note">This is the primary signed-in upload surface. Success stays on the dashboard and refreshes your recent albums.</p>
+      <p class="hint upload-note">This is the primary signed-in upload surface. Successful uploads open the new owner album immediately.</p>
     </div>
-    <form id="dashboard-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data">
+    <form id="dashboard-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="true">
       <div class="upload-dropzone">
         <span class="upload-title-wrap">
           <input type="text" name="title" placeholder="Album title (optional)">
@@ -43,7 +43,7 @@
         <label class="upload-stage" for="dashboard-upload-file-input">
           <span class="upload-stage-frame">
             <span class="upload-dropzone-title">Drop images here</span>
-            <span class="upload-dropzone-copy">Or pick files from your device. Add multiple files at once, or append them straight into an existing album.</span>
+            <span class="upload-dropzone-copy">Or pick files from your device. Add multiple files at once.</span>
           </span>
         </label>
         <div class="upload-actions-panel">
@@ -64,9 +64,6 @@
             ></textarea>
           </label>
           <span class="upload-file-summary" aria-live="polite"></span>
-          <span class="upload-form-fields">
-            <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
-          </span>
         </div>
         <input id="dashboard-upload-file-input" type="file" name="file" required multiple>
       </div>

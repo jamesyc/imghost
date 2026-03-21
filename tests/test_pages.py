@@ -41,6 +41,8 @@ def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> 
         assert '<script src="/static/js/home.js" defer></script>' in response.text
         assert 'href="/login"' in response.text
         assert 'href="/register"' in response.text
+        assert '<a class="nav-brand" href="/">ImgHost</a>' in response.text
+        assert '>Home<' not in response.text
         assert 'id="login-form"' not in response.text
         assert 'id="register-form"' not in response.text
         assert 'id="upload-form"' in response.text
@@ -95,6 +97,7 @@ def test_home_page_shows_session_state_when_logged_in(tmp_path, monkeypatch) -> 
         assert "Anonymous uploads currently expire after 24 hour(s)." not in page.text
         assert 'data-logout-form' in page.text
         assert 'id="upload-form"' in page.text
+        assert 'name="album_id"' not in page.text
 
 
 def test_login_page_renders_form_and_register_link(tmp_path, monkeypatch) -> None:
@@ -271,6 +274,7 @@ def test_dashboard_page_focuses_on_uploads_recent_albums_and_links_to_settings(t
         assert "Your dashboard" in page.text
         assert "Signed-in home" in page.text
         assert 'id="dashboard-upload-form"' in page.text
+        assert 'name="album_id"' not in page.text
         assert 'id="dashboard-recent-albums"' in page.text
         assert 'href="/albums"' in page.text
         assert 'href="/settings"' in page.text
@@ -330,9 +334,141 @@ def test_private_album_page_renders_owner_workspace_shell(tmp_path, monkeypatch,
 
         page = client.get(f'/albums/{upload.json()["album_id"]}')
         assert page.status_code == 200
-        assert "Manage album" in page.text
+        assert "Manage album" not in page.text
+        assert "Private album" not in page.text
         assert 'id="album-detail-bootstrap"' in page.text
+        assert 'id="album-detail-title"' in page.text
+        assert 'id="album-detail-title-input"' in page.text
+        assert 'id="album-detail-add-images-button"' in page.text
+        assert 'id="album-upload-form"' in page.text
+        assert '<script src="/static/js/upload-box.js" defer></script>' in page.text
         assert '<script src="/static/js/album-detail.js" defer></script>' in page.text
+
+
+def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_for_owner(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, api_key = create_user_and_api_key(capsys, username="publicowner", email="publicowner@example.com")
+    stranger_id, _ = create_user_and_api_key(capsys, username="publicstranger", email="publicstranger@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("public.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Public Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+
+        anonymous_page = client.get(f'/a/{upload.json()["album_id"]}')
+        assert anonymous_page.status_code == 200
+        assert '<link rel="stylesheet" href="/static/css/base.css">' in anonymous_page.text
+        assert '<nav class="site-nav" aria-label="Primary">' in anonymous_page.text
+        assert 'id="public-album-bootstrap"' in anonymous_page.text
+        assert '<script src="/static/js/public-album.js" defer></script>' in anonymous_page.text
+        assert "Public album" in anonymous_page.text
+        assert "Edit Album" not in anonymous_page.text
+        assert "delete_token=" not in anonymous_page.text
+
+        set_user_password(client, user_id, "secret-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "publicowner@example.com", "password": "secret-pass"},
+        )
+        assert login.status_code == 200
+
+        owner_page = client.get(f'/a/{upload.json()["album_id"]}')
+        assert owner_page.status_code == 200
+        assert f'href="/albums/{upload.json()["album_id"]}"' in owner_page.text
+        assert "Edit Album" in owner_page.text
+        client.post("/api/v1/auth/logout")
+
+        set_user_password(client, stranger_id, "stranger-pass")
+        stranger_login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "publicstranger@example.com", "password": "stranger-pass"},
+        )
+        assert stranger_login.status_code == 200
+
+        stranger_page = client.get(f'/a/{upload.json()["album_id"]}')
+        assert stranger_page.status_code == 200
+        assert "Edit Album" not in stranger_page.text
+
+
+def test_anonymous_manage_page_reuses_album_workspace_shell(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("anon.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Anon Manage Album"},
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+        token = payload["delete_url"].split("delete_token=")[1]
+
+        page = client.get(f"/manage/{payload['album_id']}", params={"token": token})
+        assert page.status_code == 200
+        assert 'id="album-detail-bootstrap"' in page.text
+        assert '"access_mode": "token"' in page.text
+        assert '"delete_token": "' in page.text
+        assert "Manage view" in page.text
+        assert 'id="album-detail-add-images-button"' in page.text
+        assert 'id="album-upload-form"' in page.text
+        assert '<script src="/static/js/upload-box.js" defer></script>' in page.text
+        assert '<script src="/static/js/album-detail.js" defer></script>' in page.text
+
+
+def test_anonymous_manage_page_requires_valid_token(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("anon.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Anon Manage Album"},
+        )
+        assert upload.status_code == 200
+        album_id = upload.json()["album_id"]
+
+        missing = client.get(f"/manage/{album_id}")
+        assert missing.status_code == 403
+
+        invalid = client.get(f"/manage/{album_id}", params={"token": "wrong-token"})
+        assert invalid.status_code == 403
+
+
+def test_public_user_album_list_page_uses_template_shell(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="showcase2", email="showcase2@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("showcase.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Showcase Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+        wait_for_thumbnail(client, upload.json()["media_id"])
+
+        page = client.get("/u/showcase2")
+        assert page.status_code == 200
+        assert '<link rel="stylesheet" href="/static/css/base.css">' in page.text
+        assert '<nav class="site-nav" aria-label="Primary">' in page.text
+        assert "Public user album list." in page.text
+        assert "Showcase Album" in page.text
+        assert f'/a/{upload.json()["album_id"]}' in page.text
 
 
 def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path, monkeypatch, capsys) -> None:

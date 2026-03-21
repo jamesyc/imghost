@@ -28,7 +28,7 @@
 
 ## Basic Browser UI
 
-The current UI is intentionally simple and exists mainly to exercise the backend:
+The current UI is template-backed and centered on the upload, album, and public-sharing flows:
 
 - `/`:
   - sign in
@@ -36,7 +36,25 @@ The current UI is intentionally simple and exists mainly to exercise the backend
   - anonymous upload
 - `/dashboard`:
   - authenticated upload
-  - owned album management
+  - recent albums and quick resume
+- `/albums`:
+  - owned album list
+  - ZIP, public-link, and delete actions
+- `/albums/{id}`:
+  - owner album workspace
+  - inline title editing
+  - append upload
+  - reorder
+  - lightbox preview
+- `/a/{id}`:
+  - public album presentation
+  - ZIP download
+  - split-link media actions
+- `/manage/{id}`:
+  - token-backed anonymous album workspace
+  - same editing surface as the owner album page
+- `/u/{username}`:
+  - public user gallery
 - `/settings`:
   - account summary
   - password change

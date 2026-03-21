@@ -27,9 +27,9 @@
         <p class="eyebrow">{% if current_user %}Uploads do not expire when you're logged in.{% else %}Anonymous uploads currently expire after {{ runtime_flags.anon_expiry_hours }} hour(s).{% endif %}</p>
         <h2>Start a new album.</h2>
       </div>
-      <p class="hint upload-note">{% if current_user %}Upload to your account, or add more files to an album you already made.{% else %}Upload one or more files to make a simple shareable album.{% endif %}</p>
+      <p class="hint upload-note">{% if current_user %}Upload one or more files to create a new album in your account.{% else %}Upload one or more files to make a simple shareable album.{% endif %}</p>
     </div>
-    <form id="upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data">
+    <form id="upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="{{ 'true' if current_user else 'false' }}">
       <div class="upload-dropzone">
         <span class="upload-title-wrap">
           <input type="text" name="title" placeholder="Album title (optional)">
@@ -58,11 +58,6 @@
             ></textarea>
           </label>
           <span class="upload-file-summary" aria-live="polite"></span>
-          <span class="upload-form-fields">
-            {% if current_user %}
-            <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
-            {% endif %}
-          </span>
         </div>
         <input id="upload-file-input" type="file" name="file" required multiple>
       </div>

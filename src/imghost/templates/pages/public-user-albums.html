@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "partials/flash.html" %}
+<section class="stack public-user-shell">
+  <section class="card hero-card public-user-hero">
+    <p class="eyebrow">Public user album list.</p>
+    <h1>{{ public_user.username }}</h1>
+    <p class="lede">{{ public_albums|length }} public album(s), sorted by most recently modified.</p>
+  </section>
+
+  {% if public_albums %}
+  <section class="stack">
+    {% for album in public_albums %}
+    <a class="album-card album-list-card dashboard-recent-album-card public-user-album-card" href="/a/{{ album.id }}">
+      <div class="dashboard-recent-album-copy">
+        <div>
+          <h2>{{ album.title or "Untitled album" }}</h2>
+          <p class="hint">{{ album.item_count }} item(s) · {{ album.total_size_display }}</p>
+          <p class="hint">Created {{ album.created_at_display }}</p>
+        </div>
+      </div>
+      <span class="dashboard-recent-album-thumb public-user-album-thumb">
+        {% if album.cover_media_id and album.cover_thumb_format and album.cover_thumb_status == "done" %}
+        <img src="/t/{{ album.cover_media_id }}.{{ album.cover_thumb_format }}" alt="{{ album.title or 'Untitled album' }}">
+        {% elif album.cover_media_id and album.cover_thumb_format %}
+        <span class="dashboard-recent-album-thumb-placeholder">Thumbnail pending</span>
+        {% else %}
+        <span class="dashboard-recent-album-thumb-placeholder">No media</span>
+        {% endif %}
+      </span>
+    </a>
+    {% endfor %}
+  </section>
+  {% else %}
+  <section class="card albums-empty-state">
+    <h2>No public albums yet.</h2>
+    <p class="hint">This user has no public albums yet.</p>
+  </section>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,5 +1,6 @@
 <nav class="site-nav" aria-label="Primary">
   <div class="nav-links">
+    <a class="nav-brand" href="/">ImgHost</a>
     {% for item in nav_items %}
     {% if item.href not in ["/login", "/register"] %}
     <a class="nav-link" href="{{ item.href }}">{{ item.label }}</a>

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "partials/flash.html" %}
+<script id="public-album-bootstrap" type="application/json">{{ album_payload|tojson }}</script>
+<section class="stack public-album-shell">
+  <section class="card hero-card public-album-hero">
+    <div class="public-album-hero-copy">
+      <p class="eyebrow">Public album</p>
+      <h1>{{ album_payload["title"] or "Untitled album" }}</h1>
+      <p class="lede">{{ album_payload["item_count"] }} item(s) · {{ album_payload["total_size_display"] }} · updated {{ album_payload["updated_at_display"] }}</p>
+    </div>
+    <div class="row row-actions public-album-hero-actions" id="public-album-hero-actions">
+      <a class="button-link secondary-link" href="/api/v1/album/{{ album_payload['id'] }}/zip">Download ZIP</a>
+      {% if is_owner_viewer %}
+      <a class="button-link secondary-link" href="/albums/{{ album_payload['id'] }}">Edit Album</a>
+      {% endif %}
+    </div>
+    {% if expiry_hint %}
+    <p class="public-album-banner">{{ expiry_hint }}</p>
+    {% endif %}
+    {% for warning in compat_warnings %}
+    <p class="public-album-banner">{{ warning }}</p>
+    {% endfor %}
+  </section>
+
+  <section class="stack" id="public-album-items">
+    {% for item in album_payload["items"] %}
+    <article class="card public-album-item">
+      <div class="public-album-item-header">
+        <h2>{{ item.filename or item.id }}</h2>
+        <p class="hint">{{ item.file_size_display }}</p>
+      </div>
+      <button
+        type="button"
+        class="public-album-preview{% if item.media_type == 'video' %} is-video{% endif %}"
+        data-media-url="{{ item.media_url }}"
+        data-media-type="{{ item.media_type }}"
+        data-filename="{{ item.filename or item.id }}"
+        {% if item.media_type == "video" and item.thumb_status == "done" %}
+        data-thumb-src="{{ item.thumb_url }}"
+        {% elif item.media_type == "video" and (item.thumb_status == "pending" or item.thumb_status == "processing") %}
+        data-thumb-src="{{ item.thumb_url }}"
+        data-thumb-status="{{ item.thumb_status }}"
+        {% endif %}
+        aria-label="Open {{ item.filename or item.id }}"
+      >
+        {% if item.media_type != "video" %}
+        <img src="{{ item.media_url }}" alt="{{ item.filename or item.id }}">
+        {% elif item.thumb_status == "done" %}
+        <img src="{{ item.thumb_url }}" alt="{{ item.filename or item.id }}">
+        {% elif item.thumb_status == "failed" %}
+        <span class="public-album-preview-placeholder">Thumbnail failed</span>
+        {% else %}
+        <span class="public-album-preview-placeholder" data-thumb-status="{{ item.thumb_status }}">Thumbnail pending</span>
+        {% endif %}
+        {% if item.media_type == "video" %}
+        <span class="public-album-preview-badge">Video</span>
+        {% endif %}
+      </button>
+      {% if item.compat_warning %}
+      <p class="public-album-inline-warning">{{ item.compat_warning }}</p>
+      {% endif %}
+      <div class="public-album-item-actions">
+        <div class="split-link-control">
+          <a class="split-link-action" href="{{ item.media_url }}" target="_blank" rel="noreferrer">Open Media</a>
+          <input
+            class="split-link-value"
+            type="text"
+            value="{{ item.media_url }}"
+            readonly
+            aria-label="Media URL"
+            onclick="this.select()"
+          >
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+</section>
+{% endblock %}
