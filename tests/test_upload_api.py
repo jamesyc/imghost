@@ -156,7 +156,7 @@ def test_mpo_backed_jpeg_upload_is_normalized_to_jpg_and_thumbnails_succeed(tmp_
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
 
-    sample_path = Path(__file__).resolve().parents[1] / "plan" / "IMG_1238.jpg"
+    sample_path = Path(__file__).resolve().parent / "fixtures" / "IMG_1238.jpg"
     payload_bytes = sample_path.read_bytes()
 
     with TestClient(app) as client:
