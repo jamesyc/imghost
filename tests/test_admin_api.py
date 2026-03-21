@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from imghost.main import app
 from imghost.models import utcnow
 
-from .helpers import PNG_1X1, create_admin_and_api_key, create_user_and_api_key
+from .helpers import PNG_1X1, create_admin_and_api_key, create_user_and_api_key, set_user_password
 
 
 def assert_paginated_envelope(payload: dict, *, limit: int, offset: int, total: int, has_more: bool) -> None:
@@ -62,6 +62,43 @@ def test_admin_runtime_status_reports_redis_disabled_when_redis_queue_mode_is_no
         assert payload["tasks"]["mode"] == "redis"
         assert payload["redis"]["configured"] is False
         assert payload["redis"]["reachable"] is False
+
+
+def test_admin_browser_session_can_patch_runtime_config_used_by_admin_ui(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    admin_id, _ = create_admin_and_api_key(capsys, username="sessioncfgadmin", email="sessioncfgadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, admin_id, "admin-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "sessioncfgadmin@example.com", "password": "admin-pass"},
+        )
+        assert login.status_code == 200
+
+        patched = client.patch(
+            "/api/v1/admin/config",
+            json={
+                "allow_registration": False,
+                "anon_upload_enabled": False,
+                "anon_expiry_hours": 72,
+            },
+        )
+        assert patched.status_code == 200
+        patched_payload = patched.json()
+        assert patched_payload["allow_registration"]["value"] is False
+        assert patched_payload["anon_upload_enabled"]["value"] is False
+        assert patched_payload["anon_expiry_hours"]["value"] == 72
+
+        fetched = client.get("/api/v1/admin/config")
+        assert fetched.status_code == 200
+        fetched_payload = fetched.json()
+        assert fetched_payload["allow_registration"]["value"] is False
+        assert fetched_payload["anon_upload_enabled"]["value"] is False
+        assert fetched_payload["anon_expiry_hours"]["value"] == 72
 
 
 def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:

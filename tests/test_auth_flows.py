@@ -4,6 +4,7 @@ from io import BytesIO
 from fastapi.testclient import TestClient
 
 from imghost.main import app
+from imghost.models import utcnow
 
 from .helpers import (
     PNG_1X1,
@@ -93,6 +94,8 @@ def test_local_login_sets_session_cookie_and_authenticates_browser_flow(tmp_path
         assert "imghost_session=" in login.headers["set-cookie"]
         assert "Secure" in login.headers["set-cookie"]
         assert "Max-Age=" in login.headers["set-cookie"]
+        assert "SameSite=lax" in login.headers["set-cookie"]
+        assert "HttpOnly" in login.headers["set-cookie"]
         assert login.json()["authenticated"] is True
 
         me = client.get("/api/v1/user/me")
@@ -118,6 +121,7 @@ def test_local_login_sets_session_cookie_and_authenticates_browser_flow(tmp_path
         assert logout.status_code == 200
         assert logout.json()["authenticated"] is False
         assert "Secure" in logout.headers["set-cookie"]
+        assert "SameSite=lax" in logout.headers["set-cookie"]
 
         after_logout = client.get("/api/v1/user/me")
         assert after_logout.status_code == 401
@@ -268,6 +272,8 @@ def test_registration_creates_user_session_and_audit_entry(tmp_path, monkeypatch
         assert registered.status_code == 200
         assert "imghost_session=" in registered.headers["set-cookie"]
         assert "Secure" in registered.headers["set-cookie"]
+        assert "SameSite=lax" in registered.headers["set-cookie"]
+        assert "HttpOnly" in registered.headers["set-cookie"]
         payload = registered.json()
         assert payload["authenticated"] is True
         user_id = payload["user"]["id"]
@@ -306,6 +312,73 @@ def test_session_cookie_secure_can_be_overridden_for_http_deployments(tmp_path, 
         )
         assert login.status_code == 200
         assert "Secure" in login.headers["set-cookie"]
+        assert "SameSite=lax" in login.headers["set-cookie"]
+
+
+def test_admin_browser_session_can_mutate_user_and_album_routes_used_by_ui(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    admin_id, _ = create_admin_and_api_key(capsys, username="csrfadmin", email="csrfadmin@example.com")
+    target_user_id, target_user_key = create_user_and_api_key(capsys, username="csrftarget", email="csrftarget@example.com")
+    album_owner_id, album_owner_key = create_user_and_api_key(capsys, username="csrfalbum", email="csrfalbum@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, admin_id, "admin-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfadmin@example.com", "password": "admin-pass"},
+        )
+        assert login.status_code == 200
+
+        patch_user = client.patch(
+            f"/api/v1/admin/users/{target_user_id}",
+            json={"quota_bytes": 1234, "rate_limit_rpm": 9},
+        )
+        assert patch_user.status_code == 200
+        assert patch_user.json()["quota_bytes"] == 1234
+        assert patch_user.json()["rate_limit_rpm"] == 9
+
+        reset_password = client.post(
+            f"/api/v1/admin/users/{target_user_id}/reset-password",
+            json={"new_password": "new-target-pass"},
+        )
+        assert reset_password.status_code == 200
+        assert reset_password.json() == {"reset": True, "user_id": target_user_id}
+
+        target_login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrftarget", "password": "new-target-pass"},
+        )
+        assert target_login.status_code == 200
+
+        client.post("/api/v1/auth/logout")
+        relogin = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfadmin@example.com", "password": "admin-pass"},
+        )
+        assert relogin.status_code == 200
+
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {album_owner_key}"},
+            data={"title": "Admin Session Album"},
+        )
+        assert upload.status_code == 200
+        album_id = upload.json()["album_id"]
+
+        patch_album = client.patch(
+            f"/api/v1/admin/albums/{album_id}",
+            json={"expires_at": utcnow().replace(microsecond=0).isoformat()},
+        )
+        assert patch_album.status_code == 200
+        assert patch_album.json()["id"] == album_id
+
+        delete_album = client.delete(f"/api/v1/admin/albums/{album_id}")
+        assert delete_album.status_code == 200
+        assert delete_album.json()["deleted"] is True
 
 
 def test_registration_respects_allow_registration_runtime_config(tmp_path, monkeypatch, capsys) -> None:
