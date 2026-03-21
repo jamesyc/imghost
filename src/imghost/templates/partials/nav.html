@@ -10,6 +10,11 @@
     <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
       <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">◐</span>
     </button>
+    {% if current_user %}
+    <form class="nav-logout-form" data-logout-form action="/api/v1/auth/logout" method="post">
+      <button type="submit" class="nav-logout-button">Log Out</button>
+    </form>
+    {% endif %}
     {% for item in nav_items %}
     {% if item.href in ["/login", "/register"] %}
     <a class="nav-link nav-link-strong" href="{{ item.href }}">{{ item.label }}</a>

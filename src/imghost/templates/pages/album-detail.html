@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "partials/flash.html" %}
+<script id="album-detail-bootstrap" type="application/json">{{ {"album_id": album_id}|tojson }}</script>
+<section class="stack albums-shell">
+  <section class="card hero-card albums-hero">
+    <div class="albums-hero-copy">
+      <p class="eyebrow">Private album</p>
+      <h1>Manage album</h1>
+      <p class="lede">Review the files you just uploaded, adjust the title or cover, and jump out to the public page when you need to verify what viewers will see.</p>
+    </div>
+    <div class="albums-hero-actions row row-actions">
+      <a class="button-link secondary-link" href="/dashboard">Dashboard</a>
+      <a class="button-link secondary-link" href="/albums">All albums</a>
+      <a class="button-link secondary-link" href="/settings">Settings</a>
+    </div>
+  </section>
+
+  <section class="card album-workspace" id="album-detail-root">
+    <div class="albums-section-header row">
+      <div>
+        <p class="eyebrow">Owner view</p>
+        <h2 id="album-detail-title">Loading album...</h2>
+      </div>
+      <div class="row row-actions" id="album-detail-actions"></div>
+    </div>
+    <p class="hint" id="album-detail-summary">Loading album details.</p>
+
+    <form id="album-detail-metadata-form" class="hidden">
+      <div class="form-grid">
+        <input id="album-detail-title-input" type="text" name="title" placeholder="Album title">
+        <input id="album-detail-cover-input" type="text" name="cover_media_id" placeholder="Cover media ID">
+      </div>
+      <div class="row row-actions">
+        <button type="submit">Save Album Metadata</button>
+        <button id="album-detail-delete" type="button" class="danger">Delete Album</button>
+      </div>
+    </form>
+
+    <div id="album-detail-items" class="album-item-list"></div>
+  </section>
+</section>
+{% endblock %}

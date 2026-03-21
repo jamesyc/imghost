@@ -37,6 +37,7 @@ def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> 
         response = client.get("/")
         assert response.status_code == 200
         assert '<link rel="stylesheet" href="/static/css/base.css">' in response.text
+        assert '<script src="/static/js/upload-box.js" defer></script>' in response.text
         assert '<script src="/static/js/home.js" defer></script>' in response.text
         assert 'href="/login"' in response.text
         assert 'href="/register"' in response.text
@@ -85,10 +86,14 @@ def test_home_page_shows_session_state_when_logged_in(tmp_path, monkeypatch) -> 
 
         page = client.get("/")
         assert page.status_code == 200
-        assert "Signed in as <strong>browseruser</strong>." in page.text
-        assert 'href="/dashboard"' in page.text
-        assert 'id="logout-form"' in page.text
-        assert "Authenticated uploads do not expire by default." in page.text
+        assert "Hello browseruser" in page.text
+        assert "Signed in as <strong>browseruser</strong>." not in page.text
+        assert "Open dashboard" not in page.text
+        assert 'id="logout-form"' not in page.text
+        assert "Authenticated uploads do not expire by default." not in page.text
+        assert "Uploads do not expire when you're logged in." in page.text
+        assert "Anonymous uploads currently expire after 24 hour(s)." not in page.text
+        assert 'data-logout-form' in page.text
         assert 'id="upload-form"' in page.text
 
 
@@ -165,6 +170,7 @@ def test_login_and_register_redirect_authenticated_users_to_dashboard(tmp_path, 
     ("path", "expected_next"),
     [
         ("/dashboard", "/login?next=%2Fdashboard"),
+        ("/albums", "/login?next=%2Falbums"),
         ("/settings", "/login?next=%2Fsettings"),
         ("/admin", "/login?next=%2Fadmin"),
     ],
@@ -219,11 +225,16 @@ def test_template_shell_wraps_phase_three_pages_and_private_pages(tmp_path, monk
         assert login.status_code == 200
 
         dashboard = client.get("/dashboard")
+        albums = client.get("/albums")
         settings = client.get("/settings")
         assert dashboard.status_code == 200
+        assert albums.status_code == 200
         assert settings.status_code == 200
-        assert "User Dashboard" in dashboard.text
+        assert "Your dashboard" in dashboard.text
+        assert '<script src="/static/js/upload-box.js" defer></script>' in dashboard.text
+        assert "Your albums" in albums.text
         assert "Settings" in settings.text
+        assert 'href="/albums"' in dashboard.text
         assert 'href="/settings"' in dashboard.text
         assert 'href="/dashboard"' in settings.text
         assert 'href="/admin"' not in dashboard.text
@@ -239,7 +250,7 @@ def test_template_shell_wraps_phase_three_pages_and_private_pages(tmp_path, monk
         assert 'href="/admin"' in admin_page.text
 
 
-def test_dashboard_page_focuses_on_uploads_albums_and_links_to_settings(tmp_path, monkeypatch, capsys) -> None:
+def test_dashboard_page_focuses_on_uploads_recent_albums_and_links_to_settings(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
     monkeypatch.setenv("SECRET_KEY", "test-secret")
@@ -256,12 +267,69 @@ def test_dashboard_page_focuses_on_uploads_albums_and_links_to_settings(tmp_path
 
         page = client.get("/dashboard")
         assert page.status_code == 200
-        assert "User Dashboard" in page.text
-        assert "API Key Mode" in page.text
+        assert "Your dashboard" in page.text
+        assert "Signed-in home" in page.text
         assert 'id="dashboard-upload-form"' in page.text
-        assert 'id="owned-albums"' in page.text
+        assert 'id="dashboard-recent-albums"' in page.text
+        assert 'href="/albums"' in page.text
         assert 'href="/settings"' in page.text
+        assert "This is a quick resume view. Use the albums page for the full list." not in page.text
+        assert "Keep moving" not in page.text
         assert 'id="change-password-form"' not in page.text
+
+
+def test_albums_page_focuses_on_album_list_and_has_no_primary_upload_box(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="albumlistuser", email="albumlist@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "albumlist@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        page = client.get("/albums")
+        assert page.status_code == 200
+        assert "Your albums" in page.text
+        assert 'id="owned-albums"' in page.text
+        assert 'id="albums-upload-form"' not in page.text
+        assert 'href="/dashboard"' in page.text
+        assert 'href="/settings"' in page.text
+
+
+def test_private_album_page_renders_owner_workspace_shell(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, api_key = create_user_and_api_key(capsys, username="albumowner", email="albumowner@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "secret-pass")
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("detail.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Owner Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "albumowner@example.com", "password": "secret-pass"},
+        )
+        assert login.status_code == 200
+
+        page = client.get(f'/albums/{upload.json()["album_id"]}')
+        assert page.status_code == 200
+        assert "Manage album" in page.text
+        assert 'id="album-detail-bootstrap"' in page.text
+        assert '<script src="/static/js/album-detail.js" defer></script>' in page.text
 
 
 def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path, monkeypatch, capsys) -> None:

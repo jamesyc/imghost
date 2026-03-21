@@ -5,19 +5,11 @@
 <section class="stack home-shell">
   <section class="card hero-card hero-card-primary">
     <h1>Upload your photos and videos. Share them in seconds.</h1>
+    {% if current_user %}
+    <p class="eyebrow hero-greeting">Hello {{ current_user.username }}</p>
+    {% endif %}
     <p class="lede">Drop your files in, get a link, and send it to anyone. No clutter, no weird extras, just a fast way to share.</p>
     {% if current_user %}
-    <div class="status-panel">
-      <p>Signed in as <strong>{{ current_user.username }}</strong>.</p>
-      <p class="hint">Authenticated uploads do not expire by default.</p>
-    </div>
-    <div class="row row-actions hero-actions">
-      <a class="button-link" href="/dashboard">Open dashboard</a>
-      <a class="button-link secondary-link" href="/settings">Settings</a>
-    </div>
-    <form id="logout-form" class="inline-form inline-form-tight" action="/api/v1/auth/logout" method="post">
-      <button type="submit" class="ghost">Log Out</button>
-    </form>
     {% else %}
     <div class="status-panel">
       <p class="hint">Anonymous uploads currently expire after {{ runtime_flags.anon_expiry_hours }} hour(s).</p>
@@ -32,7 +24,7 @@
   <section class="card upload-card">
     <div class="upload-card-header">
       <div>
-        <p class="eyebrow">Anonymous uploads currently expire after {{ runtime_flags.anon_expiry_hours }} hour(s).</p>
+        <p class="eyebrow">{% if current_user %}Uploads do not expire when you're logged in.{% else %}Anonymous uploads currently expire after {{ runtime_flags.anon_expiry_hours }} hour(s).{% endif %}</p>
         <h2>Start a new album.</h2>
       </div>
       <p class="hint upload-note">{% if current_user %}Upload to your account, or add more files to an album you already made.{% else %}Upload one or more files to make a simple shareable album.{% endif %}</p>
@@ -81,7 +73,7 @@
     <p class="eyebrow">Upload unavailable</p>
     <h2>Uploads Disabled</h2>
     <p>Anonymous uploads are currently disabled. Sign in to upload.</p>
-    <p class="hint">If you already have an API key, the dashboard page can still use it for authenticated testing.</p>
+    <p class="hint">Signed-in uploads remain available from your dashboard.</p>
     <p class="hint">Base URL: {{ public_base_url }}</p>
   </section>
   {% endif %}

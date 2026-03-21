@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% include "partials/flash.html" %}
+<script id="dashboard-bootstrap" type="application/json">{{ {"session_user": session_user}|tojson }}</script>
+<section class="stack dashboard-shell">
+  <section class="card hero-card dashboard-hero">
+    <div class="dashboard-hero-copy">
+      <p class="eyebrow">Signed-in home</p>
+      <h1>Your dashboard</h1>
+      <p class="lede">Upload into a new album, jump back into recent work, and move into your albums or settings without bouncing around utility screens.</p>
+    </div>
+    <div class="dashboard-hero-actions row row-actions">
+      <a class="button-link secondary-link" href="/albums">All albums</a>
+      <a class="button-link secondary-link" href="/settings">Settings</a>
+      <a class="button-link secondary-link" href="/u/{{ current_user.username }}" target="_blank" rel="noreferrer">Public gallery</a>
+    </div>
+  </section>
+
+  <section class="card summary-card dashboard-usage-card" id="dashboard-usage-summary">
+    <p class="eyebrow">Usage</p>
+    <h2>{{ session_user.album_count }} album{{ "" if session_user.album_count == 1 else "s" }}</h2>
+    <p class="hint" id="dashboard-usage-copy">{{ session_user.media_count }} file{{ "" if session_user.media_count == 1 else "s" }} stored.</p>
+    <div class="usage-meter" aria-hidden="true">
+      <span class="usage-meter-bar" id="dashboard-usage-bar"></span>
+    </div>
+    <p class="hint" id="dashboard-quota-copy">Using {{ session_user.storage_used_bytes }} of {{ session_user.quota_bytes }} bytes.</p>
+  </section>
+
+  <section class="card upload-card">
+    <div class="upload-card-header">
+      <div>
+        <p class="eyebrow">Upload</p>
+        <h2>Start a new album or append to an existing one.</h2>
+      </div>
+      <p class="hint upload-note">This is the primary signed-in upload surface. Success stays on the dashboard and refreshes your recent albums.</p>
+    </div>
+    <form id="dashboard-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data">
+      <div class="upload-dropzone">
+        <span class="upload-title-wrap">
+          <input type="text" name="title" placeholder="Album title (optional)">
+        </span>
+        <label class="upload-stage" for="dashboard-upload-file-input">
+          <span class="upload-stage-frame">
+            <span class="upload-dropzone-title">Drop images here</span>
+            <span class="upload-dropzone-copy">Or pick files from your device. Add multiple files at once, or append them straight into an existing album.</span>
+          </span>
+        </label>
+        <div class="upload-actions-panel">
+          <span class="upload-divider" aria-hidden="true"></span>
+          <label class="upload-picker" for="dashboard-upload-file-input">
+            <span class="upload-picker-icon" aria-hidden="true">▣</span>
+            <span class="upload-picker-label">Choose Photo/Video</span>
+          </label>
+          <span class="upload-or">or</span>
+          <label class="upload-paste-box">
+            <span class="upload-paste-label">Paste image URL or raw image</span>
+            <textarea
+              id="dashboard-upload-paste-input"
+              class="upload-paste-input"
+              rows="1"
+              placeholder="Paste an image link, or paste an image from your clipboard"
+              spellcheck="false"
+            ></textarea>
+          </label>
+          <span class="upload-file-summary" aria-live="polite"></span>
+          <span class="upload-form-fields">
+            <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
+          </span>
+        </div>
+        <input id="dashboard-upload-file-input" type="file" name="file" required multiple>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="albums-section-header row dashboard-recent-header">
+      <div>
+        <p class="eyebrow">Recent albums</p>
+        <h2>Pick up where you left off.</h2>
+      </div>
+    </div>
+    <div id="dashboard-recent-albums-empty" class="albums-empty-state hidden">
+      <h3>No albums yet.</h3>
+      <p class="hint">Upload from the panel above to create your first album.</p>
+    </div>
+    <div id="dashboard-recent-albums" class="stack"></div>
+    <div class="row row-actions dashboard-recent-footer">
+      <a class="button-link secondary-link" href="/albums">View All Albums</a>
+    </div>
+  </section>
+</section>
+{% endblock %}

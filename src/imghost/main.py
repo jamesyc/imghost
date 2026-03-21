@@ -529,6 +529,7 @@ def nav_items(user: User | None, *, allow_registration: bool) -> list[dict[str, 
         links.extend(
             [
                 ("/dashboard", "Dashboard"),
+                ("/albums", "Albums"),
                 ("/settings", "Settings"),
                 ("/album-tools", "Album Tools"),
             ]
@@ -640,7 +641,7 @@ async def index(request: Request) -> str:
         extra_context={
             "upload_enabled": user is not None or flags.anon_upload_enabled,
         },
-        script_paths=["js/home.js"],
+        script_paths=["js/upload-box.js", "js/home.js"],
     )
 
 
@@ -675,284 +676,58 @@ async def register_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page(request: Request) -> str:
+async def dashboard_page(request: Request) -> HTMLResponse:
     state = get_state(request)
-    base_url = public_base_url(request, state.settings)
     user_or_redirect = await require_page_user(request)
     if isinstance(user_or_redirect, RedirectResponse):
         return user_or_redirect
     user = user_or_redirect
-    session_user = await state.uploads.get_current_user_summary(user) if user else None
-    bootstrap = json.dumps({"session_user": session_user, "base_url": base_url})
-    body = """
-      <section class="grid">
-        <section class="card">
-          <h1>User Dashboard</h1>
-          <p>Use this page to test authenticated uploads and owned album management. Session auth or a pasted API key both work.</p>
-        </section>
-        <section class="card">
-          <h2>API Key Mode</h2>
-          <form id="api-key-form">
-            <input id="api-key-input" type="text" name="api_key" placeholder="Paste API key to drive the dashboard without a browser session">
-            <div class="row">
-              <button type="submit">Use API Key</button>
-              <button id="clear-api-key" type="button" class="secondary">Clear API Key</button>
-            </div>
-          </form>
-          <p class="hint">This is useful for testing on plain HTTP when secure session cookies are unavailable.</p>
-        </section>
-      </section>
-      <section id="dashboard-unauth" class="card">
-        <h2>Authentication Needed</h2>
-        <p>Sign in on the home page or paste an API key here to unlock the dashboard.</p>
-      </section>
-      <section id="dashboard-auth" class="stack hidden">
-        <section class="card">
-          <h2>User Settings</h2>
-          <p>API key management, ShareX export, password changes, and account deletion now live on the dedicated settings page.</p>
-          <p><a class="inline-link" href="/settings">Open settings</a></p>
-        </section>
-        <section class="card">
-          <h2>Authenticated Upload</h2>
-          <form id="dashboard-upload-form" enctype="multipart/form-data">
-            <input type="text" name="title" placeholder="Album title (optional)">
-            <input type="text" name="album_id" placeholder="Existing owned album ID (optional)">
-            <input type="file" name="file" required multiple>
-            <button type="submit">Upload</button>
-          </form>
-          <pre id="dashboard-upload-result" class="result hidden"></pre>
-        </section>
-        <section class="card">
-          <div class="row">
-            <h2>Owned Albums</h2>
-            <button id="refresh-albums" type="button">Refresh Albums</button>
-          </div>
-          <p id="owned-albums-link" class="hint"></p>
-          <div id="owned-albums" class="stack"></div>
-        </section>
-      </section>
-    """
-    script = f"""
-    <script>
-      const boot = {bootstrap};
-      const state = {{
-        apiKey: window.localStorage.getItem("imghost_api_key") || "",
-        latestApiKey: null,
-        user: boot.session_user,
-      }};
-      const flash = document.getElementById("flash");
-      const apiKeyInput = document.getElementById("api-key-input");
-      const unauth = document.getElementById("dashboard-unauth");
-      const auth = document.getElementById("dashboard-auth");
-      const albumsRoot = document.getElementById("owned-albums");
-      const albumsLink = document.getElementById("owned-albums-link");
-      const uploadResult = document.getElementById("dashboard-upload-result");
-      apiKeyInput.value = state.apiKey;
+    session_user = await state.uploads.get_current_user_summary(user)
+    return await render_template_page(
+        request,
+        "pages/dashboard.html",
+        "Dashboard",
+        user=user,
+        extra_context={"session_user": session_user},
+        script_paths=["js/upload-box.js", "js/dashboard.js"],
+    )
 
-      const showMessage = (message) => {{
-        flash.textContent = message || "";
-      }};
-      const escapeHtml = (value) => String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;");
-      const authHeaders = (headers = {{}}) => {{
-        const resolved = new Headers(headers);
-        const apiKey = state.apiKey || state.latestApiKey;
-        if (apiKey) {{
-          resolved.set("Authorization", `Bearer ${{apiKey}}`);
-        }}
-        return resolved;
-      }};
-      const requestJson = async (url, options = {{}}) => {{
-        const response = await fetch(url, {{ ...options, headers: authHeaders(options.headers || {{}}) }});
-        const data = await response.json().catch(() => ({{}}));
-        if (!response.ok) {{
-          throw new Error(data.detail || `Request failed (${{response.status}}).`);
-        }}
-        return data;
-      }};
-      const formToObject = (form) => Object.fromEntries(new FormData(form).entries());
-      const parseOptionalNumber = (value) => value === "" ? null : Number(value);
-      const renderState = () => {{
-        const isAuthed = !!state.user;
-        unauth.classList.toggle("hidden", isAuthed);
-        auth.classList.toggle("hidden", !isAuthed);
-        if (!isAuthed) {{
-          albumsRoot.innerHTML = "";
-          albumsLink.textContent = "";
-          return;
-        }}
-        albumsLink.innerHTML = `Public album list: <a class="inline-link" href="/u/${{encodeURIComponent(state.user.username)}}" target="_blank">/u/${{escapeHtml(state.user.username)}}</a>`;
-      }};
-      const refreshUser = async () => {{
-        try {{
-          state.user = await requestJson("/api/v1/user/me");
-        }} catch {{
-          state.user = null;
-        }}
-        renderState();
-        if (state.user) {{
-          await refreshAlbums();
-        }}
-      }};
-      const renderAlbum = (album) => {{
-        const orderValue = album.items.map((item) => `${{item.id}}:${{item.position}}`).join("\\n");
-        const items = album.items.map((item) => `
-          <div class="item">
-            <p><strong>${{escapeHtml(item.filename)}}</strong> · ${{escapeHtml(item.id)}} · ${{escapeHtml(item.media_type)}} · thumb=${{escapeHtml(item.thumb_status)}}</p>
-            <p class="hint"><a class="inline-link" href="${{item.media_url}}" target="_blank">media</a> · <a class="inline-link" href="${{item.thumb_url}}" target="_blank">thumb</a>${{item.compat_warning ? ` · ${{escapeHtml(item.compat_warning)}}` : ""}}</p>
-            <button type="button" class="danger media-delete" data-media-id="${{item.id}}">Delete Media</button>
-          </div>
-        `).join("");
-        return `
-          <section class="album-card" data-album-id="${{album.id}}">
-            <h3>${{escapeHtml(album.title || "Untitled album")}}</h3>
-            <p class="hint">Album ${{escapeHtml(album.id)}} · ${{album.item_count}} item(s) · <a class="inline-link" href="/a/${{album.id}}" target="_blank">public page</a> · <a class="inline-link" href="/api/v1/album/${{album.id}}/zip" target="_blank">zip</a></p>
-            <form class="album-edit-form">
-              <input type="text" name="title" placeholder="Album title" value="${{escapeHtml(album.title || "")}}">
-              <input type="text" name="cover_media_id" placeholder="Cover media ID (blank to clear)" value="${{escapeHtml(album.cover_media_id || "")}}">
-              <button type="submit">Save Album Metadata</button>
-            </form>
-            <form class="album-append-form" enctype="multipart/form-data">
-              <input type="file" name="file" required multiple>
-              <button type="submit" class="secondary">Append Files To Album</button>
-            </form>
-            <form class="album-order-form">
-              <textarea name="order" placeholder="media_id:position per line">${{escapeHtml(orderValue)}}</textarea>
-              <button type="submit" class="ghost">Reorder</button>
-            </form>
-            <div class="item-list">${{items || '<p class="muted">No items.</p>'}}</div>
-            <button type="button" class="danger album-delete">Delete Album</button>
-          </section>
-        `;
-      }};
-      const refreshAlbums = async () => {{
-        if (!state.user) {{
-          albumsRoot.innerHTML = "";
-          return;
-        }}
-        const albums = await requestJson("/api/v1/user/me/albums");
-        albumsRoot.innerHTML = albums.length ? albums.map(renderAlbum).join("") : '<p class="muted">No owned albums yet.</p>';
-      }};
 
-      document.getElementById("api-key-form").addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        state.apiKey = apiKeyInput.value.trim();
-        state.latestApiKey = null;
-        if (state.apiKey) {{
-          window.localStorage.setItem("imghost_api_key", state.apiKey);
-        }} else {{
-          window.localStorage.removeItem("imghost_api_key");
-        }}
-        await refreshUser();
-        showMessage(state.user ? "API key accepted." : "Unable to authenticate with that API key.");
-      }});
-      document.getElementById("clear-api-key").addEventListener("click", async () => {{
-        state.apiKey = "";
-        state.latestApiKey = null;
-        apiKeyInput.value = "";
-        window.localStorage.removeItem("imghost_api_key");
-        await refreshUser();
-        showMessage("API key cleared.");
-      }});
-      document.getElementById("dashboard-upload-form").addEventListener("submit", async (event) => {{
-        event.preventDefault();
-        try {{
-          const response = await fetch("/api/v1/upload", {{
-            method: "POST",
-            headers: authHeaders(),
-            body: new FormData(event.currentTarget),
-          }});
-          const data = await response.json().catch(() => ({{}}));
-          if (!response.ok) {{
-            throw new Error(data.detail || "Upload failed.");
-          }}
-          uploadResult.classList.remove("hidden");
-          uploadResult.textContent = JSON.stringify(data, null, 2);
-          event.currentTarget.reset();
-          await refreshAlbums();
-          showMessage("Upload succeeded.");
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      document.getElementById("refresh-albums").addEventListener("click", refreshAlbums);
-      albumsRoot.addEventListener("submit", async (event) => {{
-        const card = event.target.closest("[data-album-id]");
-        if (!card) return;
-        const albumId = card.dataset.albumId;
-        event.preventDefault();
-        try {{
-          if (event.target.matches(".album-edit-form")) {{
-            const form = new FormData(event.target);
-            await requestJson(`/api/v1/album/${{albumId}}`, {{
-              method: "PATCH",
-              headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify({{
-                title: form.get("title") || null,
-                cover_media_id: form.get("cover_media_id") || null,
-              }}),
-            }});
-            showMessage("Album metadata updated.");
-          }} else if (event.target.matches(".album-append-form")) {{
-            const form = new FormData(event.target);
-            form.append("album_id", albumId);
-            const response = await fetch("/api/v1/upload", {{
-              method: "POST",
-              headers: authHeaders(),
-              body: form,
-            }});
-            const data = await response.json().catch(() => ({{}}));
-            if (!response.ok) {{
-              throw new Error(data.detail || "Append upload failed.");
-            }}
-            showMessage("Files appended to album.");
-          }} else if (event.target.matches(".album-order-form")) {{
-            const raw = new FormData(event.target).get("order");
-            const payload = String(raw || "").split("\\n").map((line) => line.trim()).filter(Boolean).map((line) => {{
-              const [media_id, position] = line.split(":");
-              return {{ media_id: media_id.trim(), position: Number(position.trim()) }};
-            }});
-            await requestJson(`/api/v1/album/${{albumId}}/order`, {{
-              method: "PATCH",
-              headers: {{ "Content-Type": "application/json" }},
-              body: JSON.stringify(payload),
-            }});
-            showMessage("Album order updated.");
-          }}
-          await refreshAlbums();
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
-      albumsRoot.addEventListener("click", async (event) => {{
-        const card = event.target.closest("[data-album-id]");
-        if (!card) return;
-        const albumId = card.dataset.albumId;
-        try {{
-          if (event.target.matches(".album-delete")) {{
-            if (!window.confirm(`Delete album ${{albumId}}?`)) return;
-            await requestJson(`/api/v1/album/${{albumId}}`, {{ method: "DELETE" }});
-            showMessage("Album deleted.");
-            await refreshAlbums();
-          }} else if (event.target.matches(".media-delete")) {{
-            const mediaId = event.target.dataset.mediaId;
-            if (!window.confirm(`Delete media ${{mediaId}}?`)) return;
-            await requestJson(`/api/v1/media/${{mediaId}}`, {{ method: "DELETE" }});
-            showMessage("Media deleted.");
-            await refreshAlbums();
-          }}
-        }} catch (error) {{
-          showMessage(error.message);
-        }}
-      }});
+@app.get("/albums", response_class=HTMLResponse)
+async def albums_page(request: Request) -> HTMLResponse:
+    user_or_redirect = await require_page_user(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    return await render_template_page(
+        request,
+        "pages/albums.html",
+        "Albums",
+        user=user,
+        script_paths=["js/albums.js"],
+    )
 
-      refreshUser();
-    </script>
-    """
-    return await page_shell(request, "Dashboard", with_flash(body), user=user, script=script)
+
+@app.get("/albums/{album_id}", response_class=HTMLResponse)
+async def album_detail_page(request: Request, album_id: str) -> HTMLResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    user_or_redirect = await require_page_user(request)
+    if isinstance(user_or_redirect, RedirectResponse):
+        return user_or_redirect
+    user = user_or_redirect
+    album = await state.repository.get_album(album_id)
+    if album is None or is_expired(album.expires_at) or album.user_id != user.id:
+        raise HTTPException(status_code=404)
+    return await render_template_page(
+        request,
+        "pages/album-detail.html",
+        "Album",
+        user=user,
+        extra_context={"album_id": album_id},
+        script_paths=["js/album-detail.js"],
+    )
 
 
 @app.get("/settings", response_class=HTMLResponse)

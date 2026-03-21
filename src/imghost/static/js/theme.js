@@ -21,3 +21,9 @@ themeToggle?.addEventListener("click", () => {
   window.localStorage.setItem(storageKey, nextTheme);
   applyTheme(nextTheme);
 });
+
+document.querySelector("[data-logout-form]")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await fetch("/api/v1/auth/logout", { method: "POST" });
+  window.location.reload();
+});

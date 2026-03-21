@@ -2,9 +2,10 @@ const flash = document.getElementById("flash");
 const uploadForm = document.getElementById("upload-form");
 const uploadDropzone = uploadForm?.querySelector(".upload-dropzone");
 const uploadInput = uploadForm?.querySelector('input[type="file"][name="file"]');
-const uploadFileSummary = uploadForm?.querySelector(".upload-file-summary");
 const uploadPasteInput = document.getElementById("upload-paste-input");
 const uploadPicker = uploadForm?.querySelector(".upload-picker");
+const uploadStatus = window.createUploadStatusController?.(uploadForm);
+const authenticatedUpload = Boolean(uploadForm?.querySelector('input[name="album_id"]'));
 let uploadInFlight = false;
 
 const showHomeMessage = (message) => {
@@ -18,7 +19,7 @@ const setUploadingState = (isUploading) => {
   uploadDropzone?.classList.toggle("is-uploading", isUploading);
   uploadPasteInput?.classList.toggle("is-uploading", isUploading);
   uploadPicker?.classList.toggle("is-uploading", isUploading);
-  uploadFileSummary?.classList.toggle("is-uploading", isUploading);
+  uploadForm?.querySelector(".upload-file-summary")?.classList.toggle("is-uploading", isUploading);
   if (uploadInput) {
     uploadInput.disabled = isUploading;
   }
@@ -28,19 +29,14 @@ const setUploadingState = (isUploading) => {
 };
 
 const updateFileSummary = (message) => {
-  if (!uploadFileSummary) {
+  if (!uploadStatus) {
     return;
   }
   if (message) {
-    uploadFileSummary.textContent = message;
+    uploadStatus.setInfo(message);
     return;
   }
-  const fileCount = uploadInput?.files?.length || 0;
-  uploadFileSummary.textContent = fileCount
-    ? fileCount === 1
-      ? uploadInput.files[0].name
-      : `${fileCount} files selected`
-    : "";
+  uploadStatus.syncSelection(uploadInput);
 };
 
 const resetTransientInputs = () => {
@@ -58,7 +54,7 @@ const submitUpload = async (fileList, statusMessage) => {
     return;
   }
   if (uploadInFlight) {
-    showHomeMessage("Upload already in progress.");
+    uploadStatus?.setError("Upload already in progress.");
     return;
   }
   let shouldResetInputs = true;
@@ -85,17 +81,20 @@ const submitUpload = async (fileList, statusMessage) => {
     if (!response.ok) {
       throw new Error(data.detail || "Upload failed.");
     }
-    const destination = data.album_url || (data.album_id ? `/a/${data.album_id}` : "");
+    const destination = window.resolveUploadDestination?.({
+      albumId: data.album_id,
+      albumUrl: data.album_url,
+      isAuthenticated: authenticatedUpload,
+    }) || "";
     if (!destination) {
       throw new Error("Upload succeeded, but no album URL was returned.");
     }
     shouldResetInputs = false;
-    showHomeMessage("Upload succeeded. Redirecting...");
+    uploadStatus?.persistSuccess("Upload succeeded. Redirecting...");
     window.location.href = destination;
     return;
   } catch (error) {
-    updateFileSummary(statusMessage || "Upload failed");
-    showHomeMessage(error.message);
+    uploadStatus?.setError(error.message || statusMessage || "Upload failed");
   } finally {
     if (shouldResetInputs) {
       resetTransientInputs();
@@ -124,13 +123,13 @@ const uploadFromUrl = async (urlText) => {
     return;
   }
   if (uploadInFlight) {
-    showHomeMessage("Upload already in progress.");
+    uploadStatus?.setError("Upload already in progress.");
     return;
   }
   try {
     new URL(url);
   } catch {
-    showHomeMessage("Paste a valid image URL.");
+    uploadStatus?.setError("Paste a valid image URL.");
     return;
   }
   updateFileSummary("Fetching image URL...");
@@ -147,7 +146,7 @@ const uploadFromUrl = async (urlText) => {
     await submitUpload([file], "Uploading pasted image URL...");
   } catch (error) {
     updateFileSummary();
-    showHomeMessage(error.message || "Could not fetch that image URL.");
+    uploadStatus?.setError(error.message || "Could not fetch that image URL.");
   }
 };
 
