@@ -39,6 +39,26 @@ Session storage model:
 
 This is intentionally availability-first rather than purely server-side.
 
+## Browser-session mutation protection
+
+Session-authenticated browser mutations are protected with trusted-origin checks.
+
+Current policy:
+
+- session-authenticated `POST`, `PATCH`, and `DELETE` requests require a trusted `Origin` or `Referer`
+- the trusted set comes from the same public-origin configuration used for generated URLs
+- bearer API-key requests are exempt from this browser-session check
+- `POST /api/v1/auth/login` and `POST /api/v1/auth/register` are intentionally exempt
+- `POST /api/v1/auth/logout` is protected
+
+Failure mode:
+
+- blocked requests return `403` with `CSRF protection blocked the request.`
+
+Operational implication:
+
+- if the app is served from more than one browser-visible origin, every valid origin must be configured in the trusted public-origin allowlist or browser-session mutations will fail
+
 ## Stale session handling
 
 If a page request arrives with an invalid or stale session cookie:
@@ -75,6 +95,12 @@ Owned albums can instead be managed by:
 
 - the owning authenticated user
 - an admin
+
+Important interaction with browser sessions:
+
+- token-authenticated mutations work without CSRF headers when no browser session is present
+- if a browser session cookie is present on the same request, the browser-session CSRF gate still applies
+- same-origin browser requests with a valid token continue to work
 
 ## ShareX behavior
 

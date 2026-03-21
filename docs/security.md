@@ -26,6 +26,16 @@ The app intentionally prefers graceful availability:
 
 This means a Redis outage degrades revocation semantics rather than hard-failing authentication.
 
+## Browser-session CSRF posture
+
+- browser-session-authenticated `POST`, `PATCH`, and `DELETE` routes require a trusted `Origin` or `Referer`
+- trusted origins are matched exactly against the configured public-origin allowlist/base URL model
+- bearer API-key requests are not subject to the browser-session CSRF gate
+- login and registration are intentionally exempt
+- logout and other browser-session mutations are protected
+
+Anonymous album manage-token flows are separate from browser-session auth, but if a session cookie is also present the browser-session CSRF gate still applies unless the request carries same-origin headers.
+
 ## URL generation and proxy trust
 
 - exact trusted public-origin allowlist
@@ -48,4 +58,3 @@ Important admin endpoints include:
 - no wildcard public-origin support
 - no full proxy-chain trust model
 - no richer metrics/telemetry backend yet
-

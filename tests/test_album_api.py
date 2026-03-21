@@ -165,6 +165,163 @@ def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
         assert client.get(f"/api/v1/album/{album_id}").status_code == 404
 
 
+def test_anonymous_manage_token_can_append_without_csrf_headers_when_no_session_exists(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Anonymous Workspace"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+        delete_token = payload["delete_url"].split("delete_token=")[1]
+
+        appended = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"album_id": album_id, "delete_token": delete_token},
+        )
+        assert appended.status_code == 200
+        assert appended.json()["album_id"] == album_id
+
+        album = client.get(f"/api/v1/album/{album_id}")
+        assert album.status_code == 200
+        assert album.json()["item_count"] == 2
+
+
+def test_delete_token_cannot_mutate_a_different_album(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("first.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "First"},
+        )
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("second.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Second"},
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_payload = first.json()
+        second_payload = second.json()
+        wrong_token = first_payload["delete_url"].split("delete_token=")[1]
+        second_album_id = second_payload["album_id"]
+        second_media_id = second_payload["media_id"]
+
+        patch = client.patch(
+            f"/api/v1/album/{second_album_id}",
+            params={"delete_token": wrong_token},
+            json={"title": "Should Fail"},
+        )
+        assert patch.status_code == 403
+
+        delete_media = client.delete(
+            f"/api/v1/media/{second_media_id}",
+            params={"delete_token": wrong_token},
+        )
+        assert delete_media.status_code == 403
+
+        untouched = client.get(f"/api/v1/album/{second_album_id}")
+        assert untouched.status_code == 200
+        assert untouched.json()["title"] == "Second"
+
+
+def test_manage_token_with_browser_session_but_no_same_origin_headers_is_blocked(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Anonymous Workspace"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        delete_token = payload["delete_url"].split("delete_token=")[1]
+
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "tokenbrowser",
+                "email": "tokenbrowser@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        blocked = client.patch(
+            f"/api/v1/album/{payload['album_id']}",
+            params={"delete_token": delete_token},
+            json={"title": "Blocked"},
+        )
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == "CSRF protection blocked the request."
+
+
+def test_manage_token_with_browser_session_and_same_origin_headers_still_works(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
+            ],
+            data={"title": "Anonymous Workspace"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+        delete_token = payload["delete_url"].split("delete_token=")[1]
+        media_ids = [item["media_id"] for item in payload["items"]]
+
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "tokenbrowserok",
+                "email": "tokenbrowserok@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        patched = client.patch(
+            f"/api/v1/album/{album_id}",
+            params={"delete_token": delete_token},
+            json={"title": "Managed In Browser"},
+            headers=browser_session_headers("https://testserver", f"/manage/{album_id}"),
+        )
+        assert patched.status_code == 200
+        assert patched.json()["title"] == "Managed In Browser"
+
+        reordered = client.patch(
+            f"/api/v1/album/{album_id}/order",
+            params={"delete_token": delete_token},
+            json=[
+                {"media_id": media_ids[1], "position": 50},
+                {"media_id": media_ids[0], "position": 60},
+            ],
+            headers=browser_session_headers("https://testserver", f"/manage/{album_id}"),
+        )
+        assert reordered.status_code == 200
+        assert [item["id"] for item in reordered.json()["items"]] == [media_ids[1], media_ids[0]]
+
+
 def test_browser_session_owner_can_append_reorder_and_delete_owned_album(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

@@ -85,6 +85,17 @@ Expected logs include:
 - worker lifecycle transitions
 - suppressed warnings for repeated untrusted-origin cases
 
+## Browser-session mutation troubleshooting
+
+If a browser-authenticated `POST`, `PATCH`, or `DELETE` request starts returning `403` with `CSRF protection blocked the request.`:
+
+- confirm the browser-visible origin is in the trusted public-origin set
+- confirm reverse-proxy forwarded host/proto values match the public site origin
+- confirm browser automation or tests are sending realistic same-origin `Origin` or `Referer` headers
+- remember that logout is protected too
+
+Delete-token album manage requests are not bearer-authenticated. If the browser also has a valid session cookie, those requests still need same-origin headers to pass the browser-session CSRF gate.
+
 ## Redis degraded mode
 
 When Redis is down and `REDIS_MODE=auto`:

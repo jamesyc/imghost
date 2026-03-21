@@ -8,7 +8,7 @@ uv run pytest -q
 
 Current full-suite baseline:
 
-- 152 passing tests
+- 176 passing tests
 
 ## Test database safety
 
@@ -36,6 +36,8 @@ Current tests cover:
 
 - uploads and album behavior
 - auth and sessions
+- browser-session CSRF enforcement and exemptions
+- anonymous manage-token mutation coverage
 - stale-session cleanup
 - auth redirect normalization
 - API keys and ShareX behavior

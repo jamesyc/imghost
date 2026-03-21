@@ -26,7 +26,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   How public-origin handling works, how trusted proxy CIDRs affect forwarded-header trust, and what a reverse proxy should send.
 
 - [authentication.md](/home/james/imghost/docs/authentication.md)
-  Browser sessions, API keys, ShareX export behavior, and the current auth model and caveats.
+  Browser sessions, browser-session CSRF policy, API keys, ShareX export behavior, and the current auth model and caveats.
 
 - [storage.md](/home/james/imghost/docs/storage.md)
   Filesystem and S3-compatible storage backends, media serving behavior, and ZIP streaming.
@@ -35,10 +35,10 @@ This directory holds implementation-oriented documentation for the current `imgh
   Task queue modes, worker behavior, Redis fallback semantics, and thumbnail recovery.
 
 - [operations.md](/home/james/imghost/docs/operations.md)
-  Health endpoint contract, runtime status, probe semantics, low-noise logging model, and degraded-mode operational behavior.
+  Health endpoint contract, runtime status, probe semantics, low-noise logging model, degraded-mode behavior, and browser-session mutation troubleshooting.
 
 - [testing.md](/home/james/imghost/docs/testing.md)
-  Test command, test database safety model, and what the suite expects from the local environment.
+  Test command, test database safety model, browser-session CSRF coverage, and what the suite expects from the local environment.
 
 - [api-overview.md](/home/james/imghost/docs/api-overview.md)
   Route map for the main HTML, API, admin, and health endpoints.
