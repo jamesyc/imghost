@@ -8,9 +8,10 @@ from ..ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from ..payloads import album_delete_url, album_to_payload, media_url, thumb_format, thumb_url
 from ..public_origin import public_base_url
 from ..service import CurrentActor, UNSET
-from .context import authenticated_user
+from .auth_context import authenticated_user
+from .display_helpers import album_manage_url, is_expired
 from .request_context import correlation_id, get_state
-from .utils import album_manage_url, is_expired, upload_rate_limit_key
+from .request_helpers import upload_rate_limit_key
 
 router = APIRouter()
 

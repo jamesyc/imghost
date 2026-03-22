@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from ..events import AdminLoggedIn
 from ..service import LocalLoginInput, UserCreateInput
-from .context import (
+from .auth_context import (
     apply_session_cookie,
     authenticated_user,
     clear_session_cookie,

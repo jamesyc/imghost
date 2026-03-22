@@ -6,14 +6,14 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..payloads import album_to_payload, compatibility_warning
 from ..public_origin import public_base_url
-from .context import (
+from .auth_context import (
     authenticated_user,
     require_page_admin,
     require_page_user,
 )
+from .display_helpers import display_timestamp, humanize_bytes, humanize_expiry, is_expired
 from .page_context import normalize_next_path, render_template_page, runtime_flags
 from .request_context import get_state
-from .utils import display_timestamp, humanize_bytes, humanize_expiry, is_expired
 
 router = APIRouter()
 
