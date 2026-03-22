@@ -93,3 +93,20 @@ If you serve `https://photos.example.com` and `https://uploads.example.com`, bot
 - exact origin matching only
 - no wildcard origin support
 - no deeper proxy-chain trust model beyond the immediate peer CIDR check
+
+## HTTPS and HSTS
+
+The app emits `Strict-Transport-Security` only when a request is effectively HTTPS.
+
+That means:
+
+- direct HTTPS requests get HSTS
+- trusted forwarded `X-Forwarded-Proto: https` requests get HSTS
+- plain HTTP local/direct-access requests do not
+
+For reverse-proxy deployments, make sure the proxy sends:
+
+- `X-Forwarded-Proto`
+- `X-Forwarded-Host`
+
+and that proxy trust is configured correctly, or the app will intentionally avoid trusting the forwarded HTTPS signal.

@@ -48,6 +48,22 @@ Anonymous album manage-token flows are separate from browser-session auth, but i
 - optional trusted proxy CIDR gate for forwarded headers
 - fallback to `BASE_URL` when request-derived origin data is rejected
 
+## Baseline browser security headers
+
+The app now sets these headers broadly on HTML, JSON, media, and error responses:
+
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-Frame-Options: DENY`
+- `Content-Security-Policy: frame-ancestors 'none'`
+
+`Strict-Transport-Security` is added only when the request is effectively HTTPS:
+
+- direct `https://` requests
+- or trusted forwarded `X-Forwarded-Proto: https` behind a trusted proxy
+
+The app does not currently ship a stricter full script/style CSP.
+
 ## Admin protection
 
 Admin pages and APIs require admin auth.

@@ -85,6 +85,17 @@ Expected logs include:
 - worker lifecycle transitions
 - suppressed warnings for repeated untrusted-origin cases
 
+## Browser security headers
+
+Baseline response headers now include:
+
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-Frame-Options: DENY`
+- `Content-Security-Policy: frame-ancestors 'none'`
+
+`Strict-Transport-Security` is emitted only for effectively HTTPS requests so local direct-access HTTP setups do not get pinned accidentally.
+
 ## Browser-session mutation troubleshooting
 
 If a browser-authenticated `POST`, `PATCH`, or `DELETE` request starts returning `403` with `CSRF protection blocked the request.`:
