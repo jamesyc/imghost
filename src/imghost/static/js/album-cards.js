@@ -58,7 +58,6 @@ const albumCardPublicLinkControl = (album) => {
         value="${albumCardEscapeHtml(publicUrl)}"
         readonly
         aria-label="Public page URL"
-        onclick="this.select()"
       >
     </div>
   `;

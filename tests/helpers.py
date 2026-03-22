@@ -35,23 +35,30 @@ def browser_session_headers(base_url: str = "https://testserver", path: str = "/
     }
 
 
+def _extract_cli_value(lines: list[str], prefix: str) -> str:
+    for line in reversed(lines):
+        if line.startswith(prefix):
+            return line.split(": ", 1)[1]
+    raise AssertionError(f"expected CLI output line starting with {prefix!r}, got: {lines!r}")
+
+
 def create_user_and_api_key(capsys, *, username: str, email: str) -> tuple[str, str]:
     assert cli_main(["create-user", "--username", username, "--email", email]) == 0
     create_output = capsys.readouterr().out.strip().splitlines()
-    user_id = create_output[-1].split(": ", 1)[1]
+    user_id = _extract_cli_value(create_output, "created user:")
     assert cli_main(["issue-api-key", "--user-id", user_id]) == 0
     issue_lines = capsys.readouterr().out.strip().splitlines()
-    api_key = issue_lines[-1].split(": ", 1)[1]
+    api_key = _extract_cli_value(issue_lines, "api_key:")
     return user_id, api_key
 
 
 def create_admin_and_api_key(capsys, *, username: str, email: str) -> tuple[str, str]:
     assert cli_main(["create-user", "--username", username, "--email", email, "--admin"]) == 0
     create_output = capsys.readouterr().out.strip().splitlines()
-    user_id = create_output[-1].split(": ", 1)[1]
+    user_id = _extract_cli_value(create_output, "created user:")
     assert cli_main(["issue-api-key", "--user-id", user_id]) == 0
     issue_lines = capsys.readouterr().out.strip().splitlines()
-    api_key = issue_lines[-1].split(": ", 1)[1]
+    api_key = _extract_cli_value(issue_lines, "api_key:")
     return user_id, api_key
 
 

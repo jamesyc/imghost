@@ -16,6 +16,17 @@ const applyTheme = (theme) => {
 
 applyTheme(root.dataset.theme || "light");
 
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  if (!target.classList.contains("split-link-value")) {
+    return;
+  }
+  target.select();
+});
+
 themeToggle?.addEventListener("click", () => {
   const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
   window.localStorage.setItem(storageKey, nextTheme);

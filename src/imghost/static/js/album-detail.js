@@ -121,7 +121,6 @@ const splitLinkControl = (label, url, ariaLabel) => `
       value="${escapeHtml(url)}"
       readonly
       aria-label="${escapeHtml(ariaLabel)}"
-      onclick="this.select()"
     >
   </div>
 `;
