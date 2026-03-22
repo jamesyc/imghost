@@ -4,7 +4,9 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+!.env.example.beginner
 !docker/.env.example
+!docker/.env.example.beginner
 docker/.env
 
 .vscode/
