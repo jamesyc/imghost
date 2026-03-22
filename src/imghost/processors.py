@@ -139,7 +139,7 @@ class StaticPillowProcessor(PillowProcessor):
             if self.save_format == "JPEG":
                 save_kwargs["quality"] = 95
             converted.save(output, format=self.save_format, **save_kwargs)
-        normalized_format = "jpeg" if metadata.format in {"jpeg", "jpg", "mpo"} else metadata.format
+        normalized_format = "jpeg" if self.save_format == "JPEG" else self.save_format.lower()
         return SanitizedFile(data=output.getvalue(), mime_type=self.mime_type, format=normalized_format)
 
     async def generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:

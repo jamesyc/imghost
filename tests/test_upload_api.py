@@ -3,10 +3,18 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from imghost.main import app
 
 from .helpers import PNG_1X1, wait_for_thumbnail
+
+
+def jpeg_bytes(color: str = "red", size: tuple[int, int] = (8, 8)) -> bytes:
+    image = Image.new("RGB", size, color)
+    output = BytesIO()
+    image.save(output, format="JPEG")
+    return output.getvalue()
 
 
 def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
@@ -226,6 +234,64 @@ def test_mpo_backed_jpeg_upload_is_normalized_to_jpg_and_thumbnails_succeed(tmp_
         thumb_response = client.get(f"/t/{media_id}.jpg")
         assert thumb_response.status_code == 200
         assert thumb_response.headers["content-type"] == "image/jpeg"
+
+
+def test_mislabeled_jpeg_upload_is_stored_as_sanitized_png_output(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("mislabeled.png", BytesIO(jpeg_bytes()), "image/png"))],
+            data={"title": "Mislabeled JPEG"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        item = payload["items"][0]
+        media_id = item["media_id"]
+        assert item["media_url"].endswith(".png")
+
+        state = client.app.state.imghost
+        media = client.portal.call(state.repository.get_media, media_id)
+        assert media is not None
+        assert media.format == "png"
+        assert media.mime_type == "image/png"
+
+        media_response = client.get(f"/i/{media_id}.png")
+        assert media_response.status_code == 200
+        assert media_response.headers["content-type"] == "image/png"
+
+
+def test_mislabeled_png_upload_is_stored_as_sanitized_jpeg_output(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("mislabeled.jpg", BytesIO(PNG_1X1), "image/jpeg"))],
+            data={"title": "Mislabeled PNG"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        item = payload["items"][0]
+        media_id = item["media_id"]
+        assert item["media_url"].endswith(".jpg")
+
+        state = client.app.state.imghost
+        media = client.portal.call(state.repository.get_media, media_id)
+        assert media is not None
+        assert media.format == "jpeg"
+        assert media.mime_type == "image/jpeg"
+
+        media_response = client.get(f"/i/{media_id}.jpg")
+        assert media_response.status_code == 200
+        assert media_response.headers["content-type"] == "image/jpeg"
 
 
 def test_album_payload_and_page_show_video_compatibility_warning(tmp_path, monkeypatch) -> None:
