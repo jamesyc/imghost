@@ -39,25 +39,6 @@ if (adminUsersRoot) {
               <a class="button-link secondary-link" href="/admin/users/${user.id}">Open</a>
             </div>
           </div>
-          <form class="admin-user-patch-form stack">
-            <label class="check"><input type="checkbox" name="suspended" ${user.suspended ? "checked" : ""}> Suspended</label>
-            <input type="number" name="quota_bytes" placeholder="Quota bytes" value="${user.quota_bytes ?? ""}">
-            <input type="number" name="rate_limit_rpm" placeholder="Requests per minute override" value="${user.rate_limit_rpm ?? ""}">
-            <input type="number" name="rate_limit_bph" placeholder="Bytes per hour override" value="${user.rate_limit_bph ?? ""}">
-            <div class="row row-actions">
-              <button type="submit">Patch User</button>
-            </div>
-          </form>
-          <form class="admin-user-reset-form stack">
-            <input type="password" name="new_password" placeholder="New password" required>
-            <div class="row row-actions">
-              <button type="submit" class="secondary">Reset Password</button>
-            </div>
-          </form>
-          <div class="row row-actions admin-delete-row">
-            <button type="button" class="danger admin-user-delete">Delete User</button>
-          </div>
-          <p class="settings-inline-status hidden admin-item-status" aria-live="polite"></p>
         </section>
       `,
       )
@@ -88,56 +69,6 @@ if (adminUsersRoot) {
       await refreshUsers();
     } catch (error) {
       adminUsersRoot.textContent = error.message;
-    }
-  });
-
-  adminUsersRoot.addEventListener("submit", async (event) => {
-    const card = event.target.closest("[data-user-id]");
-    if (!card) return;
-    event.preventDefault();
-    const status = card.querySelector(".admin-item-status");
-    window.setAdminStatus(status);
-    const userId = card.dataset.userId;
-    try {
-      if (event.target.matches(".admin-user-patch-form")) {
-        const form = new FormData(event.target);
-        await window.adminRequestJson(`/api/v1/admin/users/${userId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            suspended: form.get("suspended") === "on",
-            quota_bytes: window.parseOptionalNumber(form.get("quota_bytes")),
-            rate_limit_rpm: window.parseOptionalNumber(form.get("rate_limit_rpm")),
-            rate_limit_bph: window.parseOptionalNumber(form.get("rate_limit_bph")),
-          }),
-        });
-        window.setAdminStatus(status, "User updated.", "success");
-      } else if (event.target.matches(".admin-user-reset-form")) {
-        const form = new FormData(event.target);
-        await window.adminRequestJson(`/api/v1/admin/users/${userId}/reset-password`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ new_password: form.get("new_password") }),
-        });
-        window.setAdminStatus(status, "Password reset.", "success");
-      }
-      await refreshUsers();
-    } catch (error) {
-      window.setAdminStatus(status, error.message, "error");
-    }
-  });
-
-  adminUsersRoot.addEventListener("click", async (event) => {
-    const card = event.target.closest("[data-user-id]");
-    if (!card || !event.target.matches(".admin-user-delete")) return;
-    if (!window.confirm(`Delete user ${card.dataset.userId}?`)) return;
-    const status = card.querySelector(".admin-item-status");
-    window.setAdminStatus(status);
-    try {
-      await window.adminRequestJson(`/api/v1/admin/users/${card.dataset.userId}`, { method: "DELETE" });
-      await refreshUsers();
-    } catch (error) {
-      window.setAdminStatus(status, error.message, "error");
     }
   });
 

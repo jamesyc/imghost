@@ -573,6 +573,7 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         users = client.get("/admin/users")
         assert users.status_code == 200
         assert "User management" in users.text
+        assert "open a detail page to review stats, albums, and account actions." in users.text
         assert 'id="admin-user-search-form"' in users.text
         assert 'id="admin-users"' in users.text
         assert 'href="/admin/users/new"' in users.text

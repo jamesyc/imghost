@@ -5,6 +5,7 @@ This document describes the environment variables currently consumed by the appl
 ## App-level settings
 
 These are defined in [`.env.example`](/home/james/imghost/.env.example).
+That file is intentionally a hardened deployment example, not a localhost quick-start template.
 
 ### Public URL and proxy trust
 
@@ -86,6 +87,7 @@ Practical modes:
 ## Docker/Compose settings
 
 These are defined in [`docker/.env.example`](/home/james/imghost/docker/.env.example).
+That file is also intentionally deployment-oriented: strict public-origin mode is enabled, proxy trust gating is on, and session cookies are secure by default.
 
 They include all of the app-level concepts above, plus Docker-stack-specific settings:
 

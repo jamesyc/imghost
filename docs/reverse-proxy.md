@@ -78,10 +78,13 @@ For a deployment serving multiple domains:
 
 ```env
 BASE_URL=https://imghost.example.com
+PUBLIC_ORIGIN_ENABLED=true
 TRUSTED_PUBLIC_ORIGINS=https://imghost.example.com,https://imghost.example2.com
 TRUSTED_PROXY_CIDRS_ENABLED=true
 TRUSTED_PROXY_CIDRS=127.0.0.1/32,172.16.0.0/12
 ```
+
+The checked-in [`.env.example`](/home/james/imghost/.env.example) and [`docker/.env.example`](/home/james/imghost/docker/.env.example) now follow this hardened deployment posture by default.
 
 If you serve `https://photos.example.com` and `https://uploads.example.com`, both must be listed in `TRUSTED_PUBLIC_ORIGINS`. Unknown hosts are intentionally ignored and the app falls back to `BASE_URL`.
 
