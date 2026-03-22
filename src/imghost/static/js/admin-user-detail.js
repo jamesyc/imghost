@@ -20,6 +20,7 @@ if (adminUserDetailRoot) {
 
   const patchForm = document.getElementById("admin-user-detail-patch-form");
   const resetForm = document.getElementById("admin-user-detail-reset-form");
+  const isAdminInput = document.getElementById("admin-user-detail-is-admin");
   const suspendedInput = document.getElementById("admin-user-detail-suspended");
   const quotaInput = document.getElementById("admin-user-detail-quota");
   const rpmInput = document.getElementById("admin-user-detail-rpm");
@@ -27,6 +28,7 @@ if (adminUserDetailRoot) {
 
   const renderSummary = (payload) => {
     document.getElementById("admin-user-detail-name").textContent = payload.username;
+    isAdminInput.checked = Boolean(payload.is_admin);
     suspendedInput.checked = Boolean(payload.suspended);
     quotaInput.value = payload.quota_bytes ?? "";
     rpmInput.value = payload.rate_limit_rpm ?? "";
@@ -126,6 +128,7 @@ if (adminUserDetailRoot) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          is_admin: isAdminInput.checked,
           suspended: suspendedInput.checked,
           quota_bytes: window.parseOptionalNumber(quotaInput.value),
           rate_limit_rpm: window.parseOptionalNumber(rpmInput.value),

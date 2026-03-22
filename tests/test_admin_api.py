@@ -249,9 +249,10 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
         patched = client.patch(
             f"/api/v1/admin/users/{created_user['id']}",
             headers={"Authorization": f"Bearer {admin_key}"},
-            json={"suspended": True, "quota_bytes": 999, "rate_limit_rpm": 7},
+            json={"is_admin": True, "suspended": True, "quota_bytes": 999, "rate_limit_rpm": 7},
         )
         assert patched.status_code == 200
+        assert patched.json()["is_admin"] is True
         assert patched.json()["suspended"] is True
         assert patched.json()["quota_bytes"] == 999
         assert patched.json()["rate_limit_rpm"] == 7
@@ -259,7 +260,21 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
         refreshed_users = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_key}"})
         assert refreshed_users.status_code == 200
         refreshed_list = {item["id"]: item for item in refreshed_users.json()["items"]}
+        assert refreshed_list[created_user["id"]]["is_admin"] is True
         assert refreshed_list[created_user["id"]]["rate_limit_rpm"] == 7
+
+        demoted = client.patch(
+            f"/api/v1/admin/users/{created_user['id']}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"is_admin": False},
+        )
+        assert demoted.status_code == 200
+        assert demoted.json()["is_admin"] is False
+
+        refreshed_users = client.get("/api/v1/admin/users", headers={"Authorization": f"Bearer {admin_key}"})
+        assert refreshed_users.status_code == 200
+        refreshed_list = {item["id"]: item for item in refreshed_users.json()["items"]}
+        assert refreshed_list[created_user["id"]]["is_admin"] is False
 
         stats = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {admin_key}"})
         assert stats.status_code == 200

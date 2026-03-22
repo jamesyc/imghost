@@ -22,7 +22,6 @@
         </div>
         <a class="button-link secondary-link" href="/admin/users">Back to users</a>
       </div>
-      <p id="admin-user-detail-status" class="settings-inline-status hidden" aria-live="polite"></p>
       <div id="admin-user-detail-summary" class="stack admin-overview-metrics"></div>
     </section>
 
@@ -46,6 +45,7 @@
         </div>
       </div>
       <form id="admin-user-detail-patch-form" class="stack">
+        <label class="check"><input id="admin-user-detail-is-admin" type="checkbox" name="is_admin"> Admin</label>
         <label class="check"><input id="admin-user-detail-suspended" type="checkbox" name="suspended"> Suspended</label>
         <input id="admin-user-detail-quota" type="number" name="quota_bytes" placeholder="Quota bytes">
         <input id="admin-user-detail-rpm" type="number" name="rate_limit_rpm" placeholder="Requests per minute override">
@@ -54,6 +54,7 @@
           <button type="submit">Patch User</button>
         </div>
       </form>
+      <p id="admin-user-detail-status" class="settings-inline-status admin-inline-status-gap hidden" aria-live="polite"></p>
       <form id="admin-user-detail-reset-form" class="stack">
         <input id="admin-user-detail-reset-password" type="password" name="new_password" placeholder="New password" required minlength="8">
         <div class="row row-actions">

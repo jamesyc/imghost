@@ -29,6 +29,7 @@ class AdminUserCreateRequest(BaseModel):
 
 
 class AdminUserPatchRequest(BaseModel):
+    is_admin: bool | None = None
     suspended: bool | None = None
     quota_bytes: int | None = None
     rate_limit_rpm: int | None = None
@@ -237,6 +238,7 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
     updated = await state.uploads.update_user(
         user_id,
         payload=UserUpdateInput(
+            is_admin=payload.is_admin if "is_admin" in payload.model_fields_set else UNSET,
             suspended=payload.suspended if "suspended" in payload.model_fields_set else None,
             quota_bytes=payload.quota_bytes if "quota_bytes" in payload.model_fields_set else UNSET,
             rate_limit_rpm=payload.rate_limit_rpm if "rate_limit_rpm" in payload.model_fields_set else UNSET,

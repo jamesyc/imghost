@@ -371,10 +371,11 @@ def test_admin_browser_session_can_mutate_user_and_album_routes_used_by_ui(tmp_p
 
         patch_user = client.patch(
             f"/api/v1/admin/users/{target_user_id}",
-            json={"quota_bytes": 1234, "rate_limit_rpm": 9},
+            json={"is_admin": True, "quota_bytes": 1234, "rate_limit_rpm": 9},
             headers=browser_session_headers("https://testserver", f"/admin/users/{target_user_id}"),
         )
         assert patch_user.status_code == 200
+        assert patch_user.json()["is_admin"] is True
         assert patch_user.json()["quota_bytes"] == 1234
         assert patch_user.json()["rate_limit_rpm"] == 9
 
@@ -391,6 +392,12 @@ def test_admin_browser_session_can_mutate_user_and_album_routes_used_by_ui(tmp_p
             json={"login": "csrftarget", "password": "new-target-pass"},
         )
         assert target_login.status_code == 200
+
+        target_admin_runtime = client.get(
+            "/api/v1/admin/runtime-status",
+            headers=browser_session_headers("https://testserver", f"/admin/users/{target_user_id}"),
+        )
+        assert target_admin_runtime.status_code == 200
 
         client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
         relogin = client.post(

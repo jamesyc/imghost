@@ -612,6 +612,10 @@ body::after {
   line-height: 1.5;
 }
 
+.admin-inline-status-gap {
+  margin-top: 0.45rem;
+}
+
 .settings-inline-status[data-tone="error"] {
   background: rgba(210, 66, 79, 0.14);
   border: 1px solid rgba(210, 66, 79, 0.26);

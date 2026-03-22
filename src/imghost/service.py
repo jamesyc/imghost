@@ -92,6 +92,7 @@ class UserCreateInput:
 
 @dataclass
 class UserUpdateInput:
+    is_admin: bool | object = UNSET
     suspended: bool | None = None
     quota_bytes: int | None | object = UNSET
     rate_limit_rpm: int | None | object = UNSET
@@ -923,6 +924,8 @@ class UploadService:
         if user is None:
             raise HTTPException(status_code=404, detail="User not found.")
 
+        if payload.is_admin is not UNSET:
+            user.is_admin = bool(payload.is_admin)
         if payload.suspended is not None and payload.suspended != user.suspended:
             user.suspended = payload.suspended
             await self.event_bus.emit(
