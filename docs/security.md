@@ -13,6 +13,7 @@ This document summarizes the security-relevant behavior currently implemented.
 ## Auth
 
 - passwords hashed with bcrypt
+- local passwords must be at least 8 characters when created or changed through the app APIs
 - API keys stored hash-only
 - browser sessions signed with `SECRET_KEY`
 - cookie security controlled by `SESSION_COOKIE_SECURE`

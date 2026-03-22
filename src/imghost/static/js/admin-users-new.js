@@ -7,13 +7,18 @@ if (adminCreateUserForm) {
     window.setAdminStatus(adminCreateUserStatus);
     try {
       const form = new FormData(event.currentTarget);
+      const password = String(form.get("password") || "");
+      if (password && password.length < 8) {
+        window.setAdminStatus(adminCreateUserStatus, "Optional passwords must be at least 8 characters.", "error");
+        return;
+      }
       const created = await window.adminRequestJson("/api/v1/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: form.get("username"),
           email: form.get("email"),
-          password: form.get("password") || null,
+          password: password || null,
           is_admin: form.get("is_admin") === "on",
           quota_bytes: window.parseOptionalNumber(form.get("quota_bytes")),
           rate_limit_rpm: window.parseOptionalNumber(form.get("rate_limit_rpm")),

@@ -134,6 +134,10 @@ if (settingsBootstrapNode) {
       const formData = new FormData(event.currentTarget);
       const newPassword = String(formData.get("new_password") || "");
       const confirmPassword = String(formData.get("confirm_new_password") || "");
+      if (newPassword.length < 8) {
+        setInlineStatus(passwordStatus, "Please use at least 8 characters for the new password.", "error");
+        return;
+      }
       if (newPassword !== confirmPassword) {
         setInlineStatus(passwordStatus, "New passwords do not match.", "error");
         return;

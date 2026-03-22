@@ -11,13 +11,14 @@ from imghost.config import Settings
 from imghost.models import Album, User, utcnow
 from imghost.storage import StorageStream
 from imghost.payloads import album_to_payload
-from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UploadService
+from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UploadService, UserCreateInput
 
 
 class DummyRepository:
     def __init__(self, user: User | None = None) -> None:
         self.user = user
         self.updated_user: User | None = None
+        self.created_user: User | None = None
         self.album: Album | None = None
         self.album_media: list[object] = []
 
@@ -35,6 +36,16 @@ class DummyRepository:
         self.updated_user = user
         self.user = user
         return user
+
+    async def create_user(self, user: User) -> User:
+        self.created_user = user
+        self.user = user
+        return user
+
+    async def get_user(self, user_id: str) -> User | None:
+        if self.user and self.user.id == user_id:
+            return self.user
+        return None
 
     async def get_album(self, album_id: str) -> Album | None:
         if self.album and self.album.id == album_id:
@@ -74,8 +85,17 @@ class DummyStorage:
         return self.payloads[key]
 
 
-def make_service(user: User | None = None, *, storage=None) -> tuple[UploadService, DummyRepository]:
+class DummyEventBus:
+    def __init__(self) -> None:
+        self.events: list[object] = []
+
+    async def emit(self, event: object) -> None:
+        self.events.append(event)
+
+
+def make_service(user: User | None = None, *, storage=None) -> tuple[UploadService, DummyRepository, DummyEventBus]:
     repository = DummyRepository(user)
+    event_bus = DummyEventBus()
     settings = Settings(
         base_url="http://testserver",
         public_origin_enabled=True,
@@ -112,12 +132,12 @@ def make_service(user: User | None = None, *, storage=None) -> tuple[UploadServi
         settings=settings,
         repository=repository,
         storage=storage,  # type: ignore[arg-type]
-        event_bus=None,  # type: ignore[arg-type]
+        event_bus=event_bus,  # type: ignore[arg-type]
         processors=None,  # type: ignore[arg-type]
         runtime_config=None,  # type: ignore[arg-type]
         rate_limiter=None,  # type: ignore[arg-type]
     )
-    return service, repository
+    return service, repository, event_bus
 
 
 def make_user(*, password_hash: str) -> User:
@@ -138,7 +158,7 @@ def make_user(*, password_hash: str) -> User:
 
 
 def test_hash_password_uses_bcrypt_and_is_not_deterministic() -> None:
-    service, _ = make_service()
+    service, _, _ = make_service()
 
     first = service._hash_password("secret-pass")
     second = service._hash_password("secret-pass")
@@ -152,7 +172,7 @@ def test_hash_password_uses_bcrypt_and_is_not_deterministic() -> None:
 
 def test_authenticate_local_user_accepts_bcrypt_hash() -> None:
     password_hash = bcrypt.hashpw(b"secret-pass", bcrypt.gensalt()).decode("utf-8")
-    service, _ = make_service(make_user(password_hash=password_hash))
+    service, _, _ = make_service(make_user(password_hash=password_hash))
 
     user = asyncio.run(
         service.authenticate_local_user(LocalLoginInput(login="alice@example.com", password="secret-pass"))
@@ -164,7 +184,7 @@ def test_authenticate_local_user_accepts_bcrypt_hash() -> None:
 def test_change_password_replaces_hash_with_new_bcrypt_hash() -> None:
     old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
     user = make_user(password_hash=old_hash)
-    service, repository = make_service(user)
+    service, repository, _ = make_service(user)
 
     updated = asyncio.run(
         service.change_password(
@@ -179,14 +199,67 @@ def test_change_password_replaces_hash_with_new_bcrypt_hash() -> None:
     assert not bcrypt.checkpw(b"old-pass", updated.password_hash.encode("utf-8"))
 
 
+def test_create_user_rejects_password_shorter_than_eight_characters() -> None:
+    service, repository, _ = make_service()
+
+    with pytest.raises(HTTPException) as rejected:
+        asyncio.run(
+            service.create_user(
+                UserCreateInput(
+                    username="shortpass",
+                    email="shortpass@example.com",
+                    password="short7!",
+                    is_admin=False,
+                    quota_bytes=None,
+                )
+            )
+        )
+
+    assert rejected.value.status_code == 400
+    assert rejected.value.detail == "Password must be at least 8 characters."
+    assert repository.created_user is None
+
+
+def test_reset_user_password_rejects_password_shorter_than_eight_characters() -> None:
+    old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
+    user = make_user(password_hash=old_hash)
+    service, repository, event_bus = make_service(user)
+
+    with pytest.raises(HTTPException) as rejected:
+        asyncio.run(service.reset_user_password(user.id, "short7!", "reset-short"))
+
+    assert rejected.value.status_code == 400
+    assert rejected.value.detail == "New password must be at least 8 characters."
+    assert repository.updated_user is None
+    assert event_bus.events == []
+
+
+def test_change_password_rejects_password_shorter_than_eight_characters() -> None:
+    old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
+    user = make_user(password_hash=old_hash)
+    service, repository, _ = make_service(user)
+
+    with pytest.raises(HTTPException) as rejected:
+        asyncio.run(
+            service.change_password(
+                user,
+                PasswordChangeInput(current_password="old-pass", new_password="short7!"),
+            )
+        )
+
+    assert rejected.value.status_code == 400
+    assert rejected.value.detail == "New password must be at least 8 characters."
+    assert repository.updated_user is None
+
+
 def test_verify_password_returns_false_for_invalid_stored_hash() -> None:
-    service, _ = make_service()
+    service, _, _ = make_service()
 
     assert service._verify_password("secret-pass", "not-a-bcrypt-hash") is False
 
 
 def test_require_album_access_allows_owner_admin_or_valid_token() -> None:
-    service, _ = make_service()
+    service, _, _ = make_service()
     owner = make_user(password_hash=bcrypt.hashpw(b"x", bcrypt.gensalt()).decode("utf-8"))
     admin = make_user(password_hash=bcrypt.hashpw(b"y", bcrypt.gensalt()).decode("utf-8"))
     admin.id = "admin-1"
@@ -231,7 +304,7 @@ def test_require_album_access_allows_owner_admin_or_valid_token() -> None:
 
 
 def test_get_or_create_album_requires_delete_token_for_anonymous_append() -> None:
-    service, repository = make_service()
+    service, repository, _ = make_service()
     repository.album = Album(
         id="album-2",
         title="Anon",
@@ -302,7 +375,7 @@ def test_album_to_payload_omits_delete_token_by_default() -> None:
 
 def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -> None:
     storage = DummyStorage({"media/original.png": b"png-data"})
-    service, repository = make_service(storage=storage)
+    service, repository, _ = make_service(storage=storage)
     repository.album = Album(
         id="album-1",
         title="Album",

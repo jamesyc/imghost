@@ -18,7 +18,7 @@
     <form id="admin-create-user-form" class="stack">
       <input type="text" name="username" placeholder="Username" required>
       <input type="email" name="email" placeholder="Email" required>
-      <input type="password" name="password" placeholder="Password (optional)">
+      <input type="password" name="password" placeholder="Password (optional, 8+ chars)" minlength="8">
       <label class="check"><input type="checkbox" name="is_admin"> Admin</label>
       <input type="number" name="quota_bytes" placeholder="Quota bytes">
       <input type="number" name="rate_limit_rpm" placeholder="Requests per minute override">

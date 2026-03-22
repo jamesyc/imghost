@@ -42,6 +42,7 @@ from .zip_streaming import AsyncIterableBridge
 MAX_ALBUM_ITEMS = 1000
 UNSET = object()
 VIDEO_FORMATS = {"mp4", "mov", "webm"}
+MIN_PASSWORD_LENGTH = 8
 
 
 @dataclass
@@ -133,6 +134,16 @@ class UploadService:
         self.processors = processors
         self.runtime_config = runtime_config
         self.rate_limiter = rate_limiter
+
+    def _require_password_value(self, password: str, *, label: str) -> str:
+        if not password.strip():
+            raise HTTPException(status_code=400, detail=f"{label} is required.")
+        if len(password) < MIN_PASSWORD_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label} must be at least {MIN_PASSWORD_LENGTH} characters.",
+            )
+        return password
 
     async def upload(
         self,
@@ -873,8 +884,8 @@ class UploadService:
             raise HTTPException(status_code=400, detail="Username is required.")
         if not email:
             raise HTTPException(status_code=400, detail="Email is required.")
-        if payload.password is not None and not payload.password.strip():
-            raise HTTPException(status_code=400, detail="Password is required.")
+        if payload.password is not None:
+            self._require_password_value(payload.password, label="Password")
         if await self.repository.get_user_by_username(username):
             raise HTTPException(status_code=409, detail="Username already exists.")
         if await self.repository.get_user_by_email(email):
@@ -934,7 +945,7 @@ class UploadService:
                 payload.rate_limit_bph if payload.rate_limit_bph is None or isinstance(payload.rate_limit_bph, int) else None
             )
         if payload.password is not None:
-            user.password_hash = self._hash_password(payload.password)
+            user.password_hash = self._hash_password(self._require_password_value(payload.password, label="Password"))
         user.updated_at = utcnow()
         await self.repository.update_user(user)
         return user
@@ -943,8 +954,7 @@ class UploadService:
         user = await self.repository.get_user(user_id)
         if user is None:
             raise HTTPException(status_code=404, detail="User not found.")
-        if not new_password.strip():
-            raise HTTPException(status_code=400, detail="New password is required.")
+        new_password = self._require_password_value(new_password, label="New password")
 
         user.password_hash = self._hash_password(new_password)
         user.updated_at = utcnow()
@@ -964,9 +974,7 @@ class UploadService:
             raise HTTPException(status_code=400, detail="Password login is not configured for this user.")
         if not self._verify_password(payload.current_password, user.password_hash):
             raise HTTPException(status_code=403, detail="Current password is incorrect.")
-        if not payload.new_password.strip():
-            raise HTTPException(status_code=400, detail="New password is required.")
-        user.password_hash = self._hash_password(payload.new_password)
+        user.password_hash = self._hash_password(self._require_password_value(payload.new_password, label="New password"))
         user.updated_at = utcnow()
         await self.repository.update_user(user)
         return user

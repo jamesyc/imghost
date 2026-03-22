@@ -21,6 +21,11 @@ Registration creates:
 - a browser session
 - a registration audit/event flow
 
+Password-setting policy:
+
+- local passwords must be at least 8 characters
+- the backend enforces this for registration, admin user creation, admin reset, and current-user password change
+
 ## Browser sessions
 
 Session implementation lives in [`src/imghost/sessions.py`](/home/james/imghost/src/imghost/sessions.py).

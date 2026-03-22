@@ -225,7 +225,7 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
             json={
                 "username": "harry",
                 "email": "harry@example.com",
-                "password": "secret",
+                "password": "secret-pass",
                 "quota_bytes": 12345,
                 "rate_limit_rpm": 12,
                 "rate_limit_bph": 34567,
@@ -290,7 +290,7 @@ def test_admin_user_listing_supports_search_filters_and_pagination(tmp_path, mon
             json={
                 "username": "suspendeduser",
                 "email": "suspended@example.com",
-                "password": "secret",
+                "password": "secret-pass",
             },
         )
         assert created.status_code == 201
@@ -371,6 +371,26 @@ def test_admin_user_listing_supports_search_filters_and_pagination(tmp_path, mon
             params={"limit": 5000},
         )
         assert bad_limit.status_code == 400
+
+
+def test_admin_create_user_rejects_password_shorter_than_eight_characters(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="shortadmincreate", email="shortadmincreate@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={
+                "username": "shortcreated",
+                "email": "shortcreated@example.com",
+                "password": "short7!",
+            },
+        )
+        assert created.status_code == 400
+        assert created.json()["detail"] == "Password must be at least 8 characters."
 
 
 def test_admin_user_listing_uses_default_envelope_exact_boundary_and_empty_page(tmp_path, monkeypatch, capsys) -> None:

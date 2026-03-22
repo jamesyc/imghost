@@ -143,11 +143,16 @@ if (adminUserDetailRoot) {
     event.preventDefault();
     window.setAdminStatus(detailStatus);
     const form = new FormData(event.currentTarget);
+    const newPassword = String(form.get("new_password") || "");
+    if (newPassword.length < 8) {
+      window.setAdminStatus(detailStatus, "New passwords must be at least 8 characters.", "error");
+      return;
+    }
     try {
       await window.adminRequestJson(`/api/v1/admin/users/${userId}/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ new_password: form.get("new_password") }),
+        body: JSON.stringify({ new_password: newPassword }),
       });
       event.currentTarget.reset();
       window.setAdminStatus(detailStatus, "Password reset.", "success");

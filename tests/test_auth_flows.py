@@ -49,6 +49,23 @@ def test_admin_password_reset_requires_dedicated_endpoint_and_allows_new_login(t
         assert login.json()["authenticated"] is True
 
 
+def test_admin_password_reset_rejects_short_new_password(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="pwshortadmin", email="pwshortadmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="shortreset", email="shortreset@example.com")
+
+    with TestClient(app) as client:
+        reset = client.post(
+            f"/api/v1/admin/users/{user_id}/reset-password",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"new_password": "short7!"},
+        )
+        assert reset.status_code == 400
+        assert reset.json()["detail"] == "New password must be at least 8 characters."
+
+
 def test_user_can_change_password_with_current_password(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -296,6 +313,24 @@ def test_registration_creates_user_session_and_audit_entry(tmp_path, monkeypatch
         assert audit_payload[0]["actor_id"] == user_id
         assert audit_payload[0]["metadata"]["method"] == "registration"
         assert audit_payload[0]["target_id"] == user_id
+
+
+def test_registration_rejects_password_shorter_than_eight_characters(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "shortregister",
+                "email": "shortregister@example.com",
+                "password": "short7!",
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Password must be at least 8 characters."
 
 
 def test_session_cookie_secure_can_be_overridden_for_http_deployments(tmp_path, monkeypatch, capsys) -> None:

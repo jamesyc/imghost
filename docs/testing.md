@@ -36,6 +36,7 @@ Current tests cover:
 
 - uploads and album behavior
 - auth and sessions
+- password minimum-length enforcement on registration, admin create/reset, and current-user change flows
 - browser-session CSRF enforcement and exemptions
 - anonymous manage-token mutation coverage
 - stale-session cleanup

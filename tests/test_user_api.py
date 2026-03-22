@@ -635,6 +635,30 @@ def test_browser_session_password_change_requires_old_password_and_enables_new_l
         assert new_login.status_code == 200
 
 
+def test_browser_session_password_change_rejects_short_new_password(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="shortpasswordbrowser", email="shortpasswordbrowser@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "old-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "shortpasswordbrowser@example.com", "password": "old-pass"},
+        )
+        assert login.status_code == 200
+
+        rejected = client.patch(
+            "/api/v1/user/me/password",
+            json={"current_password": "old-pass", "new_password": "short7!"},
+            headers=browser_session_headers("https://testserver", "/settings"),
+        )
+        assert rejected.status_code == 400
+        assert rejected.json()["detail"] == "New password must be at least 8 characters."
+
+
 def test_browser_session_delete_current_user_clears_session_and_removes_content(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

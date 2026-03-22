@@ -56,7 +56,7 @@ def test_anon_rate_limit_blocks_after_runtime_threshold(tmp_path, monkeypatch) -
                 UserCreateInput(
                     username="anon-rate-admin",
                     email="anon-rate-admin@example.com",
-                    password="secret",
+                    password="secret-pass",
                     is_admin=True,
                     quota_bytes=None,
                 ),
@@ -102,7 +102,7 @@ def test_anon_rate_limit_ignores_spoofed_forwarding_headers_from_untrusted_clien
                 UserCreateInput(
                     username="anon-spoof-admin",
                     email="anon-spoof-admin@example.com",
-                    password="secret",
+                    password="secret-pass",
                     is_admin=True,
                     quota_bytes=None,
                 ),
@@ -148,7 +148,7 @@ def test_anon_rate_limit_uses_forwarded_headers_from_trusted_proxy_peer(tmp_path
                 UserCreateInput(
                     username="anon-proxy-admin",
                     email="anon-proxy-admin@example.com",
-                    password="secret",
+                    password="secret-pass",
                     is_admin=True,
                     quota_bytes=None,
                 ),
@@ -194,7 +194,7 @@ def test_anon_rate_limit_uses_x_real_ip_from_trusted_proxy_peer(tmp_path, monkey
                 UserCreateInput(
                     username="anon-xreal-admin",
                     email="anon-xreal-admin@example.com",
-                    password="secret",
+                    password="secret-pass",
                     is_admin=True,
                     quota_bytes=None,
                 ),
@@ -239,7 +239,7 @@ def test_anon_rate_limit_remains_permissive_when_trusted_proxy_gate_is_disabled(
                 UserCreateInput(
                     username="anon-permissive-admin",
                     email="anon-permissive-admin@example.com",
-                    password="secret",
+                    password="secret-pass",
                     is_admin=True,
                     quota_bytes=None,
                 ),
