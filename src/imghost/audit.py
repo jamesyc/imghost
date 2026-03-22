@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from .db import Database
 from .events import (
+    ApiKeyIssued,
     AdminLoggedIn,
     AlbumCoverSet,
     AlbumCreated,
@@ -14,9 +15,14 @@ from .events import (
     AlbumTitleChanged,
     ConfigChanged,
     EventBus,
+    LoginFailed,
     MediaDeleted,
     MediaUploaded,
+    UserAdminStatusChanged,
     UserDeleted,
+    UserLoggedOut,
+    UserLimitsChanged,
+    UserPasswordChanged,
     UserPasswordReset,
     UserRegistered,
     UserSuspended,
@@ -137,6 +143,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
             {
                 "album_id": event.album_id,
                 "item_count": event.item_count,
+                "actor_kind": event.actor_kind,
                 "source": event.source,
                 "correlation_id": event.correlation_id,
             },
@@ -156,6 +163,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
                 "file_size": event.file_size,
                 "media_type": event.media_type,
                 "format": event.format,
+                "actor_kind": event.actor_kind,
                 "source": event.source,
                 "correlation_id": event.correlation_id,
             },
@@ -173,6 +181,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
                 "album_id": event.album_id,
                 "item_count": event.item_count,
                 "total_size": event.total_size,
+                "actor_kind": event.actor_kind,
                 "source": event.source,
                 "correlation_id": event.correlation_id,
             },
@@ -190,6 +199,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
                 "media_id": event.media_id,
                 "album_id": event.album_id,
                 "file_size": event.file_size,
+                "actor_kind": event.actor_kind,
                 "source": event.source,
                 "correlation_id": event.correlation_id,
             },
@@ -207,6 +217,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
                 "album_id": event.album_id,
                 "old_title": event.old_title,
                 "new_title": event.new_title,
+                "actor_kind": event.actor_kind,
                 "correlation_id": event.correlation_id,
             },
         )
@@ -222,6 +233,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
             {
                 "album_id": event.album_id,
                 "media_id": event.media_id,
+                "actor_kind": event.actor_kind,
                 "correlation_id": event.correlation_id,
             },
         )
@@ -236,6 +248,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
             event.correlation_id,
             {
                 "album_id": event.album_id,
+                "actor_kind": event.actor_kind,
                 "correlation_id": event.correlation_id,
             },
         )
@@ -252,6 +265,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
                 "album_id": event.album_id,
                 "old_expiry": event.old_expiry,
                 "new_expiry": event.new_expiry,
+                "actor_kind": event.actor_kind,
                 "correlation_id": event.correlation_id,
             },
         )
@@ -267,6 +281,7 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
             {
                 "target_user_id": event.user_id,
                 "deleted_by": event.deleted_by,
+                "actor_kind": event.actor_kind,
                 "album_count": event.album_count,
                 "media_count": event.media_count,
                 "source": event.source,
@@ -335,6 +350,101 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
             },
         )
 
+    async def write_login_failed(event: LoginFailed) -> None:
+        await audit_log.write_audit_event(
+            "login_failed",
+            None,
+            None,
+            "auth",
+            event.login_identifier,
+            event.correlation_id,
+            {
+                "login_identifier": event.login_identifier,
+                "reason": event.reason,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
+    async def write_user_logged_out(event: UserLoggedOut) -> None:
+        await audit_log.write_audit_event(
+            "logout",
+            event.user_id,
+            None,
+            "user",
+            event.user_id,
+            event.correlation_id,
+            {
+                "target_user_id": event.user_id,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
+    async def write_api_key_issued(event: ApiKeyIssued) -> None:
+        await audit_log.write_audit_event(
+            "api_key_issued",
+            event.actor_id,
+            None,
+            "user",
+            event.user_id,
+            event.correlation_id,
+            {
+                "target_user_id": event.user_id,
+                "replaced_existing": event.replaced_existing,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
+    async def write_user_password_changed(event: UserPasswordChanged) -> None:
+        await audit_log.write_audit_event(
+            "user_password_changed",
+            event.actor_id,
+            None,
+            "user",
+            event.user_id,
+            event.correlation_id,
+            {
+                "target_user_id": event.user_id,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
+    async def write_user_admin_status_changed(event: UserAdminStatusChanged) -> None:
+        await audit_log.write_audit_event(
+            "user_admin_status_changed",
+            event.actor_id,
+            None,
+            "user",
+            event.user_id,
+            event.correlation_id,
+            {
+                "target_user_id": event.user_id,
+                "old_is_admin": event.old_is_admin,
+                "new_is_admin": event.new_is_admin,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
+    async def write_user_limits_changed(event: UserLimitsChanged) -> None:
+        await audit_log.write_audit_event(
+            "user_limits_changed",
+            event.actor_id,
+            None,
+            "user",
+            event.user_id,
+            event.correlation_id,
+            {
+                "target_user_id": event.user_id,
+                "changes": event.changes,
+                "source": event.source,
+                "correlation_id": event.correlation_id,
+            },
+        )
+
     async def write_config_changed(event: ConfigChanged) -> None:
         await audit_log.write_audit_event(
             "config_changed",
@@ -365,4 +475,10 @@ def register_audit_listeners(event_bus: EventBus, audit_log: PostgresAuditLog) -
     event_bus.subscribe(UserSuspended, write_user_suspended)
     event_bus.subscribe(UserPasswordReset, write_user_password_reset)
     event_bus.subscribe(AdminLoggedIn, write_admin_logged_in)
+    event_bus.subscribe(LoginFailed, write_login_failed)
+    event_bus.subscribe(UserLoggedOut, write_user_logged_out)
+    event_bus.subscribe(ApiKeyIssued, write_api_key_issued)
+    event_bus.subscribe(UserPasswordChanged, write_user_password_changed)
+    event_bus.subscribe(UserAdminStatusChanged, write_user_admin_status_changed)
+    event_bus.subscribe(UserLimitsChanged, write_user_limits_changed)
     event_bus.subscribe(ConfigChanged, write_config_changed)

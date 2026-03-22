@@ -2,16 +2,18 @@ import asyncio
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
+from uuid import uuid4
 
 import bcrypt
 import pytest
 
 from fastapi import HTTPException
 from imghost.config import Settings
-from imghost.models import Album, User, utcnow
+from imghost.events import ApiKeyIssued, UserAdminStatusChanged, UserLimitsChanged, UserPasswordChanged
+from imghost.models import Album, ApiKey, User, utcnow
 from imghost.storage import StorageStream
 from imghost.payloads import album_to_payload
-from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UploadService, UserCreateInput
+from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UNSET, UploadService, UserCreateInput, UserUpdateInput
 
 
 class DummyRepository:
@@ -19,6 +21,7 @@ class DummyRepository:
         self.user = user
         self.updated_user: User | None = None
         self.created_user: User | None = None
+        self.api_key: ApiKey | None = None
         self.album: Album | None = None
         self.album_media: list[object] = []
 
@@ -56,6 +59,15 @@ class DummyRepository:
         if self.album and self.album.id == album_id:
             return list(self.album_media)
         return []
+
+    async def get_api_key_for_user(self, user_id: str) -> ApiKey | None:
+        if self.api_key and self.api_key.user_id == user_id:
+            return self.api_key
+        return None
+
+    async def upsert_api_key(self, api_key: ApiKey) -> ApiKey:
+        self.api_key = api_key
+        return api_key
 
 
 class DummyStorage:
@@ -200,6 +212,26 @@ def test_change_password_replaces_hash_with_new_bcrypt_hash() -> None:
     assert not bcrypt.checkpw(b"old-pass", updated.password_hash.encode("utf-8"))
 
 
+def test_change_password_emits_audit_event_when_correlation_is_provided() -> None:
+    old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
+    user = make_user(password_hash=old_hash)
+    service, _, event_bus = make_service(user)
+
+    asyncio.run(
+        service.change_password(
+            user,
+            PasswordChangeInput(current_password="old-pass", new_password="new-pass"),
+            correlation_id="pw-change",
+        )
+    )
+
+    assert any(isinstance(event, UserPasswordChanged) for event in event_bus.events)
+    changed = next(event for event in event_bus.events if isinstance(event, UserPasswordChanged))
+    assert changed.user_id == user.id
+    assert changed.actor_id == user.id
+    assert changed.correlation_id == "pw-change"
+
+
 def test_create_user_rejects_password_shorter_than_eight_characters() -> None:
     service, repository, _ = make_service()
 
@@ -257,6 +289,98 @@ def test_verify_password_returns_false_for_invalid_stored_hash() -> None:
     service, _, _ = make_service()
 
     assert service._verify_password("secret-pass", "not-a-bcrypt-hash") is False
+
+
+def test_issue_api_key_emits_event_with_replaced_existing_flag() -> None:
+    old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
+    user = make_user(password_hash=old_hash)
+    service, repository, event_bus = make_service(user)
+    repository.api_key = ApiKey(
+        id=str(uuid4()),
+        user_id=user.id,
+        key_hash="old-hash",
+        created_at=utcnow(),
+        last_used_at=None,
+    )
+
+    issued = asyncio.run(
+        service.issue_api_key(
+            user,
+            correlation_id="rotate-key",
+            actor_id=user.id,
+            source="api",
+        )
+    )
+
+    assert issued.raw_key
+    assert repository.api_key is not None
+    assert any(isinstance(event, ApiKeyIssued) for event in event_bus.events)
+    api_event = next(event for event in event_bus.events if isinstance(event, ApiKeyIssued))
+    assert api_event.user_id == user.id
+    assert api_event.actor_id == user.id
+    assert api_event.replaced_existing is True
+
+
+def test_update_user_emits_admin_status_and_limits_events() -> None:
+    user = make_user(password_hash=bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8"))
+    service, _, event_bus = make_service(user)
+
+    asyncio.run(
+        service.update_user(
+            user.id,
+            UserUpdateInput(
+                is_admin=True,
+                suspended=None,
+                quota_bytes=2048,
+                rate_limit_rpm=12,
+                rate_limit_bph=4096,
+                password=None,
+            ),
+            "user-update-audit",
+            actor_id="admin-1",
+        )
+    )
+
+    admin_event = next(event for event in event_bus.events if isinstance(event, UserAdminStatusChanged))
+    assert admin_event.user_id == user.id
+    assert admin_event.actor_id == "admin-1"
+    assert admin_event.old_is_admin is False
+    assert admin_event.new_is_admin is True
+
+    limits_event = next(event for event in event_bus.events if isinstance(event, UserLimitsChanged))
+    assert limits_event.user_id == user.id
+    assert limits_event.changes == {
+        "quota_bytes": {"old": None, "new": 2048},
+        "rate_limit_rpm": {"old": None, "new": 12},
+        "rate_limit_bph": {"old": None, "new": 4096},
+    }
+
+
+def test_update_user_skips_admin_and_limits_events_when_values_do_not_change() -> None:
+    user = make_user(password_hash=bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8"))
+    user.rate_limit_rpm = 12
+    user.rate_limit_bph = 4096
+    user.quota_bytes = 2048
+    service, _, event_bus = make_service(user)
+
+    asyncio.run(
+        service.update_user(
+            user.id,
+            UserUpdateInput(
+                is_admin=UNSET,
+                suspended=None,
+                quota_bytes=2048,
+                rate_limit_rpm=12,
+                rate_limit_bph=4096,
+                password=None,
+            ),
+            "no-change-audit",
+            actor_id="admin-1",
+        )
+    )
+
+    assert not any(isinstance(event, UserAdminStatusChanged) for event in event_bus.events)
+    assert not any(isinstance(event, UserLimitsChanged) for event in event_bus.events)
 
 
 def test_require_album_access_allows_owner_admin_or_valid_token() -> None:

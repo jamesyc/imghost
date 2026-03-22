@@ -17,6 +17,7 @@ class AlbumCreated:
     album_id: str
     user_id: str | None
     item_count: int
+    actor_kind: str
     source: str
     correlation_id: str
 
@@ -29,6 +30,7 @@ class MediaUploaded:
     file_size: int
     media_type: str
     format: str
+    actor_kind: str
     source: str
     correlation_id: str
 
@@ -38,6 +40,7 @@ class AlbumDeleted:
     album_id: str
     user_id: str | None
     actor_id: str | None
+    actor_kind: str
     item_count: int
     total_size: int
     source: str
@@ -50,6 +53,7 @@ class MediaDeleted:
     album_id: str
     user_id: str | None
     actor_id: str | None
+    actor_kind: str
     file_size: int
     source: str
     correlation_id: str
@@ -60,6 +64,7 @@ class AlbumTitleChanged:
     album_id: str
     user_id: str | None
     actor_id: str | None
+    actor_kind: str
     old_title: str | None
     new_title: str | None
     source: str
@@ -71,6 +76,7 @@ class AlbumCoverSet:
     album_id: str
     user_id: str | None
     actor_id: str | None
+    actor_kind: str
     media_id: str | None
     source: str
     correlation_id: str
@@ -81,6 +87,7 @@ class AlbumReordered:
     album_id: str
     user_id: str | None
     actor_id: str | None
+    actor_kind: str
     source: str
     correlation_id: str
 
@@ -90,6 +97,7 @@ class AlbumExpiryChanged:
     album_id: str
     user_id: str | None
     actor_id: str | None
+    actor_kind: str
     old_expiry: str | None
     new_expiry: str | None
     source: str
@@ -100,6 +108,7 @@ class AlbumExpiryChanged:
 class UserDeleted:
     user_id: str
     actor_id: str | None
+    actor_kind: str
     deleted_by: str
     album_count: int
     media_count: int
@@ -146,6 +155,57 @@ class ConfigChanged:
     actor_id: str | None
     old_value: bool | int | None
     new_value: bool | int | None
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class LoginFailed:
+    login_identifier: str
+    reason: str
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class UserLoggedOut:
+    user_id: str
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class ApiKeyIssued:
+    user_id: str
+    actor_id: str | None
+    replaced_existing: bool
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class UserPasswordChanged:
+    user_id: str
+    actor_id: str | None
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class UserAdminStatusChanged:
+    user_id: str
+    actor_id: str | None
+    old_is_admin: bool
+    new_is_admin: bool
+    source: str
+    correlation_id: str
+
+
+@dataclass(slots=True)
+class UserLimitsChanged:
+    user_id: str
+    actor_id: str | None
+    changes: dict[str, dict[str, int | None]]
     source: str
     correlation_id: str
 

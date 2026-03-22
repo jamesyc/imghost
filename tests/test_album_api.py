@@ -164,6 +164,65 @@ def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
         assert client.get(f"/api/v1/album/{album_id}").status_code == 404
 
 
+def test_anonymous_token_mutations_are_audited_with_delete_token_actor_kind(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="tokenauditadmin", email="tokenauditadmin@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
+            ],
+            data={"title": "Token Audit Album"},
+            headers={"X-Correlation-ID": "anon-upload-audit"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+        delete_token = payload["manage_url"].split("token=")[1]
+        media_id = payload["items"][0]["media_id"]
+
+        media_delete = client.delete(
+            f"/api/v1/media/{media_id}",
+            params={"delete_token": delete_token},
+            headers={"X-Correlation-ID": "anon-media-delete"},
+        )
+        assert media_delete.status_code == 200
+
+        album_delete = client.delete(
+            f"/api/v1/album/{album_id}",
+            params={"delete_token": delete_token},
+            headers={"X-Correlation-ID": "anon-album-delete"},
+        )
+        assert album_delete.status_code == 200
+
+        media_events = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "media_deleted", "correlation_id": "anon-media-delete"},
+        )
+        assert media_events.status_code == 200
+        media_payload = media_events.json()
+        assert len(media_payload) == 1
+        assert media_payload[0]["actor_id"] is None
+        assert media_payload[0]["metadata"]["actor_kind"] == "delete_token"
+
+        album_events = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "album_deleted", "correlation_id": "anon-album-delete"},
+        )
+        assert album_events.status_code == 200
+        album_payload = album_events.json()
+        assert len(album_payload) == 1
+        assert album_payload[0]["actor_id"] is None
+        assert album_payload[0]["metadata"]["actor_kind"] == "delete_token"
+
+
 def test_anonymous_manage_token_can_append_without_csrf_headers_when_no_session_exists(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

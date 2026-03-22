@@ -15,6 +15,7 @@ from fastapi import HTTPException, UploadFile
 
 from .config import Settings
 from .events import (
+    ApiKeyIssued,
     AlbumCoverSet,
     AlbumCreated,
     AlbumDeleted,
@@ -24,7 +25,10 @@ from .events import (
     EventBus,
     MediaDeleted,
     MediaUploaded,
+    UserAdminStatusChanged,
     UserDeleted,
+    UserLimitsChanged,
+    UserPasswordChanged,
     UserPasswordReset,
     UserRegistered,
     UserSuspended,
@@ -146,6 +150,15 @@ class UploadService:
             )
         return password
 
+    def _actor_kind(self, actor_user: User | None, delete_token: str | None = None, *, system: bool = False) -> str:
+        if system:
+            return "system"
+        if actor_user is not None:
+            return "admin" if actor_user.is_admin else "user"
+        if delete_token:
+            return "delete_token"
+        return "anonymous"
+
     async def upload(
         self,
         file: UploadFile,
@@ -237,6 +250,7 @@ class UploadService:
                 album_id=album.id,
                 user_id=actor.user.id if actor.user else None,
                 item_count=0,
+                actor_kind=self._actor_kind(actor.user, delete_token),
                 source=actor.source,
                 correlation_id=correlation_id,
             )
@@ -308,6 +322,7 @@ class UploadService:
                 file_size=media.file_size,
                 media_type=media.media_type,
                 format=media.format,
+                actor_kind=self._actor_kind(actor.user),
                 source=actor.source,
                 correlation_id=correlation_id,
             )
@@ -377,6 +392,7 @@ class UploadService:
                 album_id=deleted_album.id,
                 user_id=deleted_album.user_id,
                 actor_id=actor_user.id if actor_user else None,
+                actor_kind=self._actor_kind(actor_user, delete_token),
                 item_count=len(deleted_media),
                 total_size=sum(item.file_size + (item.thumb_size or 0) for item in deleted_media),
                 source="web",
@@ -415,6 +431,7 @@ class UploadService:
                         album_id=album.id,
                         user_id=album.user_id,
                         actor_id=actor_user.id if actor_user else None,
+                        actor_kind=self._actor_kind(actor_user, delete_token),
                         old_title=old_title,
                         new_title=normalized_title,
                         source="api" if actor_user else "web",
@@ -432,6 +449,7 @@ class UploadService:
                         album_id=album.id,
                         user_id=album.user_id,
                         actor_id=actor_user.id if actor_user else None,
+                        actor_kind=self._actor_kind(actor_user, delete_token),
                         media_id=next_cover,
                         source="api" if actor_user else "web",
                         correlation_id=correlation_id,
@@ -481,6 +499,7 @@ class UploadService:
                 album_id=album.id,
                 user_id=album.user_id,
                 actor_id=actor_user.id if actor_user else None,
+                actor_kind=self._actor_kind(actor_user, delete_token),
                 source="api" if actor_user else "web",
                 correlation_id=correlation_id,
             )
@@ -518,6 +537,7 @@ class UploadService:
                 album_id=deleted_media.album_id,
                 user_id=deleted_media.user_id,
                 actor_id=actor_user.id if actor_user else None,
+                actor_kind=self._actor_kind(actor_user, delete_token),
                 file_size=deleted_media.file_size + (deleted_media.thumb_size or 0),
                 source="api" if actor_user else "web",
                 correlation_id=correlation_id,
@@ -533,6 +553,7 @@ class UploadService:
                         album_id=deleted_album.id,
                         user_id=deleted_album.user_id,
                         actor_id=actor_user.id if actor_user else None,
+                        actor_kind=self._actor_kind(actor_user, delete_token),
                         item_count=0,
                         total_size=0,
                         source="api" if actor_user else "web",
@@ -615,6 +636,7 @@ class UploadService:
                     album_id=deleted_album.id,
                     user_id=deleted_album.user_id,
                     actor_id=None,
+                    actor_kind=self._actor_kind(None, system=True),
                     item_count=len(deleted_media),
                     total_size=self._storage_bytes_for_media(deleted_media),
                     source="system",
@@ -738,7 +760,15 @@ class UploadService:
             "has_more": offset + len(items) < total,
         }
 
-    async def issue_api_key(self, user: User) -> ApiKeyIssueResult:
+    async def issue_api_key(
+        self,
+        user: User,
+        *,
+        correlation_id: str | None = None,
+        actor_id: str | None = None,
+        source: str = "api",
+    ) -> ApiKeyIssueResult:
+        replaced_existing = await self.repository.get_api_key_for_user(user.id) is not None
         raw_key = secrets.token_hex(16)
         api_key = ApiKey(
             id=str(uuid4()),
@@ -748,6 +778,16 @@ class UploadService:
             last_used_at=None,
         )
         await self.repository.upsert_api_key(api_key)
+        if correlation_id is not None:
+            await self.event_bus.emit(
+                ApiKeyIssued(
+                    user_id=user.id,
+                    actor_id=actor_id if actor_id is not None else user.id,
+                    replaced_existing=replaced_existing,
+                    source=source,
+                    correlation_id=correlation_id,
+                )
+            )
         return ApiKeyIssueResult(api_key=api_key, raw_key=raw_key)
 
     async def list_users_with_usage(self) -> list[dict[str, object]]:
@@ -924,8 +964,22 @@ class UploadService:
         if user is None:
             raise HTTPException(status_code=404, detail="User not found.")
 
+        limits_changes: dict[str, dict[str, int | None]] = {}
         if payload.is_admin is not UNSET:
-            user.is_admin = bool(payload.is_admin)
+            next_is_admin = bool(payload.is_admin)
+            if next_is_admin != user.is_admin:
+                old_is_admin = user.is_admin
+                user.is_admin = next_is_admin
+                await self.event_bus.emit(
+                    UserAdminStatusChanged(
+                        user_id=user.id,
+                        actor_id=actor_id,
+                        old_is_admin=old_is_admin,
+                        new_is_admin=next_is_admin,
+                        source="api",
+                        correlation_id=correlation_id,
+                    )
+                )
         if payload.suspended is not None and payload.suspended != user.suspended:
             user.suspended = payload.suspended
             await self.event_bus.emit(
@@ -938,17 +992,32 @@ class UploadService:
                 )
             )
         if payload.quota_bytes is not UNSET:
-            user.quota_bytes = payload.quota_bytes if payload.quota_bytes is None or isinstance(payload.quota_bytes, int) else None
+            next_quota = payload.quota_bytes if payload.quota_bytes is None or isinstance(payload.quota_bytes, int) else None
+            if next_quota != user.quota_bytes:
+                limits_changes["quota_bytes"] = {"old": user.quota_bytes, "new": next_quota}
+                user.quota_bytes = next_quota
         if payload.rate_limit_rpm is not UNSET:
-            user.rate_limit_rpm = (
-                payload.rate_limit_rpm if payload.rate_limit_rpm is None or isinstance(payload.rate_limit_rpm, int) else None
-            )
+            next_rpm = payload.rate_limit_rpm if payload.rate_limit_rpm is None or isinstance(payload.rate_limit_rpm, int) else None
+            if next_rpm != user.rate_limit_rpm:
+                limits_changes["rate_limit_rpm"] = {"old": user.rate_limit_rpm, "new": next_rpm}
+                user.rate_limit_rpm = next_rpm
         if payload.rate_limit_bph is not UNSET:
-            user.rate_limit_bph = (
-                payload.rate_limit_bph if payload.rate_limit_bph is None or isinstance(payload.rate_limit_bph, int) else None
-            )
+            next_bph = payload.rate_limit_bph if payload.rate_limit_bph is None or isinstance(payload.rate_limit_bph, int) else None
+            if next_bph != user.rate_limit_bph:
+                limits_changes["rate_limit_bph"] = {"old": user.rate_limit_bph, "new": next_bph}
+                user.rate_limit_bph = next_bph
         if payload.password is not None:
             user.password_hash = self._hash_password(self._require_password_value(payload.password, label="Password"))
+        if limits_changes:
+            await self.event_bus.emit(
+                UserLimitsChanged(
+                    user_id=user.id,
+                    actor_id=actor_id,
+                    changes=limits_changes,
+                    source="api",
+                    correlation_id=correlation_id,
+                )
+            )
         user.updated_at = utcnow()
         await self.repository.update_user(user)
         return user
@@ -972,7 +1041,14 @@ class UploadService:
         )
         return user
 
-    async def change_password(self, user: User, payload: PasswordChangeInput) -> User:
+    async def change_password(
+        self,
+        user: User,
+        payload: PasswordChangeInput,
+        *,
+        correlation_id: str | None = None,
+        source: str = "api",
+    ) -> User:
         if user.password_hash is None:
             raise HTTPException(status_code=400, detail="Password login is not configured for this user.")
         if not self._verify_password(payload.current_password, user.password_hash):
@@ -980,6 +1056,15 @@ class UploadService:
         user.password_hash = self._hash_password(self._require_password_value(payload.new_password, label="New password"))
         user.updated_at = utcnow()
         await self.repository.update_user(user)
+        if correlation_id is not None:
+            await self.event_bus.emit(
+                UserPasswordChanged(
+                    user_id=user.id,
+                    actor_id=user.id,
+                    source=source,
+                    correlation_id=correlation_id,
+                )
+            )
         return user
 
     async def authenticate_local_user(self, payload: LocalLoginInput) -> User:
@@ -1152,6 +1237,7 @@ class UploadService:
                         album_id=album.id,
                         user_id=album.user_id,
                         actor_id=actor_id,
+                        actor_kind="admin",
                         old_expiry=old_expiry,
                         new_expiry=new_expiry,
                         source="api",
@@ -1201,6 +1287,7 @@ class UploadService:
             UserDeleted(
                 user_id=deleted_user.id,
                 actor_id=actor_id,
+                actor_kind="admin" if deleted_by == "admin" else ("user" if deleted_by == "self" else "system"),
                 deleted_by=deleted_by,
                 album_count=len(deleted_albums),
                 media_count=len(deleted_media),

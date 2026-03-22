@@ -885,6 +885,49 @@ def test_admin_audit_log_tracks_events_and_supports_filters(tmp_path, monkeypatc
         assert forbidden.status_code == 403
 
 
+def test_admin_user_role_and_limits_changes_are_audited(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="auditchangeadmin", email="auditchangeadmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="auditroleuser", email="auditroleuser@example.com")
+
+    with TestClient(app) as client:
+        patched = client.patch(
+            f"/api/v1/admin/users/{user_id}",
+            headers={"Authorization": f"Bearer {admin_key}", "X-Correlation-ID": "audit-role-limits"},
+            json={"is_admin": True, "quota_bytes": 2048, "rate_limit_rpm": 12, "rate_limit_bph": 3456},
+        )
+        assert patched.status_code == 200
+        assert patched.json()["is_admin"] is True
+
+        role_events = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "user_admin_status_changed", "correlation_id": "audit-role-limits"},
+        )
+        assert role_events.status_code == 200
+        role_payload = role_events.json()
+        assert len(role_payload) == 1
+        assert role_payload[0]["actor_id"] == admin_id
+        assert role_payload[0]["target_id"] == user_id
+        assert role_payload[0]["metadata"]["old_is_admin"] is False
+        assert role_payload[0]["metadata"]["new_is_admin"] is True
+
+        limits_events = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "user_limits_changed", "correlation_id": "audit-role-limits"},
+        )
+        assert limits_events.status_code == 200
+        limits_payload = limits_events.json()
+        assert len(limits_payload) == 1
+        changes = limits_payload[0]["metadata"]["changes"]
+        assert changes["quota_bytes"] == {"old": None, "new": 2048}
+        assert changes["rate_limit_rpm"] == {"old": None, "new": 12}
+        assert changes["rate_limit_bph"] == {"old": None, "new": 3456}
+
+
 def test_admin_audit_listing_supports_limit_offset_and_validation_contract(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

@@ -7,6 +7,7 @@ from imghost.main import app
 from .helpers import (
     PNG_1X1,
     browser_session_headers,
+    create_admin_and_api_key,
     create_user_and_api_key,
     get_album_record,
     get_media_record,
@@ -428,7 +429,8 @@ def test_api_key_can_rotate_and_delete_album_via_delete(tmp_path, monkeypatch, c
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
 
-    _, api_key = create_user_and_api_key(capsys, username="carol", email="carol@example.com")
+    _, admin_key = create_admin_and_api_key(capsys, username="userauditwatcher", email="userauditwatcher@example.com")
+    user_id, api_key = create_user_and_api_key(capsys, username="carol", email="carol@example.com")
 
     with TestClient(app) as client:
         upload = client.post(
@@ -453,6 +455,18 @@ def test_api_key_can_rotate_and_delete_album_via_delete(tmp_path, monkeypatch, c
         )
         assert delete.status_code == 200
         assert delete.json()["deleted"] is True
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "api_key_issued"},
+        )
+        assert audit.status_code == 200
+        issued_events = [item for item in audit.json() if item["target_id"] == user_id]
+        assert issued_events
+        latest = issued_events[0]
+        assert latest["actor_id"] == user_id
+        assert latest["metadata"]["replaced_existing"] is True
 
 
 def test_sharex_config_download_embeds_active_api_key(tmp_path, monkeypatch, capsys) -> None:
@@ -479,6 +493,8 @@ def test_sharex_config_download_from_browser_session_auto_issues_api_key(tmp_pat
     monkeypatch.setenv("BASE_URL", "https://testserver")
     monkeypatch.setenv("SECRET_KEY", "test-secret")
 
+    _, admin_key = create_admin_and_api_key(capsys, username="sharexauditadmin", email="sharexauditadmin@example.com")
+
     with TestClient(app, base_url="https://testserver") as client:
         registered = client.post(
             "/api/v1/auth/register",
@@ -500,6 +516,18 @@ def test_sharex_config_download_from_browser_session_auto_issues_api_key(tmp_pat
         me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {issued_api_key}"})
         assert me.status_code == 200
         assert me.json()["username"] == "sharexsession"
+        user_id = me.json()["id"]
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "api_key_issued"},
+        )
+        assert audit.status_code == 200
+        sharex_events = [item for item in audit.json() if item["target_id"] == user_id]
+        assert sharex_events
+        assert sharex_events[0]["metadata"]["replaced_existing"] is False
+        assert sharex_events[0]["metadata"]["source"] == "sharex"
 
 
 def test_current_user_summary_without_api_key_reports_null_api_key_metadata(tmp_path, monkeypatch) -> None:
@@ -595,6 +623,7 @@ def test_browser_session_password_change_requires_old_password_and_enables_new_l
     monkeypatch.setenv("BASE_URL", "https://testserver")
     monkeypatch.setenv("SECRET_KEY", "test-secret")
 
+    _, admin_key = create_admin_and_api_key(capsys, username="passwordauditadmin", email="passwordauditadmin@example.com")
     user_id, _ = create_user_and_api_key(capsys, username="passwordbrowser", email="passwordbrowser@example.com")
 
     with TestClient(app, base_url="https://testserver") as client:
@@ -619,6 +648,16 @@ def test_browser_session_password_change_requires_old_password_and_enables_new_l
         )
         assert good.status_code == 200
         assert good.json()["updated"] is True
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "user_password_changed"},
+        )
+        assert audit.status_code == 200
+        changed_events = [item for item in audit.json() if item["target_id"] == user_id]
+        assert changed_events
+        assert changed_events[0]["actor_id"] == user_id
 
         client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
 

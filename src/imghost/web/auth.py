@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from ..events import AdminLoggedIn
+from ..events import AdminLoggedIn, LoginFailed, UserLoggedOut
 from ..service import LocalLoginInput, UserCreateInput
 from ..sessions import SessionBackendUnavailable
 from .auth_context import (
@@ -34,9 +34,26 @@ class RegistrationRequest(BaseModel):
 async def login(request: Request, payload: LoginRequest) -> JSONResponse:
     state = get_state(request)
     cid = correlation_id(request)
-    user = await state.uploads.authenticate_local_user(
-        LocalLoginInput(login=payload.login, password=payload.password)
-    )
+    normalized_login = payload.login.strip()
+    try:
+        user = await state.uploads.authenticate_local_user(
+            LocalLoginInput(login=payload.login, password=payload.password)
+        )
+    except HTTPException as exc:
+        reason = "invalid_credentials"
+        if exc.status_code == 400:
+            reason = "missing_credentials"
+        elif exc.status_code == 403:
+            reason = "suspended"
+        await state.event_bus.emit(
+            LoginFailed(
+                login_identifier=normalized_login,
+                reason=reason,
+                source="web",
+                correlation_id=cid,
+            )
+        )
+        raise
     if user.is_admin:
         await state.event_bus.emit(
             AdminLoggedIn(
@@ -86,7 +103,21 @@ async def register(request: Request, payload: RegistrationRequest) -> JSONRespon
 @router.post("/api/v1/auth/logout")
 async def logout(request: Request) -> JSONResponse:
     state = get_state(request)
+    cid = correlation_id(request)
+    user = None
+    try:
+        user = await authenticated_user(request, required=False)
+    except HTTPException:
+        user = None
     await state.session_backend.clear_session(request.cookies.get(state.settings.session_cookie_name))
-    response = JSONResponse({"authenticated": False}, headers={"X-Correlation-ID": correlation_id(request)})
+    if user is not None:
+        await state.event_bus.emit(
+            UserLoggedOut(
+                user_id=user.id,
+                source="web",
+                correlation_id=cid,
+            )
+        )
+    response = JSONResponse({"authenticated": False}, headers={"X-Correlation-ID": cid})
     clear_session_cookie(response, state.settings)
     return response

@@ -272,6 +272,96 @@ def test_non_admin_local_login_does_not_write_admin_login_audit_event(tmp_path, 
         assert audit.json() == []
 
 
+def test_failed_login_attempts_are_audited_with_coarse_reasons(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="auditwatcher", email="auditwatcher@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="failedloginuser", email="failedlogin@example.com")
+
+    with TestClient(app) as client:
+        set_user_password(client, user_id, "correct-pass")
+
+        bad_password = client.post(
+            "/api/v1/auth/login",
+            headers={"X-Correlation-ID": "bad-password-flow"},
+            json={"login": "failedloginuser", "password": "wrong-pass"},
+        )
+        assert bad_password.status_code == 401
+
+        missing_user = client.post(
+            "/api/v1/auth/login",
+            headers={"X-Correlation-ID": "missing-user-flow"},
+            json={"login": "no-such-user", "password": "wrong-pass"},
+        )
+        assert missing_user.status_code == 401
+
+        suspended = client.patch(
+            f"/api/v1/admin/users/{user_id}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"suspended": True},
+        )
+        assert suspended.status_code == 200
+
+        suspended_login = client.post(
+            "/api/v1/auth/login",
+            headers={"X-Correlation-ID": "suspended-flow"},
+            json={"login": "failedlogin@example.com", "password": "correct-pass"},
+        )
+        assert suspended_login.status_code == 403
+
+        for correlation_id, identifier, reason in (
+            ("bad-password-flow", "failedloginuser", "invalid_credentials"),
+            ("missing-user-flow", "no-such-user", "invalid_credentials"),
+            ("suspended-flow", "failedlogin@example.com", "suspended"),
+        ):
+            audit = client.get(
+                "/api/v1/admin/audit",
+                headers={"Authorization": f"Bearer {admin_key}"},
+                params={"event_type": "login_failed", "correlation_id": correlation_id},
+            )
+            assert audit.status_code == 200
+            payload = audit.json()
+            assert len(payload) == 1
+            assert payload[0]["target_type"] == "auth"
+            assert payload[0]["target_id"] == identifier
+            assert payload[0]["metadata"]["login_identifier"] == identifier
+            assert payload[0]["metadata"]["reason"] == reason
+
+
+def test_logout_writes_audit_event_for_authenticated_browser_session(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="logoutauditadmin", email="logoutauditadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, admin_id, "admin-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "logoutauditadmin", "password": "admin-pass"},
+        )
+        assert login.status_code == 200
+
+        logout = client.post(
+            "/api/v1/auth/logout",
+            headers={"X-Correlation-ID": "logout-flow", **browser_session_headers("https://testserver", "/")},
+        )
+        assert logout.status_code == 200
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "logout", "actor_id": admin_id, "correlation_id": "logout-flow"},
+        )
+        assert audit.status_code == 200
+        payload = audit.json()
+        assert len(payload) == 1
+        assert payload[0]["target_id"] == admin_id
+        assert payload[0]["metadata"]["target_user_id"] == admin_id
+
+
 def test_registration_creates_user_session_and_audit_entry(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

@@ -40,13 +40,14 @@ async def get_current_user_albums(request: Request, limit: int = 10, offset: int
 async def regenerate_api_key(request: Request) -> JSONResponse:
     state = get_state(request)
     user = await authenticated_user(request, required=True)
-    issued = await state.uploads.issue_api_key(user)
+    cid = correlation_id(request)
+    issued = await state.uploads.issue_api_key(user, correlation_id=cid, actor_id=user.id, source="api")
     return JSONResponse(
         {
             "api_key": issued.raw_key,
             "created_at": issued.api_key.created_at.isoformat(),
         },
-        headers={"X-Correlation-ID": correlation_id(request)},
+        headers={"X-Correlation-ID": cid},
     )
 
 
@@ -61,6 +62,8 @@ async def change_current_user_password(request: Request, payload: UserPasswordPa
             current_password=payload.current_password,
             new_password=payload.new_password,
         ),
+        correlation_id=cid,
+        source="api",
     )
     return JSONResponse({"updated": True}, headers={"X-Correlation-ID": cid})
 
@@ -71,7 +74,12 @@ async def download_sharex_config(request: Request) -> Response:
     state = get_state(request)
     raw_api_key = principal.raw_api_key
     if raw_api_key is None:
-        issued = await state.uploads.issue_api_key(principal.user)
+        issued = await state.uploads.issue_api_key(
+            principal.user,
+            correlation_id=correlation_id(request),
+            actor_id=principal.user.id,
+            source="sharex",
+        )
         raw_api_key = issued.raw_key
     base_url = public_base_url(request, state.settings)
     payload = {
