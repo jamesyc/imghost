@@ -25,7 +25,7 @@ def test_album_patch_reorder_and_media_delete_require_token(tmp_path, monkeypatc
         assert response.status_code == 200
         payload = response.json()
         album_id = payload["album_id"]
-        delete_token = payload["delete_url"].split("delete_token=")[1]
+        delete_token = payload["manage_url"].split("token=")[1]
         media_ids = [item["media_id"] for item in payload["items"]]
 
         forbidden_patch = client.patch(f"/api/v1/album/{album_id}", json={"title": "Edited"})
@@ -94,8 +94,7 @@ def test_authenticated_owner_and_admin_can_manage_album_without_delete_token(tmp
         payload = response.json()
         album_id = payload["album_id"]
         media_ids = [item["media_id"] for item in payload["items"]]
-        assert payload["delete_url"].endswith(f"/api/v1/album/{album_id}/delete")
-        assert "delete_token=" not in payload["delete_url"]
+        assert payload["manage_url"] is None
 
         stranger_patch = client.patch(
             f"/api/v1/album/{album_id}",
@@ -153,7 +152,7 @@ def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
         payload = response.json()
         media_id = payload["media_id"]
         album_id = payload["album_id"]
-        delete_token = payload["delete_url"].split("delete_token=")[1]
+        delete_token = payload["manage_url"].split("token=")[1]
 
         delete_response = client.delete(
             f"/api/v1/media/{media_id}",
@@ -179,7 +178,7 @@ def test_anonymous_manage_token_can_append_without_csrf_headers_when_no_session_
         assert created.status_code == 200
         payload = created.json()
         album_id = payload["album_id"]
-        delete_token = payload["delete_url"].split("delete_token=")[1]
+        delete_token = payload["manage_url"].split("token=")[1]
 
         appended = client.post(
             "/api/v1/upload",
@@ -214,7 +213,7 @@ def test_delete_token_cannot_mutate_a_different_album(tmp_path, monkeypatch) -> 
 
         first_payload = first.json()
         second_payload = second.json()
-        wrong_token = first_payload["delete_url"].split("delete_token=")[1]
+        wrong_token = first_payload["manage_url"].split("token=")[1]
         second_album_id = second_payload["album_id"]
         second_media_id = second_payload["media_id"]
 
@@ -249,7 +248,7 @@ def test_manage_token_with_browser_session_but_no_same_origin_headers_is_blocked
         )
         assert created.status_code == 200
         payload = created.json()
-        delete_token = payload["delete_url"].split("delete_token=")[1]
+        delete_token = payload["manage_url"].split("token=")[1]
 
         registered = client.post(
             "/api/v1/auth/register",
@@ -287,7 +286,7 @@ def test_manage_token_with_browser_session_and_same_origin_headers_still_works(t
         assert created.status_code == 200
         payload = created.json()
         album_id = payload["album_id"]
-        delete_token = payload["delete_url"].split("delete_token=")[1]
+        delete_token = payload["manage_url"].split("token=")[1]
         media_ids = [item["media_id"] for item in payload["items"]]
 
         registered = client.post(

@@ -297,17 +297,7 @@ def test_album_to_payload_omits_delete_token_by_default() -> None:
     )()
 
     payload = album_to_payload("http://testserver", album, [media_item])
-    assert payload["delete_url"] == "http://testserver/api/v1/album/album-3/delete"
-
-    payload_with_token = album_to_payload(
-        "http://testserver",
-        album,
-        [media_item],
-        include_delete_token=True,
-    )
-    assert payload_with_token["delete_url"] == (
-        "http://testserver/api/v1/album/album-3/delete?delete_token=secret-token"
-    )
+    assert "delete_url" not in payload
 
 
 def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -> None:

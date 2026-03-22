@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlencode
 
 
 def media_url(base_url: str, media_id: str, fmt: str) -> str:
@@ -29,16 +28,6 @@ def compatibility_warning(item: Any) -> str | None:
     if item.codec_hint == "vp9" and item.format == "webm":
         return "This video may not play in older Safari. Try Chrome or Firefox."
     return None
-
-
-def album_delete_url(base_url: str, album: Any, *, include_token: bool = False) -> str | None:
-    path = f"{base_url}/api/v1/album/{album.id}/delete"
-    if not album.delete_token or not include_token:
-        return path
-    query = urlencode({"delete_token": album.delete_token})
-    return f"{path}?{query}"
-
-
 def resolve_cover_media(album: Any, media_items: list[Any]) -> Any | None:
     if album.cover_media_id:
         for item in media_items:
@@ -51,8 +40,6 @@ def album_to_payload(
     base_url: str,
     album: Any,
     media_items: list[Any],
-    *,
-    include_delete_token: bool = False,
 ) -> dict[str, Any]:
     cover = resolve_cover_media(album, media_items)
     return {
@@ -62,7 +49,6 @@ def album_to_payload(
         "created_at": album.created_at.isoformat(),
         "updated_at": album.updated_at.isoformat(),
         "expires_at": album.expires_at.isoformat() if album.expires_at else None,
-        "delete_url": album_delete_url(base_url, album, include_token=include_delete_token),
         "item_count": len(media_items),
         "total_size": sum(item.file_size for item in media_items),
         "cover_url": media_url(base_url, cover.id, cover.format) if cover else None,

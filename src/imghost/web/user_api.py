@@ -87,7 +87,6 @@ async def download_sharex_config(request: Request) -> Response:
         "FileFormName": "file",
         "URL": "$json:media_url$",
         "ThumbnailURL": "$json:thumb_url$",
-        "DeletionURL": "$json:delete_url$",
     }
     return Response(
         content=JSONResponse(payload).body,

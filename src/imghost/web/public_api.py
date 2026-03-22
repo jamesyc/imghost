@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
-from ..payloads import album_delete_url, album_to_payload, media_url, thumb_format, thumb_url
+from ..payloads import album_to_payload, media_url, thumb_format, thumb_url
 from ..public_origin import public_base_url
 from ..service import CurrentActor, UNSET
 from .auth_context import authenticated_user
@@ -66,7 +66,6 @@ async def upload(
         "media_id": primary.media.id,
         "media_url": media_url(base_url, primary.media.id, primary.media.format),
         "thumb_url": thumb_url(base_url, primary.media.id, primary.media.format),
-        "delete_url": album_delete_url(base_url, primary.album, include_token=True),
         "manage_url": album_manage_url(base_url, primary.album, include_token=True) if primary.album.delete_token else None,
         "expires_at": primary.album.expires_at.isoformat() if primary.album.expires_at else None,
         "items": [
@@ -128,11 +127,6 @@ async def delete_album(request: Request, album_id: str, delete_token: str | None
         },
         headers={"X-Correlation-ID": cid},
     )
-
-
-@router.get("/api/v1/album/{album_id}/delete")
-async def delete_album_via_get(request: Request, album_id: str, delete_token: str | None = None) -> JSONResponse:
-    return await delete_album(request, album_id, delete_token)
 
 
 @router.patch("/api/v1/album/{album_id}")

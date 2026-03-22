@@ -32,15 +32,14 @@ This is a human-oriented map of the main routes. It is not meant to replace gene
 - `GET /api/v1/album/{album_id}`
 - `GET /api/v1/album/{album_id}/zip`
 - `DELETE /api/v1/album/{album_id}`
-- `GET /api/v1/album/{album_id}/delete`
 - `PATCH /api/v1/album/{album_id}`
 - `PATCH /api/v1/album/{album_id}/order`
 - `DELETE /api/v1/media/{media_id}`
 
 Anonymous/public mutation rules:
 
-- anonymous albums receive a `delete_url` with `delete_token`
-- `delete_token` can authorize album delete, album patch, album reorder, and media delete for anonymous/public albums
+- anonymous albums receive a `manage_url` with `token`
+- that token can authorize album delete, album patch, album reorder, and media delete for anonymous/public albums
 - authenticated owners and admins can perform the same mutations without `delete_token`
 
 ## Current-user APIs

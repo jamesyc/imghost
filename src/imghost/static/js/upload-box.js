@@ -250,7 +250,7 @@ window.attachUploadBox = ({
       }
 
       if (!isAuthenticated && data.album_id) {
-        const deleteToken = window.imghostAnonAlbums?.deleteTokenFromDeleteUrl?.(data.delete_url || "");
+        const deleteToken = window.imghostAnonAlbums?.deleteTokenFromManageUrl?.(data.manage_url || "");
         if (deleteToken) {
           window.imghostAnonAlbums?.remember?.({ albumId: data.album_id, deleteToken });
         }

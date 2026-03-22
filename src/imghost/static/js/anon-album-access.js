@@ -21,19 +21,19 @@
 
   const manageUrl = (albumId, deleteToken) => `/manage/${encodeURIComponent(albumId)}?token=${encodeURIComponent(deleteToken)}`;
 
-  const deleteTokenFromDeleteUrl = (deleteUrl) => {
-    if (!deleteUrl) {
+  const deleteTokenFromManageUrl = (manageUrl) => {
+    if (!manageUrl) {
       return "";
     }
     try {
-      return new URL(deleteUrl, window.location.origin).searchParams.get("delete_token") || "";
+      return new URL(manageUrl, window.location.origin).searchParams.get("token") || "";
     } catch {
       return "";
     }
   };
 
   window.imghostAnonAlbums = {
-    deleteTokenFromDeleteUrl,
+    deleteTokenFromManageUrl,
     manageUrl,
     remember({ albumId, deleteToken }) {
       if (!albumId || !deleteToken) {

@@ -27,6 +27,7 @@
   --accent-danger: linear-gradient(135deg, #d86f76 0%, #cb565f 100%);
   --accent-ghost: rgba(255, 255, 255, 0.24);
   --button-text: #f8fbff;
+  --warning-banner-fg: #7f520f;
   --canvas-a: rgba(220, 205, 184, 0.62);
   --canvas-b: rgba(163, 198, 239, 0.62);
   --canvas-c: rgba(67, 126, 217, 0.3);
@@ -52,6 +53,7 @@
   --accent-danger: linear-gradient(135deg, #e18484 0%, #c85f67 100%);
   --accent-ghost: rgba(255, 255, 255, 0.08);
   --button-text: #f8fbff;
+  --warning-banner-fg: #f1d6a0;
   --shadow-card: 0 32px 90px rgba(0, 0, 0, 0.42);
   --shadow-soft: 0 18px 60px rgba(0, 0, 0, 0.28);
   --canvas-a: rgba(14, 16, 22, 0.92);
@@ -1033,7 +1035,7 @@ body.upload-modal-open {
   border: 1px solid rgba(227, 180, 96, 0.32);
   border-radius: 16px;
   background: rgba(121, 82, 18, 0.08);
-  color: #f1d6a0;
+  color: var(--warning-banner-fg);
 }
 
 .public-album-item {

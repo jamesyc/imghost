@@ -193,7 +193,7 @@ def test_upload_uses_forwarded_public_origin_for_generated_urls(tmp_path, monkey
         assert payload["album_url"].startswith("https://imghost.b.example/")
         assert payload["media_url"].startswith("https://imghost.b.example/")
         assert payload["thumb_url"].startswith("https://imghost.b.example/")
-        assert payload["delete_url"].startswith("https://imghost.b.example/")
+        assert payload["manage_url"].startswith("https://imghost.b.example/")
 
 
 def test_upload_rejects_untrusted_forwarded_public_origin_and_falls_back_to_base_url(tmp_path, monkeypatch) -> None:
@@ -217,7 +217,7 @@ def test_upload_rejects_untrusted_forwarded_public_origin_and_falls_back_to_base
         assert payload["album_url"].startswith("https://fallback.example.com/")
         assert payload["media_url"].startswith("https://fallback.example.com/")
         assert payload["thumb_url"].startswith("https://fallback.example.com/")
-        assert payload["delete_url"].startswith("https://fallback.example.com/")
+        assert payload["manage_url"].startswith("https://fallback.example.com/")
 
 
 def test_upload_rejects_malformed_forwarded_public_origin_and_falls_back_to_base_url(tmp_path, monkeypatch) -> None:

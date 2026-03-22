@@ -39,7 +39,6 @@ def test_expected_routes_are_registered() -> None:
         "/api/v1/upload": {"POST"},
         "/api/v1/album/{album_id}": {"GET", "DELETE", "PATCH"},
         "/api/v1/album/{album_id}/zip": {"GET"},
-        "/api/v1/album/{album_id}/delete": {"GET"},
         "/api/v1/album/{album_id}/order": {"PATCH"},
         "/api/v1/media/{media_id}": {"DELETE"},
         "/api/v1/user/me": {"GET", "DELETE"},

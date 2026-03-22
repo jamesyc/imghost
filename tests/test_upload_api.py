@@ -24,16 +24,16 @@ def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
         payload = response.json()
         album_id = payload["album_id"]
         media_id = payload["items"][0]["media_id"]
-        delete_url = payload["delete_url"]
         manage_url = payload["manage_url"]
         assert payload["items"][0]["thumb_status"] in {"pending", "processing", "done"}
-        assert manage_url == f"http://testserver/manage/{album_id}?token={delete_url.split('delete_token=')[1]}"
+        assert manage_url.startswith(f"http://testserver/manage/{album_id}?token=")
+        delete_token = manage_url.split("token=")[1]
 
         album_response = client.get(f"/api/v1/album/{album_id}")
         assert album_response.status_code == 200
         assert album_response.json()["title"] == "V1 Album"
         assert album_response.json()["item_count"] == 1
-        assert "delete_token=" not in album_response.json()["delete_url"]
+        assert "delete_url" not in album_response.json()
 
         media_response = client.get(f"/i/{media_id}.png")
         assert media_response.status_code == 200
@@ -62,7 +62,7 @@ def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
         forbidden_delete = client.delete(f"/api/v1/album/{album_id}")
         assert forbidden_delete.status_code == 403
 
-        delete_response = client.get(delete_url.replace("http://testserver", ""))
+        delete_response = client.delete(f"/api/v1/album/{album_id}", params={"delete_token": delete_token})
         assert delete_response.status_code == 200
         assert delete_response.json()["deleted"] is True
 
@@ -96,7 +96,7 @@ def test_multi_file_upload_reuses_album_and_delete_removes_media(tmp_path, monke
 
         delete_response = client.delete(
             f"/api/v1/album/{payload['album_id']}",
-            params={"delete_token": payload["delete_url"].split("delete_token=")[1]},
+            params={"delete_token": payload["manage_url"].split("token=")[1]},
         )
         assert delete_response.status_code == 200
 
@@ -117,7 +117,7 @@ def test_anonymous_manage_token_can_append_and_edit_album(tmp_path, monkeypatch)
         )
         assert created.status_code == 200
         payload = created.json()
-        delete_token = payload["delete_url"].split("delete_token=")[1]
+        delete_token = payload["manage_url"].split("token=")[1]
 
         appended = client.post(
             "/api/v1/upload",

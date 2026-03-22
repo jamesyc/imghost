@@ -38,7 +38,6 @@ def test_api_key_upload_creates_user_album_and_current_user_view(tmp_path, monke
         )
         assert response.status_code == 200
         payload = response.json()
-        assert "delete_token=" not in payload["delete_url"]
         assert payload["manage_url"] is None
         wait_for_thumbnail(client, payload["media_id"])
 
@@ -385,8 +384,7 @@ def test_api_key_upload_can_create_multi_file_album_and_append_to_existing_owned
         album_id = payload["album_id"]
         media_ids = [item["media_id"] for item in payload["items"]]
         assert len(media_ids) == 2
-        assert payload["delete_url"].endswith(f"/api/v1/album/{album_id}/delete")
-        assert "delete_token=" not in payload["delete_url"]
+        assert payload["manage_url"] is None
 
         album_response = client.get(f"/api/v1/album/{album_id}")
         assert album_response.status_code == 200
@@ -426,7 +424,7 @@ def test_api_key_upload_can_create_multi_file_album_and_append_to_existing_owned
         assert forbidden.json()["detail"] == "Album does not belong to authenticated user."
 
 
-def test_api_key_can_rotate_and_delete_album_via_get(tmp_path, monkeypatch, capsys) -> None:
+def test_api_key_can_rotate_and_delete_album_via_delete(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
 
@@ -449,8 +447,8 @@ def test_api_key_can_rotate_and_delete_album_via_get(tmp_path, monkeypatch, caps
         old_me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {api_key}"})
         assert old_me.status_code == 401
 
-        delete = client.get(
-            f"/api/v1/album/{payload['album_id']}/delete",
+        delete = client.delete(
+            f"/api/v1/album/{payload['album_id']}",
             headers={"Authorization": f"Bearer {new_api_key}"},
         )
         assert delete.status_code == 200
@@ -473,7 +471,7 @@ def test_sharex_config_download_embeds_active_api_key(tmp_path, monkeypatch, cap
         payload = response.json()
         assert payload["RequestURL"] == "http://testserver/api/v1/upload"
         assert payload["Headers"]["Authorization"] == f"Bearer {api_key}"
-        assert payload["DeletionURL"] == "$json:delete_url$"
+        assert "DeletionURL" not in payload
 
 
 def test_sharex_config_download_from_browser_session_auto_issues_api_key(tmp_path, monkeypatch, capsys) -> None:

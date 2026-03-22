@@ -456,7 +456,7 @@ def test_anonymous_manage_page_reuses_album_workspace_shell(tmp_path, monkeypatc
         )
         assert upload.status_code == 200
         payload = upload.json()
-        token = payload["delete_url"].split("delete_token=")[1]
+        token = payload["manage_url"].split("token=")[1]
 
         page = client.get(f"/manage/{payload['album_id']}", params={"token": token})
         assert page.status_code == 200
