@@ -15,6 +15,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 THUMB_WIDTH = 375
 ANIMATED_ORIGINAL_THRESHOLD_BYTES = 2 * 1024 * 1024
+ANIMATED_THUMB_MAX_SOURCE_FRAMES = 100
 VIDEO_PROBE_TIMEOUT_SECS = 20
 VIDEO_REMUX_TIMEOUT_SECS = 60
 VIDEO_SINGLE_FRAME_TIMEOUT_SECS = 30
@@ -99,7 +100,8 @@ class PillowProcessor(MediaProcessor):
         try:
             with Image.open(BytesIO(payload)) as image:
                 width, height = image.size
-        except UnidentifiedImageError:
+                image.load()
+        except (UnidentifiedImageError, OSError, SyntaxError, ValueError, Image.DecompressionBombError):
             return ValidationResult(ok=False, rejection_reason="Unsupported or invalid image file.")
 
         if width * height > self.max_pixels:
@@ -220,7 +222,7 @@ class AnimatedPillowProcessor(PillowProcessor):
             frames: list[Image.Image] = []
             durations: list[int] = []
             loop = image.info.get("loop", 0)
-            for index in range(frame_count):
+            for index in self._frame_indexes(frame_count):
                 image.seek(index)
                 frame = ImageOps.exif_transpose(image.copy())
                 frame = frame.convert("RGBA")
@@ -242,6 +244,14 @@ class AnimatedPillowProcessor(PillowProcessor):
             method=6,
         )
         return output.getvalue()
+
+    def _frame_indexes(self, frame_count: int) -> list[int]:
+        if frame_count <= ANIMATED_THUMB_MAX_SOURCE_FRAMES:
+            return list(range(frame_count))
+        sample_count = max(2, ANIMATED_THUMB_MAX_SOURCE_FRAMES)
+        last_index = frame_count - 1
+        indexes = {round(position * last_index / (sample_count - 1)) for position in range(sample_count)}
+        return sorted(indexes)
 
 
 class GifProcessor(AnimatedPillowProcessor):

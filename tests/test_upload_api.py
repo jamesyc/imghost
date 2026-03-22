@@ -177,6 +177,22 @@ def test_invalid_image_upload_is_rejected(tmp_path, monkeypatch) -> None:
         assert response.json()["detail"] == "Unsupported or invalid image file."
 
 
+def test_truncated_jpeg_upload_is_rejected_without_500(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    payload = jpeg_bytes()[:-20]
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("bad.jpg", BytesIO(payload), "image/jpeg"))],
+        )
+
+        assert response.status_code == 415
+        assert response.json()["detail"] == "Unsupported or invalid image file."
+
+
 def test_upload_over_limit_is_rejected_without_processing(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

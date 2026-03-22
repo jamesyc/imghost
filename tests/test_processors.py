@@ -10,6 +10,7 @@ from PIL import Image
 
 from imghost.main import app
 from imghost.processors import (
+    ANIMATED_THUMB_MAX_SOURCE_FRAMES,
     VIDEO_ANIMATED_THUMB_TIMEOUT_SECS,
     VIDEO_PROBE_TIMEOUT_SECS,
     VIDEO_REMUX_TIMEOUT_SECS,
@@ -233,6 +234,24 @@ def test_gif_processor_generates_animated_webp_when_threshold_exceeded(monkeypat
     assert result.format == "webp"
     assert result.data is not None
     assert result.size == len(result.data)
+
+
+def test_gif_processor_caps_source_frame_sampling(monkeypatch) -> None:
+    monkeypatch.setattr("imghost.processors.ANIMATED_THUMB_MAX_SOURCE_FRAMES", 3)
+    processor = GifProcessor(max_pixels=50_000_000)
+
+    assert processor._frame_indexes(3) == [0, 1, 2]
+    assert processor._frame_indexes(10) == [0, 4, 9]
+
+
+def test_gif_processor_sampling_keeps_first_and_last_frame() -> None:
+    processor = GifProcessor(max_pixels=50_000_000)
+
+    indexes = processor._frame_indexes(ANIMATED_THUMB_MAX_SOURCE_FRAMES + 25)
+
+    assert indexes[0] == 0
+    assert indexes[-1] == ANIMATED_THUMB_MAX_SOURCE_FRAMES + 24
+    assert len(indexes) == ANIMATED_THUMB_MAX_SOURCE_FRAMES
 
 
 def test_mp4_processor_maps_ffprobe_metadata(monkeypatch) -> None:
