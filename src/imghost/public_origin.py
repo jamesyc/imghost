@@ -65,6 +65,21 @@ def request_uses_trusted_proxy_headers(request: Request, settings: Settings) -> 
     return any(peer_ip in ip_network(cidr, strict=False) for cidr in settings.trusted_proxy_cidrs)
 
 
+def trusted_forwarded_client_ip(request: Request, settings: Settings) -> str | None:
+    if not request_uses_trusted_proxy_headers(request, settings):
+        return None
+
+    for header_name in ("CF-Connecting-IP", "X-Real-IP", "X-Forwarded-For"):
+        value = _header_first_value(request, header_name)
+        if not value:
+            continue
+        try:
+            return str(ip_address(value))
+        except ValueError:
+            continue
+    return None
+
+
 def _request_origin(request: Request) -> str | None:
     scheme = request.url.scheme.strip().lower()
     host = request.headers.get("Host", "").strip()

@@ -89,6 +89,189 @@ def test_anon_rate_limit_blocks_after_runtime_threshold(tmp_path, monkeypatch) -
         assert second.json()["detail"] == "Upload rate limit exceeded."
 
 
+def test_anon_rate_limit_ignores_spoofed_forwarding_headers_from_untrusted_clients(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
+
+    with TestClient(app) as client:
+        state = client.app.state.imghost
+        admin = client.portal.call(
+            lambda: state.uploads.create_user(
+                UserCreateInput(
+                    username="anon-spoof-admin",
+                    email="anon-spoof-admin@example.com",
+                    password="secret",
+                    is_admin=True,
+                    quota_bytes=None,
+                ),
+                method="admin",
+                correlation_id="anon-spoof-admin",
+                source="api",
+            )
+        )
+        issued = client.portal.call(state.uploads.issue_api_key, admin)
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {issued.raw_key}"},
+            json={"rate_limit_anon_rpm": 1, "rate_limit_anon_bph": 1000000, "rate_limit_global_anon_rpm": 10},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "CF-Connecting-IP": "198.51.100.10"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "CF-Connecting-IP": "198.51.100.99"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Upload rate limit exceeded."
+
+
+def test_anon_rate_limit_uses_forwarded_headers_from_trusted_proxy_peer(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://backend")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
+
+    with TestClient(app, base_url="http://backend", client=("127.0.0.1", 50000)) as client:
+        state = client.app.state.imghost
+        admin = client.portal.call(
+            lambda: state.uploads.create_user(
+                UserCreateInput(
+                    username="anon-proxy-admin",
+                    email="anon-proxy-admin@example.com",
+                    password="secret",
+                    is_admin=True,
+                    quota_bytes=None,
+                ),
+                method="admin",
+                correlation_id="anon-proxy-admin",
+                source="api",
+            )
+        )
+        issued = client.portal.call(state.uploads.issue_api_key, admin)
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {issued.raw_key}"},
+            json={"rate_limit_anon_rpm": 1, "rate_limit_anon_bph": 1000000, "rate_limit_global_anon_rpm": 10},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "X-Forwarded-For": "198.51.100.10, 127.0.0.1"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "X-Forwarded-For": "198.51.100.10, 127.0.0.1"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Upload rate limit exceeded."
+
+
+def test_anon_rate_limit_uses_x_real_ip_from_trusted_proxy_peer(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://backend")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
+
+    with TestClient(app, base_url="http://backend", client=("127.0.0.1", 50000)) as client:
+        state = client.app.state.imghost
+        admin = client.portal.call(
+            lambda: state.uploads.create_user(
+                UserCreateInput(
+                    username="anon-xreal-admin",
+                    email="anon-xreal-admin@example.com",
+                    password="secret",
+                    is_admin=True,
+                    quota_bytes=None,
+                ),
+                method="admin",
+                correlation_id="anon-xreal-admin",
+                source="api",
+            )
+        )
+        issued = client.portal.call(state.uploads.issue_api_key, admin)
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {issued.raw_key}"},
+            json={"rate_limit_anon_rpm": 1, "rate_limit_anon_bph": 1000000, "rate_limit_global_anon_rpm": 10},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "X-Real-IP": "198.51.100.10"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "X-Real-IP": "198.51.100.10"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Upload rate limit exceeded."
+
+
+def test_anon_rate_limit_remains_permissive_when_trusted_proxy_gate_is_disabled(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "false")
+
+    with TestClient(app) as client:
+        state = client.app.state.imghost
+        admin = client.portal.call(
+            lambda: state.uploads.create_user(
+                UserCreateInput(
+                    username="anon-permissive-admin",
+                    email="anon-permissive-admin@example.com",
+                    password="secret",
+                    is_admin=True,
+                    quota_bytes=None,
+                ),
+                method="admin",
+                correlation_id="anon-permissive-admin",
+                source="api",
+            )
+        )
+        issued = client.portal.call(state.uploads.issue_api_key, admin)
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {issued.raw_key}"},
+            json={"rate_limit_anon_rpm": 1, "rate_limit_anon_bph": 1000000, "rate_limit_global_anon_rpm": 10},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "CF-Connecting-IP": "198.51.100.10"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent", "CF-Connecting-IP": "198.51.100.10"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Upload rate limit exceeded."
+
+
 def test_authenticated_rate_limit_uses_user_identity(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

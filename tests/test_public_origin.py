@@ -7,7 +7,8 @@ from starlette.requests import Request
 
 from imghost.config import Settings
 from imghost.main import app
-from imghost.public_origin import public_base_url, request_uses_trusted_proxy_headers
+from imghost.public_origin import public_base_url, request_uses_trusted_proxy_headers, trusted_forwarded_client_ip
+from imghost.web.request_helpers import client_ip
 
 from .helpers import PNG_1X1, browser_session_headers, create_user_and_api_key, set_user_password
 
@@ -115,6 +116,82 @@ def test_trusted_proxy_headers_are_used_when_peer_matches_configured_cidr() -> N
     settings = _settings(enabled=True, cidrs=("127.0.0.1/32", "172.16.0.0/12"))
     assert request_uses_trusted_proxy_headers(request, settings) is True
     assert public_base_url(request, settings) == "https://trusted.example"
+
+
+def test_trusted_forwarded_client_ip_ignores_headers_when_proxy_peer_is_untrusted() -> None:
+    request = _request(
+        host="backend",
+        headers=[
+            (b"host", b"backend"),
+            (b"cf-connecting-ip", b"198.51.100.10"),
+            (b"x-forwarded-for", b"198.51.100.11, 203.0.113.50"),
+        ],
+        client_host="203.0.113.10",
+    )
+
+    settings = _settings(enabled=True, cidrs=("127.0.0.1/32",))
+    assert trusted_forwarded_client_ip(request, settings) is None
+
+
+def test_trusted_forwarded_client_ip_uses_first_valid_header_from_trusted_proxy() -> None:
+    request = _request(
+        host="backend",
+        headers=[
+            (b"host", b"backend"),
+            (b"cf-connecting-ip", b"198.51.100.10"),
+            (b"x-forwarded-for", b"198.51.100.11, 203.0.113.50"),
+        ],
+        client_host="127.0.0.1",
+    )
+
+    settings = _settings(enabled=True, cidrs=("127.0.0.1/32",))
+    assert trusted_forwarded_client_ip(request, settings) == "198.51.100.10"
+
+
+def test_trusted_forwarded_client_ip_skips_malformed_values_from_trusted_proxy() -> None:
+    request = _request(
+        host="backend",
+        headers=[
+            (b"host", b"backend"),
+            (b"cf-connecting-ip", b"not-an-ip"),
+            (b"x-real-ip", b"still-not-an-ip"),
+            (b"x-forwarded-for", b"198.51.100.11, 203.0.113.50"),
+        ],
+        client_host="127.0.0.1",
+    )
+
+    settings = _settings(enabled=True, cidrs=("127.0.0.1/32",))
+    assert trusted_forwarded_client_ip(request, settings) == "198.51.100.11"
+
+
+def test_client_ip_falls_back_to_request_peer_when_trusted_forwarded_values_are_malformed() -> None:
+    request = _request(
+        host="backend",
+        headers=[
+            (b"host", b"backend"),
+            (b"cf-connecting-ip", b"not-an-ip"),
+            (b"x-real-ip", b"still-not-an-ip"),
+            (b"x-forwarded-for", b"also-not-an-ip, nope"),
+        ],
+        client_host="127.0.0.1",
+    )
+    request.app.state.imghost = type("State", (), {"settings": _settings(enabled=True, cidrs=("127.0.0.1/32",))})()
+
+    assert client_ip(request) == "127.0.0.1"
+
+
+def test_trusted_forwarded_client_ip_supports_ipv6_proxy_and_client_addresses() -> None:
+    request = _request(
+        host="backend",
+        headers=[
+            (b"host", b"backend"),
+            (b"x-forwarded-for", b"2001:db8::10, ::1"),
+        ],
+        client_host="::1",
+    )
+
+    settings = _settings(enabled=True, cidrs=("::1/128",))
+    assert trusted_forwarded_client_ip(request, settings) == "2001:db8::10"
 
 
 def test_direct_request_origin_still_works_when_proxy_gate_enabled() -> None:
