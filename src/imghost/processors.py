@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from io import BytesIO
@@ -396,7 +397,7 @@ class VideoProcessor(MediaProcessor):
 
     async def validate(self, payload: bytes) -> ValidationResult:
         try:
-            metadata = self._probe(payload)
+            metadata = await asyncio.to_thread(self._probe, payload)
         except RuntimeError:
             return ValidationResult(ok=False, rejection_reason="Unsupported or invalid video file.")
         if metadata.width is None or metadata.height is None:
@@ -406,22 +407,31 @@ class VideoProcessor(MediaProcessor):
         return ValidationResult(ok=True)
 
     async def extract_metadata(self, payload: bytes, format_hint: str) -> MediaMetadata:
-        return self._probe(payload)
+        return await asyncio.to_thread(self._probe, payload)
 
     async def sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
-        return SanitizedFile(data=self._remux(payload, metadata.format), mime_type=self.mime_type, format=metadata.format)
+        return SanitizedFile(
+            data=await asyncio.to_thread(self._remux, payload, metadata.format),
+            mime_type=self.mime_type,
+            format=metadata.format,
+        )
 
     async def generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
         duration = metadata.duration_secs or 0.0
         if duration < 1.0:
-            data = self._single_frame_thumbnail(payload, metadata.format, seek_seconds=min(duration, 1.0))
+            data = await asyncio.to_thread(
+                self._single_frame_thumbnail,
+                payload,
+                metadata.format,
+                seek_seconds=min(duration, 1.0),
+            )
             return ThumbnailResult(data=data, thumb_is_orig=False, format="jpg", size=len(data))
 
-        animated = self._animated_thumbnail(payload, metadata.format, duration)
+        animated = await asyncio.to_thread(self._animated_thumbnail, payload, metadata.format, duration)
         if animated is not None and len(animated) < len(payload):
             return ThumbnailResult(data=animated, thumb_is_orig=False, format="webp", size=len(animated))
 
-        data = self._single_frame_thumbnail(payload, metadata.format, seek_seconds=1.0)
+        data = await asyncio.to_thread(self._single_frame_thumbnail, payload, metadata.format, seek_seconds=1.0)
         return ThumbnailResult(data=data, thumb_is_orig=False, format="jpg", size=len(data))
 
     def _probe(self, payload: bytes) -> MediaMetadata:
