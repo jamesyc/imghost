@@ -46,6 +46,24 @@ def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
         assert range_response.headers["content-range"] == f"bytes 0-3/{len(stored_bytes)}"
         assert range_response.content == stored_bytes[:4]
 
+        open_ended_range = client.get(f"/i/{media_id}.png", headers={"Range": "bytes=2-"})
+        assert open_ended_range.status_code == 206
+        assert open_ended_range.headers["content-range"] == f"bytes 2-{len(stored_bytes) - 1}/{len(stored_bytes)}"
+        assert open_ended_range.content == stored_bytes[2:]
+
+        suffix_range = client.get(f"/i/{media_id}.png", headers={"Range": "bytes=-4"})
+        assert suffix_range.status_code == 206
+        assert suffix_range.headers["content-range"] == f"bytes {len(stored_bytes) - 4}-{len(stored_bytes) - 1}/{len(stored_bytes)}"
+        assert suffix_range.content == stored_bytes[-4:]
+
+        invalid_range = client.get(f"/i/{media_id}.png", headers={"Range": "bytes=4-1"})
+        assert invalid_range.status_code == 416
+        assert invalid_range.headers["content-range"] == f"bytes */{len(stored_bytes)}"
+
+        malformed_range = client.get(f"/i/{media_id}.png", headers={"Range": "bytes=nope"})
+        assert malformed_range.status_code == 416
+        assert malformed_range.headers["content-range"] == f"bytes */{len(stored_bytes)}"
+
         wait_for_thumbnail(client, media_id)
         thumb_response = client.get(f"/t/{media_id}.jpg")
         assert thumb_response.status_code == 200

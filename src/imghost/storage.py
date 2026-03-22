@@ -21,6 +21,68 @@ class StorageStream:
     body: AsyncIterator[bytes]
 
 
+@dataclass(frozen=True)
+class ByteRange:
+    start: int
+    end: int
+
+    @property
+    def header_value(self) -> str:
+        return f"bytes={self.start}-{self.end}"
+
+    @property
+    def content_range_value(self) -> str:
+        return f"bytes {self.start}-{self.end}"
+
+
+class InvalidByteRange(ValueError):
+    def __init__(self, size: int) -> None:
+        self.size = size
+        super().__init__("Invalid byte range")
+
+
+def normalize_byte_range(range_header: str | None, size: int) -> ByteRange | None:
+    if not range_header:
+        return None
+    if size <= 0 or not range_header.startswith("bytes="):
+        raise InvalidByteRange(size)
+
+    raw_spec = range_header[6:].strip()
+    if not raw_spec or "," in raw_spec:
+        raise InvalidByteRange(size)
+
+    raw_start, sep, raw_end = raw_spec.partition("-")
+    if not sep:
+        raise InvalidByteRange(size)
+    raw_start = raw_start.strip()
+    raw_end = raw_end.strip()
+
+    if raw_start:
+        if not raw_start.isdigit():
+            raise InvalidByteRange(size)
+        start = int(raw_start)
+        if start >= size:
+            raise InvalidByteRange(size)
+        if raw_end:
+            if not raw_end.isdigit():
+                raise InvalidByteRange(size)
+            end = int(raw_end)
+            if end < start:
+                raise InvalidByteRange(size)
+            end = min(end, size - 1)
+        else:
+            end = size - 1
+        return ByteRange(start=start, end=end)
+
+    if not raw_end or not raw_end.isdigit():
+        raise InvalidByteRange(size)
+    suffix_length = int(raw_end)
+    if suffix_length <= 0:
+        raise InvalidByteRange(size)
+    length = min(suffix_length, size)
+    return ByteRange(start=size - length, end=size - 1)
+
+
 class StorageBackend(Protocol):
     async def put(self, key: str, data: bytes) -> None: ...
 
@@ -75,19 +137,15 @@ class LocalFilesystemBackend:
     async def get_stream(self, key: str, range_header: str | None = None) -> StorageStream:
         path = self._path_for(key)
         size = path.stat().st_size
-        start = 0
-        end = size - 1
+        byte_range = normalize_byte_range(range_header, size)
+        start = byte_range.start if byte_range else 0
+        end = byte_range.end if byte_range else size - 1
         status_code = 200
         content_range = None
 
-        if range_header and range_header.startswith("bytes="):
-            raw_start, _, raw_end = range_header[6:].partition("-")
-            if raw_start:
-                start = int(raw_start)
-            if raw_end:
-                end = int(raw_end)
+        if byte_range is not None:
             status_code = 206
-            content_range = f"bytes {start}-{end}/{size}"
+            content_range = f"{byte_range.content_range_value}/{size}"
 
         length = max(0, end - start + 1)
 
@@ -252,7 +310,9 @@ class S3StorageBackend:
     def _get_stream_sync(self, key: str, range_header: str | None) -> StorageStream:
         params = {"Bucket": self.bucket, "Key": key}
         if range_header:
-            params["Range"] = range_header
+            head = self._head_sync(key)
+            byte_range = normalize_byte_range(range_header, int(head["ContentLength"]))
+            params["Range"] = byte_range.header_value if byte_range else range_header
         client = self._client()
         try:
             response = client.get_object(**params)
@@ -283,6 +343,13 @@ class S3StorageBackend:
             content_range=content_range,
             body=iterator(),
         )
+
+    def _head_sync(self, key: str) -> dict:
+        client = self._client()
+        try:
+            return client.head_object(Bucket=self.bucket, Key=key)
+        finally:
+            client.close()
 
 
 def build_storage_backend(settings: "Settings") -> StorageBackend:

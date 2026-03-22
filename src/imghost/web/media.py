@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from .display_helpers import is_expired
 from .media_helpers import thumb_media_type, validate_media_id_or_404
 from .request_context import get_state
+from ..storage import InvalidByteRange, normalize_byte_range
 
 router = APIRouter()
 
@@ -23,8 +24,16 @@ async def stream_media(request: Request, raw_id: str, thumb: bool) -> StreamingR
         return StreamingResponse(iter(()), status_code=202)
     if thumb and media.thumb_status == "failed":
         raise HTTPException(status_code=404)
+    total_size = media.file_size if (not thumb or media.thumb_is_orig or not media.thumb_size) else media.thumb_size
+    try:
+        byte_range = normalize_byte_range(request.headers.get("Range"), total_size)
+    except InvalidByteRange:
+        raise HTTPException(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{total_size}"},
+        ) from None
     key = media.storage_key if (not thumb or media.thumb_is_orig or not media.thumb_key) else media.thumb_key
-    stream = await state.storage.get_stream(key, request.headers.get("Range"))
+    stream = await state.storage.get_stream(key, byte_range.header_value if byte_range else None)
     headers = {
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=31536000, immutable",

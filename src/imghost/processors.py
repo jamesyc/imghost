@@ -15,7 +15,13 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 THUMB_WIDTH = 375
 ANIMATED_ORIGINAL_THRESHOLD_BYTES = 2 * 1024 * 1024
+VIDEO_PROBE_TIMEOUT_SECS = 20
+VIDEO_REMUX_TIMEOUT_SECS = 60
+VIDEO_SINGLE_FRAME_TIMEOUT_SECS = 30
+VIDEO_ANIMATED_THUMB_TIMEOUT_SECS = 40
 UNSAFE_URL_PREFIXES = ("http:", "https:", "//", "javascript:", "data:", "file:")
+SVG_DANGEROUS_ELEMENTS = {"script", "foreignobject", "iframe", "object", "embed", "audio", "video", "style"}
+SVG_URL_ATTRS = {"href", "src"}
 
 
 @dataclass(slots=True)
@@ -306,30 +312,38 @@ class SvgProcessor(MediaProcessor):
         return ThumbnailResult(data=data, thumb_is_orig=False, format="jpg", size=len(data))
 
     def _sanitize_svg(self, root: ElementTree.Element) -> None:
-        self._remove_scripts(root)
+        self._remove_dangerous_elements(root)
         for element in root.iter():
             for attr_name in list(element.attrib):
                 value = element.attrib[attr_name].strip()
-                lowered = attr_name.lower()
+                lowered = self._local_name(attr_name).lower()
                 if lowered.startswith("on"):
                     del element.attrib[attr_name]
                     continue
-                if lowered.split("}")[-1] in {"href", "src"} and self._is_unsafe_external_ref(value):
+                if lowered == "style":
+                    del element.attrib[attr_name]
+                    continue
+                if lowered in SVG_URL_ATTRS and self._is_unsafe_external_ref(value):
                     del element.attrib[attr_name]
 
-    def _remove_scripts(self, root: ElementTree.Element) -> None:
+    def _remove_dangerous_elements(self, root: ElementTree.Element) -> None:
         for parent in root.iter():
             for child in list(parent):
-                if child.tag.split("}")[-1].lower() == "script":
+                if self._local_name(child.tag).lower() in SVG_DANGEROUS_ELEMENTS:
                     parent.remove(child)
                     continue
-                self._remove_scripts(child)
+                self._remove_dangerous_elements(child)
 
     def _is_unsafe_external_ref(self, value: str) -> bool:
         lowered = value.lower()
         if lowered.startswith("#"):
             return False
-        return lowered.startswith(UNSAFE_URL_PREFIXES)
+        if lowered.startswith(UNSAFE_URL_PREFIXES):
+            return True
+        return True
+
+    def _local_name(self, value: str) -> str:
+        return value.split("}")[-1].split(":")[-1]
 
     def _svg_dimensions(self, root: ElementTree.Element) -> tuple[int | None, int | None]:
         width = self._parse_svg_length(root.attrib.get("width"))
@@ -412,7 +426,8 @@ class VideoProcessor(MediaProcessor):
                     "-of",
                     "json",
                     str(input_path),
-                ]
+                ],
+                timeout=VIDEO_PROBE_TIMEOUT_SECS,
             )
         try:
             parsed = json.loads(completed.stdout)
@@ -450,7 +465,8 @@ class VideoProcessor(MediaProcessor):
                     "-c",
                     "copy",
                     str(output_path),
-                ]
+                ],
+                timeout=VIDEO_REMUX_TIMEOUT_SECS,
             )
             return output_path.read_bytes()
 
@@ -469,7 +485,8 @@ class VideoProcessor(MediaProcessor):
                     "-vf",
                     f"scale={THUMB_WIDTH}:-1",
                     str(output_path),
-                ]
+                ],
+                timeout=VIDEO_SINGLE_FRAME_TIMEOUT_SECS,
             )
             return output_path.read_bytes()
 
@@ -489,16 +506,17 @@ class VideoProcessor(MediaProcessor):
                     "-loop",
                     "0",
                     str(output_path),
-                ]
+                ],
+                timeout=VIDEO_ANIMATED_THUMB_TIMEOUT_SECS,
             )
             if not output_path.exists():
                 return None
             return output_path.read_bytes()
 
-    def _run_command(self, args: list[str]) -> subprocess.CompletedProcess[str]:
+    def _run_command(self, args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
         try:
-            return subprocess.run(args, capture_output=True, text=True, check=True)
-        except (OSError, subprocess.CalledProcessError) as exc:
+            return subprocess.run(args, capture_output=True, text=True, check=True, timeout=timeout)
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError("video processing command failed") from exc
 
     def _temp_file(self, payload: bytes, extension: str):
