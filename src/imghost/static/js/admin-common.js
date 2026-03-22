@@ -183,3 +183,86 @@ window.renderAdminNetworkTrust = (payload) => `
     </div>
   </section>
 `;
+
+window.renderAdminRuntimeDetails = (payload) => {
+  const queueRows = Object.entries(payload.tasks?.queues || {})
+    .map(
+      ([name, depth]) => `
+        <article class="admin-list-row">
+          <div>
+            <strong>Queue ${window.escapeAdminHtml(name)}</strong>
+            <p class="hint">Depth ${window.escapeAdminHtml(window.adminFormatNumber(depth))}</p>
+          </div>
+        </article>
+      `
+    )
+    .join("");
+
+  const subsystemRows = Object.entries(payload.redis?.subsystems || {})
+    .map(
+      ([name, subsystem]) => `
+        <article class="admin-list-row">
+          <div>
+            <strong>Redis ${window.escapeAdminHtml(name)}</strong>
+            <p class="hint">
+              configured=${window.escapeAdminHtml(String(Boolean(subsystem?.configured)))} ·
+              reachable=${window.escapeAdminHtml(String(Boolean(subsystem?.reachable)))} ·
+              mode=${window.escapeAdminHtml(subsystem?.effective_mode || subsystem?.mode || "unknown")} ·
+              degraded=${window.escapeAdminHtml(String(Boolean(subsystem?.degraded)))}
+            </p>
+            <p class="hint">
+              last operation: ${window.escapeAdminHtml(subsystem?.last_operation || "Not recorded")} ·
+              last error: ${window.escapeAdminHtml(subsystem?.last_error || "Not recorded")}
+            </p>
+            <p class="hint">
+              degraded at: ${window.escapeAdminHtml(window.adminFormatDateTime(subsystem?.last_degraded_at))} ·
+              recovered at: ${window.escapeAdminHtml(window.adminFormatDateTime(subsystem?.last_recovered_at))}
+            </p>
+          </div>
+        </article>
+      `
+    )
+    .join("");
+
+  return `
+    <section class="admin-overview-subsection">
+      <div class="admin-section-header">
+        <h3>Admin-only runtime details</h3>
+        <p class="hint">Admin-only runtime details for queue, Redis, worker, and network trust.</p>
+      </div>
+      <div class="item-list">
+        <article class="admin-list-row">
+          <div>
+            <strong>Worker</strong>
+            <p class="hint">
+              enabled in this process=${window.escapeAdminHtml(String(Boolean(payload.worker?.enabled_in_this_process)))} ·
+              last started=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_started_at))} ·
+              last stopped=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_stopped_at))}
+            </p>
+            <p class="hint">
+              last task failure at=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_task_failure_at))} ·
+              last task failure=${window.escapeAdminHtml(payload.worker?.last_task_failure ? JSON.stringify(payload.worker.last_task_failure) : "Not recorded")}
+            </p>
+          </div>
+        </article>
+        <article class="admin-list-row">
+          <div>
+            <strong>Tasks</strong>
+            <p class="hint">
+              mode=${window.escapeAdminHtml(payload.tasks?.mode || "unknown")} ·
+              backend=${window.escapeAdminHtml(payload.tasks?.queue_backend || "unknown")} ·
+              queue depth=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.queue_depth || 0))}
+            </p>
+            <p class="hint">
+              worker count=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.worker_count || 0))} ·
+              active workers=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_workers || 0))} ·
+              active jobs=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_jobs || 0))}
+            </p>
+          </div>
+        </article>
+        ${queueRows}
+        ${subsystemRows}
+      </div>
+    </section>
+  `;
+};

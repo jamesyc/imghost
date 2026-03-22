@@ -45,6 +45,9 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert payload["trusted_proxy_cidrs_enabled"] is True
         assert payload["trusted_proxy_cidrs"] == ["127.0.0.1/32", "172.16.0.0/12"]
         assert payload["redis"]["session_fail_closed"] is True
+        assert "subsystems" in payload["redis"]
+        assert "worker" in payload
+        assert "tasks" in payload
 
 
 def test_admin_runtime_status_warns_when_proxy_trust_is_permissive(tmp_path, monkeypatch, capsys) -> None:

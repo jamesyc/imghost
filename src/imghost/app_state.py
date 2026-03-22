@@ -175,3 +175,22 @@ class AppState:
             "trusted_proxy_cidrs_enabled": self.settings.trusted_proxy_cidrs_enabled,
             "trusted_proxy_cidrs": list(self.settings.trusted_proxy_cidrs),
         }
+
+    async def readiness_status(self) -> dict[str, Any]:
+        runtime = await self.runtime_status()
+        ok = runtime["database"]["ok"] and runtime["storage"]["ok"]
+        if self.settings.redis_mode == "required" and runtime["redis"]["configured"] and not runtime["redis"]["reachable"]:
+            ok = False
+        return {
+            "ok": bool(ok),
+            "degraded": not bool(ok),
+            "database": {"ok": runtime["database"]["ok"]},
+            "storage": {"ok": runtime["storage"]["ok"]},
+            "redis": {
+                "configured": runtime["redis"]["configured"],
+                "reachable": runtime["redis"]["reachable"],
+            },
+            "tasks": {
+                "mode": runtime["tasks"]["mode"],
+            },
+        }

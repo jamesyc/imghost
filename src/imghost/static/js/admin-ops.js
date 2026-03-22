@@ -17,7 +17,10 @@ if (adminRuntimeStatus && adminAuditRoot) {
   };
 
   const renderRuntime = (payload) => {
-    adminRuntimeStatus.innerHTML = window.renderAdminRuntimeCards(payload);
+    adminRuntimeStatus.innerHTML = `
+      ${window.renderAdminRuntimeCards(payload)}
+      ${window.renderAdminRuntimeDetails(payload)}
+    `;
     if (adminNetworkTrust) {
       adminNetworkTrust.innerHTML = window.renderAdminNetworkTrust(payload);
     }

@@ -43,6 +43,29 @@ def _runtime_status_payload(
     }
 
 
+def _readiness_payload(
+    *,
+    ok: bool = True,
+    degraded: bool = False,
+    database_ok: bool = True,
+    storage_ok: bool = True,
+    redis_configured: bool = True,
+    redis_reachable: bool = True,
+    task_mode: str = "async",
+) -> dict[str, object]:
+    return {
+        "ok": ok,
+        "degraded": degraded,
+        "database": {"ok": database_ok},
+        "storage": {"ok": storage_ok},
+        "redis": {
+            "configured": redis_configured,
+            "reachable": redis_reachable,
+        },
+        "tasks": {"mode": task_mode},
+    }
+
+
 def test_health_live_returns_plain_ok(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -73,39 +96,46 @@ def test_health_ready_returns_ok_when_core_dependencies_are_healthy(tmp_path, mo
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
 
-    payload = _runtime_status_payload()
+    payload = _readiness_payload()
 
-    async def fake_runtime_status(self: AppState) -> dict[str, object]:
+    async def fake_readiness_status(self: AppState) -> dict[str, object]:
         return payload.copy()
 
-    monkeypatch.setattr(AppState, "runtime_status", fake_runtime_status)
+    monkeypatch.setattr(AppState, "readiness_status", fake_readiness_status)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
         assert response.status_code == 200
         body = response.json()
         assert body["ok"] is True
+        assert body["degraded"] is False
         assert body["database"]["ok"] is True
         assert body["storage"]["ok"] is True
         assert body["redis"]["configured"] is True
         assert body["redis"]["reachable"] is True
         assert body["tasks"]["mode"] == "async"
+        assert "worker" not in body
+        assert "trusted_public_origins" not in body
+        assert "trusted_proxy_cidrs" not in body
+        assert "proxy_trust_warning" not in body
+        assert "subsystems" not in body["redis"]
 
 
 def test_health_ready_returns_503_when_database_is_down(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
 
-    async def fake_runtime_status(self: AppState) -> dict[str, object]:
-        return _runtime_status_payload(database_ok=False)
+    async def fake_readiness_status(self: AppState) -> dict[str, object]:
+        return _readiness_payload(ok=False, degraded=True, database_ok=False)
 
-    monkeypatch.setattr(AppState, "runtime_status", fake_runtime_status)
+    monkeypatch.setattr(AppState, "readiness_status", fake_readiness_status)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
         assert response.status_code == 503
         body = response.json()
         assert body["ok"] is False
+        assert body["degraded"] is True
         assert body["database"]["ok"] is False
         assert "storage" in body
         assert "redis" in body
@@ -115,16 +145,17 @@ def test_health_ready_returns_503_when_storage_is_down(tmp_path, monkeypatch) ->
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
 
-    async def fake_runtime_status(self: AppState) -> dict[str, object]:
-        return _runtime_status_payload(storage_ok=False)
+    async def fake_readiness_status(self: AppState) -> dict[str, object]:
+        return _readiness_payload(ok=False, degraded=True, storage_ok=False)
 
-    monkeypatch.setattr(AppState, "runtime_status", fake_runtime_status)
+    monkeypatch.setattr(AppState, "readiness_status", fake_readiness_status)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
         assert response.status_code == 503
         body = response.json()
         assert body["ok"] is False
+        assert body["degraded"] is True
         assert body["storage"]["ok"] is False
 
 
@@ -133,16 +164,23 @@ def test_health_ready_allows_optional_redis_outage(tmp_path, monkeypatch) -> Non
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("REDIS_MODE", "auto")
 
-    async def fake_runtime_status(self: AppState) -> dict[str, object]:
-        return _runtime_status_payload(redis_configured=True, redis_reachable=False, task_mode="async")
+    async def fake_readiness_status(self: AppState) -> dict[str, object]:
+        return _readiness_payload(
+            ok=True,
+            degraded=False,
+            redis_configured=True,
+            redis_reachable=False,
+            task_mode="async",
+        )
 
-    monkeypatch.setattr(AppState, "runtime_status", fake_runtime_status)
+    monkeypatch.setattr(AppState, "readiness_status", fake_readiness_status)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
         assert response.status_code == 200
         body = response.json()
         assert body["ok"] is True
+        assert body["degraded"] is False
         assert body["redis"]["configured"] is True
         assert body["redis"]["reachable"] is False
 
@@ -152,16 +190,23 @@ def test_health_ready_fails_when_required_redis_is_down(tmp_path, monkeypatch) -
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("REDIS_MODE", "required")
 
-    async def fake_runtime_status(self: AppState) -> dict[str, object]:
-        return _runtime_status_payload(redis_configured=True, redis_reachable=False, task_mode="redis")
+    async def fake_readiness_status(self: AppState) -> dict[str, object]:
+        return _readiness_payload(
+            ok=False,
+            degraded=True,
+            redis_configured=True,
+            redis_reachable=False,
+            task_mode="redis",
+        )
 
-    monkeypatch.setattr(AppState, "runtime_status", fake_runtime_status)
+    monkeypatch.setattr(AppState, "readiness_status", fake_readiness_status)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
         assert response.status_code == 503
         body = response.json()
         assert body["ok"] is False
+        assert body["degraded"] is True
         assert body["redis"]["configured"] is True
         assert body["redis"]["reachable"] is False
 
@@ -171,12 +216,19 @@ def test_health_ready_exposes_dependency_snapshot_when_not_ready(tmp_path, monke
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("REDIS_MODE", "required")
 
-    payload = _runtime_status_payload(database_ok=False, storage_ok=True, redis_configured=True, redis_reachable=False)
+    payload = _readiness_payload(
+        ok=False,
+        degraded=True,
+        database_ok=False,
+        storage_ok=True,
+        redis_configured=True,
+        redis_reachable=False,
+    )
 
-    async def fake_runtime_status(self: AppState) -> dict[str, object]:
+    async def fake_readiness_status(self: AppState) -> dict[str, object]:
         return payload.copy()
 
-    monkeypatch.setattr(AppState, "runtime_status", fake_runtime_status)
+    monkeypatch.setattr(AppState, "readiness_status", fake_readiness_status)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
@@ -187,25 +239,28 @@ def test_health_ready_exposes_dependency_snapshot_when_not_ready(tmp_path, monke
         assert body["storage"] == {"ok": True}
         assert body["redis"]["configured"] is True
         assert body["redis"]["reachable"] is False
-        assert "worker" in body
-        assert "tasks" in body
+        assert body["tasks"] == {"mode": "async"}
+        assert "worker" not in body
+        assert "trusted_public_origins" not in body
 
 
-def test_health_ready_includes_redis_session_fail_closed_flag(tmp_path, monkeypatch) -> None:
+def test_health_ready_does_not_expose_admin_only_runtime_details(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
 
-    payload = _runtime_status_payload()
-    payload["redis"]["session_fail_closed"] = True
+    payload = _readiness_payload()
 
-    async def fake_runtime_status(self: AppState) -> dict[str, object]:
+    async def fake_readiness_status(self: AppState) -> dict[str, object]:
         return payload.copy()
 
-    monkeypatch.setattr(AppState, "runtime_status", fake_runtime_status)
+    monkeypatch.setattr(AppState, "readiness_status", fake_readiness_status)
 
     with TestClient(app) as client:
         response = client.get("/health/ready")
         assert response.status_code == 200
         body = response.json()
         assert body["ok"] is True
-        assert body["redis"]["session_fail_closed"] is True
+        assert "session_fail_closed" not in body["redis"]
+        assert "subsystems" not in body["redis"]
+        assert "worker" not in body
+        assert "trusted_proxy_cidrs" not in body

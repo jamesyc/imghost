@@ -681,6 +681,7 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert '<script src="/static/js/admin-ops.js" defer></script>' in ops.text
         assert 'id="admin-runtime-status"' in ops.text
         assert 'id="admin-network-trust"' in ops.text
+        assert "Admin-only runtime details for queue, Redis, worker, and network trust." in ops.text
         assert 'id="admin-audit-form"' in ops.text
         assert 'value="25"' in ops.text
         assert 'id="admin-audit-prev"' in ops.text

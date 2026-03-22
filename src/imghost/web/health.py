@@ -16,9 +16,5 @@ async def health_live() -> PlainTextResponse:
 @router.get("/health/ready")
 async def health_ready(request: Request) -> JSONResponse:
     state = get_state(request)
-    payload = await state.runtime_status()
-    ready = payload["database"]["ok"] and payload["storage"]["ok"]
-    if state.settings.redis_mode == "required" and payload["redis"]["configured"] and not payload["redis"]["reachable"]:
-        ready = False
-    payload["ok"] = bool(ready)
-    return JSONResponse(payload, status_code=200 if ready else 503)
+    payload = await state.readiness_status()
+    return JSONResponse(payload, status_code=200 if payload["ok"] else 503)
