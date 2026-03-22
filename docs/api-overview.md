@@ -39,6 +39,7 @@ This is a human-oriented map of the main routes. It is not meant to replace gene
 Anonymous/public mutation rules:
 
 - anonymous albums receive a `manage_url` with `token`
+- the manage workspace exposes both a public link and a copyable private manage link
 - that token can authorize album delete, album patch, album reorder, and media delete for anonymous/public albums
 - authenticated owners and admins can perform the same mutations without `delete_token`
 

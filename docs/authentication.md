@@ -40,15 +40,21 @@ Behavior:
 Session storage model:
 
 - when Redis is healthy and enabled, a Redis session record is written and the cookie is marked `store=redis`
-- when Redis is unavailable, session creation and resolution fall back to signed-cookie behavior so browser auth keeps working
+- when `SESSION_REDIS_FAIL_CLOSED=false`, Redis outages fall back to signed-cookie behavior so browser auth keeps working
+- when `SESSION_REDIS_FAIL_CLOSED=true`, Redis-backed browser sessions fail closed if Redis is unavailable
 
-This is intentionally availability-first rather than purely server-side.
+This is configurable because local/self-hosted convenience and production-oriented revocation semantics pull in different directions.
 
 Operational consequence:
 
-- the app keeps working through Redis outages
-- logout still clears the browser cookie
-- server-side revocation semantics are weaker during the outage because Redis session records cannot be consulted
+- graceful mode:
+  - the app keeps working through Redis outages
+  - logout still clears the browser cookie
+  - server-side revocation semantics are weaker during the outage because Redis session records cannot be consulted
+- fail-closed mode:
+  - browser login and registration return `503` while Redis-backed sessions are unavailable
+  - existing browser sessions stop authenticating until Redis recovers
+  - revocation semantics stay closer to server-tracked session behavior
 
 ## Browser-session mutation protection
 
@@ -113,6 +119,8 @@ Important interaction with browser sessions:
 - token-authenticated mutations work without CSRF headers when no browser session is present
 - if a browser session cookie is present on the same request, the browser-session CSRF gate still applies
 - same-origin browser requests with a valid token continue to work
+- the `/manage/{album_id}` workspace still accepts the `?token=` entry URL, but the browser scrubs the visible token from the address bar after load
+- anonymous manage access is retained on the device with bounded local persistence and a path-scoped manage cookie so the workspace can reload after URL scrubbing
 
 ## ShareX behavior
 

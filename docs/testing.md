@@ -44,6 +44,7 @@ Current tests cover:
 - API keys and ShareX behavior
 - Redis fallback behavior
 - Redis session creation and logout behavior during outages
+- strict Redis session fail-closed behavior during outages
 - proxy/origin handling
 - baseline browser security headers and conditional HSTS
 - page bootstrap/view-model helpers

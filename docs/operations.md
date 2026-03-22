@@ -107,18 +107,27 @@ If a browser-authenticated `POST`, `PATCH`, or `DELETE` request starts returning
 
 Delete-token album manage requests are not bearer-authenticated. If the browser also has a valid session cookie, those requests still need same-origin headers to pass the browser-session CSRF gate.
 
-## Redis degraded mode
+## Redis session outage mode
 
-When Redis is down and `REDIS_MODE=auto`:
+When Redis is down and `REDIS_MODE=auto`, the exact browser-session behavior depends on `SESSION_REDIS_FAIL_CLOSED`.
+
+Graceful mode (`SESSION_REDIS_FAIL_CLOSED=false`):
 
 - new browser sessions can still be created
 - sessions fall back to signed-cookie validation
 - rate limits fall back to in-memory counters
 - Redis task queue falls back to in-process async enqueue
 
+Fail-closed mode (`SESSION_REDIS_FAIL_CLOSED=true`):
+
+- browser login and registration return `503`
+- existing browser sessions stop authenticating until Redis recovers
+- API-key flows remain independent of browser-session storage
+- rate limits and tasks still follow their own Redis fallback behavior
+
 That degraded state should still be reflected as ready by `/health/ready` unless Redis is configured as required.
 
-Availability-first tradeoff:
+Graceful-mode tradeoff:
 
 - browser auth keeps working
 - logout still clears the cookie in the current browser

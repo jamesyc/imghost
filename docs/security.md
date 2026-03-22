@@ -20,18 +20,19 @@ This document summarizes the security-relevant behavior currently implemented.
 
 ## Session model
 
-The app intentionally prefers graceful availability:
+The app supports two Redis session outage postures:
 
-- Redis-backed sessions when Redis is healthy
-- signed-cookie fallback when Redis is down
+- graceful mode (`SESSION_REDIS_FAIL_CLOSED=false`)
+  - Redis-backed sessions when Redis is healthy
+  - signed-cookie fallback when Redis is down
+- fail-closed mode (`SESSION_REDIS_FAIL_CLOSED=true`)
+  - Redis-backed sessions when Redis is healthy
+  - browser sessions stop authenticating if Redis-backed session state cannot be consulted
 
-This means a Redis outage degrades revocation semantics rather than hard-failing authentication.
+Tradeoff:
 
-Explicit posture:
-
-- keep the app usable during Redis outages
-- accept that Redis-backed session invalidation is temporarily weaker in that state
-- rely on browser cookie clearing for logout in the current client while degraded
+- graceful mode favors availability and accepts weaker revocation during the outage
+- fail-closed mode favors stronger session invalidation semantics and accepts browser-auth downtime during the outage
 
 ## Browser-session CSRF posture
 

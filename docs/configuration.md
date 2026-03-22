@@ -53,6 +53,8 @@ Practical modes:
 
 - `SESSION_COOKIE_NAME`
 - `SESSION_COOKIE_SECURE`
+- `SESSION_REDIS_FAIL_CLOSED`
+  When `true`, browser-session creation and resolution fail closed if Redis-backed sessions are unavailable. When `false`, the app falls back to signed-cookie session validation during Redis outages.
 - `SESSION_REMEMBER_DAYS`
 
 ### Storage settings
@@ -146,6 +148,7 @@ These can be environment-locked with:
 ## Resolution notes
 
 - `SESSION_COOKIE_SECURE` defaults from the scheme of `BASE_URL` when unset.
+- `SESSION_REDIS_FAIL_CLOSED` defaults to `false`.
 - `PUBLIC_ORIGIN_ENABLED` defaults to `true`.
 - `TRUSTED_PROXY_CIDRS_ENABLED` defaults to `false`.
 - `TRUSTED_PROXY_CIDRS_ENABLED=true` requires a non-empty `TRUSTED_PROXY_CIDRS` list.
