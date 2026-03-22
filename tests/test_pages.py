@@ -1,11 +1,12 @@
 from datetime import timedelta
 from io import BytesIO
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 import pytest
 
 from imghost.main import app
-from imghost.models import utcnow
+from imghost.models import User, utcnow
 
 from .helpers import (
     PNG_1X1,
@@ -15,6 +16,34 @@ from .helpers import (
     set_user_password,
     wait_for_thumbnail,
 )
+
+HOSTILE_TITLE = '</script><img src=x onerror=alert(1)>'
+HOSTILE_FILENAME = '<svg onload=alert(1)>.png'
+HOSTILE_USERNAME = '</script><img src=x onerror=alert(1)>'
+
+
+def assert_no_active_markup(text: str) -> None:
+    assert "</script><img" not in text
+    assert "<img src=x onerror=alert(1)>" not in text
+    assert "<svg onload=alert(1)>" not in text
+
+
+def create_raw_user(client: TestClient, *, username: str, email: str, is_admin: bool = False) -> User:
+    now = utcnow()
+    user = User(
+        id=str(uuid4()),
+        username=username,
+        email=email,
+        password_hash=None,
+        is_admin=is_admin,
+        suspended=False,
+        quota_bytes=None,
+        rate_limit_rpm=None,
+        rate_limit_bph=None,
+        created_at=now,
+        updated_at=now,
+    )
+    return client.portal.call(client.app.state.imghost.repository.create_user, user)
 
 
 def test_static_base_css_is_served(tmp_path, monkeypatch) -> None:
@@ -472,6 +501,32 @@ def test_anonymous_manage_page_reuses_album_workspace_shell(tmp_path, monkeypatc
         assert '<script src="/static/js/album-detail.js" defer></script>' in page.text
 
 
+def test_anonymous_manage_page_accepts_path_scoped_cookie_after_url_scrub(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("anon.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Anon Manage Cookie Album"},
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+        token = payload["manage_url"].split("token=")[1]
+
+        client.cookies.set(
+            f"imghost_manage_{payload['album_id']}",
+            token,
+            path=f"/manage/{payload['album_id']}",
+        )
+
+        page = client.get(f"/manage/{payload['album_id']}")
+        assert page.status_code == 200
+        assert '"access_mode": "token"' in page.text
+        assert f'"album_id": "{payload["album_id"]}"' in page.text
+
+
 def test_anonymous_manage_page_requires_valid_token(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -687,6 +742,7 @@ def test_admin_users_page_links_to_detail_page_and_detail_requires_real_user(tmp
         detail = client.get(f"/admin/users/{user_id}")
         assert detail.status_code == 200
         assert 'id="admin-user-detail-patch-form"' in detail.text
+        assert 'id="admin-user-detail-is-admin"' in detail.text
         assert 'id="admin-user-detail-reset-form"' in detail.text
         assert 'id="admin-user-detail-delete"' in detail.text
 
@@ -779,6 +835,77 @@ def test_public_user_album_list_page_hides_expired_albums_and_404s_for_missing_u
 
         missing = client.get("/u/does-not-exist")
         assert missing.status_code == 404
+
+
+def test_public_album_page_escapes_hostile_title_filename_and_bootstrap_json(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="hostilealbum", email="hostilealbum@example.com")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", (HOSTILE_FILENAME, BytesIO(PNG_1X1), "image/png"))],
+            data={"title": HOSTILE_TITLE},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+        wait_for_thumbnail(client, upload.json()["media_id"])
+
+        page = client.get(f"/a/{upload.json()['album_id']}")
+        assert page.status_code == 200
+        assert_no_active_markup(page.text)
+        assert "\\u003c/script\\u003e\\u003cimg src=x onerror=alert(1)\\u003e" in page.text
+        assert "&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;" in page.text
+        assert "&lt;svg onload=alert(1)&gt;.png" in page.text
+
+
+def test_public_user_album_list_page_escapes_hostile_album_title(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="hostilelist", email="hostilelist@example.com")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("safe.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": HOSTILE_TITLE},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+        wait_for_thumbnail(client, upload.json()["media_id"])
+
+        page = client.get("/u/hostilelist")
+        assert page.status_code == 200
+        assert_no_active_markup(page.text)
+        assert "&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;" in page.text
+
+
+def test_admin_user_detail_page_escapes_hostile_username_and_bootstrap_json(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    admin_id, _ = create_admin_and_api_key(capsys, username="xssadmin", email="xssadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        hostile_user = create_raw_user(
+            client,
+            username=HOSTILE_USERNAME,
+            email="hostile-bootstrap@example.com",
+        )
+
+        set_user_password(client, admin_id, "admin-pass")
+        login = client.post("/api/v1/auth/login", json={"login": "xssadmin@example.com", "password": "admin-pass"})
+        assert login.status_code == 200
+
+        detail = client.get(f"/admin/users/{hostile_user.id}")
+        assert detail.status_code == 200
+        assert_no_active_markup(detail.text)
+        assert "\\u003c/script\\u003e\\u003cimg src=x onerror=alert(1)\\u003e" in detail.text
+        assert "&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;" in detail.text
 
 
 def test_home_page_clears_stale_session_cookie_and_renders_anonymous_state(tmp_path, monkeypatch) -> None:
