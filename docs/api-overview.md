@@ -12,6 +12,7 @@ This is a human-oriented map of the main routes. It is not meant to replace gene
 - `GET /admin`
 - `GET /admin/users`
 - `GET /admin/users/new`
+- `GET /admin/users/{user_id}`
 - `GET /admin/albums`
 - `GET /admin/config`
 - `GET /admin/ops`
@@ -73,6 +74,9 @@ Anonymous/public mutation rules:
 ## Admin APIs
 
 - `GET /api/v1/admin/users`
+- `GET /api/v1/admin/users/{user_id}`
+- `GET /api/v1/admin/users/{user_id}/stats`
+- `GET /api/v1/admin/users/{user_id}/albums`
 - `POST /api/v1/admin/users`
 - `PATCH /api/v1/admin/users/{user_id}`
 - `POST /api/v1/admin/users/{user_id}/reset-password`
@@ -96,6 +100,14 @@ Anonymous/public mutation rules:
 - `before`
 - `limit` default `100`, maximum `500`
 - `offset`
+
+`GET /api/v1/admin/users/{user_id}/albums` returns a paginated envelope:
+
+- `items`
+- `total`
+- `limit`
+- `offset`
+- `has_more`
 
 ## Health
 

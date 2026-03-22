@@ -4,15 +4,19 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
-from ..payloads import album_to_payload, compatibility_warning
 from ..public_origin import public_base_url
 from .auth_context import (
     authenticated_user,
     require_page_admin,
     require_page_user,
 )
-from .display_helpers import display_timestamp, humanize_bytes, humanize_expiry, is_expired
+from .display_helpers import is_expired
 from .page_context import normalize_next_path, render_template_page, runtime_flags
+from .page_views import (
+    build_public_album_page_context,
+    build_public_user_album_list_context,
+    build_workspace_bootstrap,
+)
 from .request_context import get_state
 
 router = APIRouter()
@@ -115,13 +119,12 @@ async def album_detail_page(request: Request, album_id: str) -> HTMLResponse:
         "Album",
         user=user,
         extra_context={
-            "workspace_bootstrap": {
-                "album_id": album_id,
-                "access_mode": "owner",
-                "workspace_label": "Owner view",
-                "post_delete_url": "/albums",
-                "delete_token": None,
-            }
+            "workspace_bootstrap": build_workspace_bootstrap(
+                album_id,
+                access_mode="owner",
+                post_delete_url="/albums",
+                delete_token=None,
+            )
         },
         script_paths=["js/upload-box.js", "js/album-detail.js"],
     )
@@ -146,13 +149,12 @@ async def manage_album_page(request: Request, album_id: str, token: str | None =
         "Manage Album",
         user=viewer,
         extra_context={
-            "workspace_bootstrap": {
-                "album_id": album_id,
-                "access_mode": "token",
-                "workspace_label": "Manage view",
-                "post_delete_url": "/",
-                "delete_token": token,
-            }
+            "workspace_bootstrap": build_workspace_bootstrap(
+                album_id,
+                access_mode="token",
+                post_delete_url="/",
+                delete_token=token,
+            )
         },
         script_paths=["js/upload-box.js", "js/album-detail.js"],
     )
@@ -297,22 +299,17 @@ async def album_page(request: Request, album_id: str) -> HTMLResponse:
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
     items = await state.repository.list_album_media(album_id)
-    album_payload = album_to_payload(public_base_url(request, state.settings), album, items)
-    album_payload["total_size_display"] = humanize_bytes(int(album_payload["total_size"]))
-    album_payload["updated_at_display"] = display_timestamp(album_payload["updated_at"])
-    for item in album_payload["items"]:
-        item["file_size_display"] = humanize_bytes(int(item["file_size"]))
     return await render_template_page(
         request,
         "pages/public-album.html",
         album.title or "Untitled album",
         user=user,
-        extra_context={
-            "album_payload": album_payload,
-            "expiry_hint": humanize_expiry(album.expires_at),
-            "compat_warnings": [warning for warning in dict.fromkeys(compatibility_warning(item) for item in items) if warning],
-            "is_owner_viewer": user is not None and album.user_id == user.id,
-        },
+        extra_context=build_public_album_page_context(
+            public_base_url(request, state.settings),
+            album,
+            items,
+            viewer_user_id=user.id if user is not None else None,
+        ),
         script_paths=["js/public-album.js"],
     )
 
@@ -322,9 +319,6 @@ async def user_album_list_page(request: Request, username: str) -> HTMLResponse:
     state = get_state(request)
     viewer = await authenticated_user(request, required=False)
     user, albums = await state.uploads.list_public_albums_for_username(username)
-    for album in albums:
-        album["total_size_display"] = humanize_bytes(int(album["total_size"]))
-        album["created_at_display"] = display_timestamp(str(album["created_at"]))
     return await render_template_page(
         request,
         "pages/public-user-albums.html",
@@ -332,6 +326,6 @@ async def user_album_list_page(request: Request, username: str) -> HTMLResponse:
         user=viewer,
         extra_context={
             "public_user": user,
-            "public_albums": albums,
+            **build_public_user_album_list_context(albums),
         },
     )

@@ -1,0 +1,97 @@
+from datetime import UTC, datetime
+
+from imghost.models import Album, Media
+from imghost.web.page_views import (
+    build_public_album_page_context,
+    build_public_user_album_list_context,
+    build_workspace_bootstrap,
+)
+
+
+def test_build_workspace_bootstrap_sets_owner_and_token_labels() -> None:
+    owner = build_workspace_bootstrap("album123", access_mode="owner", post_delete_url="/albums", delete_token=None)
+    assert owner == {
+        "album_id": "album123",
+        "access_mode": "owner",
+        "workspace_label": "Owner view",
+        "post_delete_url": "/albums",
+        "delete_token": None,
+    }
+
+    token = build_workspace_bootstrap("album123", access_mode="token", post_delete_url="/", delete_token="secret")
+    assert token == {
+        "album_id": "album123",
+        "access_mode": "token",
+        "workspace_label": "Manage view",
+        "post_delete_url": "/",
+        "delete_token": "secret",
+    }
+
+
+def test_build_public_album_page_context_adds_display_fields_and_owner_flag() -> None:
+    created = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    album = Album(
+        id="album123",
+        title="Display Album",
+        user_id="user123",
+        cover_media_id=None,
+        delete_token=None,
+        created_at=created,
+        updated_at=created,
+        expires_at=None,
+    )
+    item = Media(
+        id="media123",
+        album_id="album123",
+        user_id="user123",
+        filename_orig="sample.png",
+        media_type="image",
+        format="png",
+        mime_type="image/png",
+        storage_key="media/sample.png",
+        thumb_key="thumb/sample.jpg",
+        thumb_is_orig=False,
+        thumb_status="done",
+        file_size=68,
+        thumb_size=12,
+        width=1,
+        height=1,
+        duration_secs=None,
+        is_animated=False,
+        codec_hint=None,
+        position=0,
+        created_at=created,
+    )
+
+    payload = build_public_album_page_context(
+        "https://testserver",
+        album,
+        [item],
+        viewer_user_id="user123",
+    )
+
+    assert payload["album_payload"]["total_size_display"] == "68 B"
+    assert payload["album_payload"]["updated_at_display"]
+    assert payload["album_payload"]["items"][0]["file_size_display"] == "68 B"
+    assert payload["expiry_hint"] is None
+    assert payload["compat_warnings"] == []
+    assert payload["is_owner_viewer"] is True
+
+
+def test_build_public_user_album_list_context_adds_display_fields_without_mutating_input() -> None:
+    source = [
+        {
+            "id": "album123",
+            "title": "Public Album",
+            "item_count": 1,
+            "total_size": 68,
+            "created_at": "2026-01-02T03:04:05+00:00",
+        }
+    ]
+
+    payload = build_public_user_album_list_context(source)
+
+    assert payload["public_albums"][0]["total_size_display"] == "68 B"
+    assert payload["public_albums"][0]["created_at_display"]
+    assert "total_size_display" not in source[0]
+    assert "created_at_display" not in source[0]

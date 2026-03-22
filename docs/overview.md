@@ -18,13 +18,32 @@
 
 ## Main moving parts
 
-- Web app: FastAPI app in [`src/imghost/main.py`](/home/james/imghost/src/imghost/main.py)
+- App bootstrap: FastAPI app wiring in [`src/imghost/main.py`](/home/james/imghost/src/imghost/main.py)
+- Route modules: focused web routes in [`src/imghost/web`](/home/james/imghost/src/imghost/web)
 - Database: PostgreSQL state via [`src/imghost/repositories.py`](/home/james/imghost/src/imghost/repositories.py)
 - Storage: filesystem or S3-compatible backend via [`src/imghost/storage.py`](/home/james/imghost/src/imghost/storage.py)
 - Background jobs: in-process async, sync, or Redis-backed task queue via [`src/imghost/tasks.py`](/home/james/imghost/src/imghost/tasks.py)
 - Sessions: signed-cookie fallback with Redis-backed session records when available via [`src/imghost/sessions.py`](/home/james/imghost/src/imghost/sessions.py)
 - Rate limits: in-memory fallback with optional Redis-backed counters via [`src/imghost/rate_limits.py`](/home/james/imghost/src/imghost/rate_limits.py)
 - Shared JSON payload helpers via [`src/imghost/payloads.py`](/home/james/imghost/src/imghost/payloads.py)
+- Page/bootstrap view shaping via [`src/imghost/web/page_views.py`](/home/james/imghost/src/imghost/web/page_views.py)
+- Shared page/API pagination validation via [`src/imghost/web/pagination.py`](/home/james/imghost/src/imghost/web/pagination.py)
+
+## Web structure
+
+The web layer is intentionally split by responsibility:
+
+- [`src/imghost/web/auth_context.py`](/home/james/imghost/src/imghost/web/auth_context.py): auth/session resolution and page/admin guards
+- [`src/imghost/web/csrf.py`](/home/james/imghost/src/imghost/web/csrf.py): browser-session CSRF enforcement
+- [`src/imghost/web/page_context.py`](/home/james/imghost/src/imghost/web/page_context.py): template rendering and shared page context
+- [`src/imghost/web/request_context.py`](/home/james/imghost/src/imghost/web/request_context.py): request/app-state helpers
+- [`src/imghost/web/pages.py`](/home/james/imghost/src/imghost/web/pages.py): browser page routes
+- [`src/imghost/web/auth.py`](/home/james/imghost/src/imghost/web/auth.py): auth API routes
+- [`src/imghost/web/public_api.py`](/home/james/imghost/src/imghost/web/public_api.py): upload/album/media routes
+- [`src/imghost/web/user_api.py`](/home/james/imghost/src/imghost/web/user_api.py): current-user API routes
+- [`src/imghost/web/admin_api.py`](/home/james/imghost/src/imghost/web/admin_api.py): admin API routes
+- [`src/imghost/web/media.py`](/home/james/imghost/src/imghost/web/media.py): media-serving routes
+- [`src/imghost/web/health.py`](/home/james/imghost/src/imghost/web/health.py): liveness/readiness routes
 
 ## Deployment model
 

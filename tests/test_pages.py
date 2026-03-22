@@ -376,6 +376,10 @@ def test_private_album_page_renders_owner_workspace_shell(tmp_path, monkeypatch,
         assert "Manage album" not in page.text
         assert "Private album" not in page.text
         assert 'id="album-detail-bootstrap"' in page.text
+        assert '"access_mode": "owner"' in page.text
+        assert '"workspace_label": "Owner view"' in page.text
+        assert '"post_delete_url": "/albums"' in page.text
+        assert '"delete_token": null' in page.text
         assert 'id="album-detail-title"' in page.text
         assert 'id="album-detail-title-input"' in page.text
         assert 'id="album-detail-add-images-button"' in page.text
@@ -408,6 +412,8 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         assert '<link rel="stylesheet" href="/static/css/base.css">' in anonymous_page.text
         assert '<nav class="site-nav" aria-label="Primary">' in anonymous_page.text
         assert 'id="public-album-bootstrap"' in anonymous_page.text
+        assert '"total_size_display"' in anonymous_page.text
+        assert '"file_size_display"' in anonymous_page.text
         assert '<script src="/static/js/public-album.js" defer></script>' in anonymous_page.text
         assert "Public album" in anonymous_page.text
         assert "Edit Album" not in anonymous_page.text
@@ -456,6 +462,8 @@ def test_anonymous_manage_page_reuses_album_workspace_shell(tmp_path, monkeypatc
         assert page.status_code == 200
         assert 'id="album-detail-bootstrap"' in page.text
         assert '"access_mode": "token"' in page.text
+        assert '"workspace_label": "Manage view"' in page.text
+        assert '"post_delete_url": "/"' in page.text
         assert '"delete_token": "' in page.text
         assert "Manage view" in page.text
         assert 'id="album-detail-add-images-button"' in page.text
@@ -507,6 +515,7 @@ def test_public_user_album_list_page_uses_template_shell(tmp_path, monkeypatch, 
         assert '<nav class="site-nav" aria-label="Primary">' in page.text
         assert "Public user album list." in page.text
         assert "Showcase Album" in page.text
+        assert "Created " in page.text
         assert f'/a/{upload.json()["album_id"]}' in page.text
 
 
@@ -671,6 +680,9 @@ def test_admin_users_page_links_to_detail_page_and_detail_requires_real_user(tmp
         users = client.get("/admin/users")
         assert users.status_code == 200
         assert '<script src="/static/js/admin-users.js" defer></script>' in users.text
+        assert "Patch User" not in users.text
+        assert "Reset Password" not in users.text
+        assert "Delete User" not in users.text
 
         detail = client.get(f"/admin/users/{user_id}")
         assert detail.status_code == 200

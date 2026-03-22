@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
 from ..service import PasswordChangeInput
 from ..public_origin import public_base_url
 from .auth_context import authenticated_principal, authenticated_user
+from .pagination import validate_pagination
 from .request_context import correlation_id, get_state
 
 router = APIRouter()
@@ -30,10 +31,7 @@ async def get_current_user_albums(request: Request, limit: int = 10, offset: int
     state = get_state(request)
     base_url = public_base_url(request, state.settings)
     user = await authenticated_user(request, required=True)
-    if limit < 1 or limit > 200:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 200.")
-    if offset < 0:
-        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    validate_pagination(limit, offset)
     payload = await state.uploads.get_current_user_albums_page(user, base_url=base_url, limit=limit, offset=offset)
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 

@@ -12,6 +12,7 @@ from ..payloads import album_to_payload
 from ..public_origin import public_base_url
 from ..service import AdminAlbumUpdateInput, UNSET, UserCreateInput, UserUpdateInput
 from .auth_context import require_admin_user
+from .pagination import validate_pagination
 from .request_context import correlation_id, get_state
 
 router = APIRouter()
@@ -66,10 +67,7 @@ async def admin_list_users(
 ) -> JSONResponse:
     state = get_state(request)
     await require_admin_user(request)
-    if limit < 1 or limit > 200:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 200.")
-    if offset < 0:
-        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    validate_pagination(limit, offset)
     payload = await state.uploads.list_users_with_usage_page(
         q=(q or "").strip() or None,
         is_admin=is_admin,
@@ -100,10 +98,7 @@ async def admin_get_user_stats(request: Request, user_id: str) -> JSONResponse:
 async def admin_list_user_albums(request: Request, user_id: str, limit: int = 10, offset: int = 0) -> JSONResponse:
     state = get_state(request)
     await require_admin_user(request)
-    if limit < 1 or limit > 200:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 200.")
-    if offset < 0:
-        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    validate_pagination(limit, offset)
     payload = await state.uploads.list_albums_for_user_admin_page(
         user_id,
         base_url=public_base_url(request, state.settings),
@@ -124,10 +119,7 @@ async def admin_list_albums(
 ) -> JSONResponse:
     state = get_state(request)
     await require_admin_user(request)
-    if limit < 1 or limit > 200:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 200.")
-    if offset < 0:
-        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    validate_pagination(limit, offset)
     payload = await state.uploads.list_albums_for_admin_page(
         q=(q or "").strip() or None,
         owner=(owner or "").strip() or None,
@@ -152,10 +144,7 @@ async def admin_list_audit(
 ) -> JSONResponse:
     state = get_state(request)
     await require_admin_user(request)
-    if limit < 1 or limit > 500:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 500.")
-    if offset < 0:
-        raise HTTPException(status_code=400, detail="offset must be non-negative.")
+    validate_pagination(limit, offset, max_limit=500)
     events = await state.audit.query_audit_log(
         event_type=event_type,
         actor_id=actor_id,

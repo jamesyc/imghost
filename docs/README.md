@@ -5,7 +5,7 @@ This directory holds implementation-oriented documentation for the current `imgh
 ## Documents
 
 - [overview.md](/home/james/imghost/docs/overview.md)
-  High-level summary of what the app does, the main moving parts, and the supported deployment shapes.
+  High-level summary of what the app does, the current `src/imghost/web` module layout, the main moving parts, and the supported deployment shapes.
 
 - [setup.md](/home/james/imghost/docs/setup.md)
   Opinionated step-by-step setup guide for a practical Docker plus reverse-proxy deployment.
@@ -38,7 +38,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   Health endpoint contract, runtime status, probe semantics, low-noise logging model, degraded-mode behavior, and browser-session mutation troubleshooting.
 
 - [testing.md](/home/james/imghost/docs/testing.md)
-  Test command, test database safety model, browser-session CSRF coverage, and what the suite expects from the local environment.
+  Test command, test database safety model, current full-suite baseline, browser-session CSRF coverage, and what the suite expects from the local environment.
 
 - [api-overview.md](/home/james/imghost/docs/api-overview.md)
   Route map for the main HTML, API, admin, and health endpoints.

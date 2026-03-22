@@ -60,8 +60,46 @@ Purpose:
 
 Purpose:
 
-- user management
-- album management
-- runtime config
-- audit log
-- runtime/ops inspection
+- admin overview and quick navigation into the focused admin tools
+
+## `/admin/users`
+
+Purpose:
+
+- search and page through users
+- open the focused admin detail page for a specific account
+
+This page no longer owns the full patch/reset/delete workflow inline.
+
+## `/admin/users/{user_id}`
+
+Purpose:
+
+- inspect one account in depth
+- review storage/account stats
+- page through the user’s owned albums
+- patch account state
+- reset password
+- delete user
+
+## `/admin/albums`
+
+Purpose:
+
+- search and page through albums across the system
+- review album ownership and summary information
+- perform admin album actions
+
+## `/admin/config`
+
+Purpose:
+
+- inspect and update runtime config values
+
+## `/admin/ops`
+
+Purpose:
+
+- runtime-status inspection
+- proxy/public-origin trust inspection
+- audit log queries

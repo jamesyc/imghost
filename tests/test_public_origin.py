@@ -373,3 +373,20 @@ def test_local_public_origin_mode_still_ignores_untrusted_forwarded_headers_when
     settings = _settings(enabled=True, cidrs=("127.0.0.1/32",))
     settings = Settings(**{**settings.__dict__, "public_origin_enabled": False, "base_url": "http://192.168.0.100:8000"})
     assert public_base_url(request, settings) == "http://192.168.0.55:8000"
+
+
+def test_local_public_origin_mode_accepts_trusted_forwarded_headers_when_proxy_peer_matches() -> None:
+    request = _request(
+        host="backend:8000",
+        scheme="http",
+        headers=[
+            (b"host", b"backend:8000"),
+            (b"x-forwarded-proto", b"https"),
+            (b"x-forwarded-host", b"albums.lan.example"),
+        ],
+        client_host="127.0.0.1",
+    )
+
+    settings = _settings(enabled=True, cidrs=("127.0.0.1/32",))
+    settings = Settings(**{**settings.__dict__, "public_origin_enabled": False, "base_url": "http://192.168.0.100:8000"})
+    assert public_base_url(request, settings) == "https://albums.lan.example"

@@ -505,6 +505,74 @@ def test_browser_session_mutation_allows_direct_lan_origin_when_public_origin_mo
         assert rotated.json()["api_key"] != old_api_key
 
 
+def test_browser_session_mutation_allows_trusted_forwarded_origin_in_local_mode(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://192.168.0.100:8000")
+    monkeypatch.setenv("PUBLIC_ORIGIN_ENABLED", "false")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, old_api_key = create_user_and_api_key(capsys, username="csrfproxylocal", email="csrfproxylocal@example.com")
+
+    with TestClient(app, base_url="http://backend:8000", client=("127.0.0.1", 50000)) as client:
+        forwarded_headers = {
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "albums.lan.example",
+        }
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfproxylocal@example.com", "password": "open-sesame"},
+            headers=forwarded_headers,
+        )
+        assert login.status_code == 200
+
+        rotated = client.post(
+            "/api/v1/user/me/api-key",
+            headers={
+                **forwarded_headers,
+                **browser_session_headers("https://albums.lan.example", "/settings"),
+            },
+        )
+        assert rotated.status_code == 200
+        assert rotated.json()["api_key"] != old_api_key
+
+
+def test_browser_session_mutation_rejects_mismatched_forwarded_origin_in_local_mode(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://192.168.0.100:8000")
+    monkeypatch.setenv("PUBLIC_ORIGIN_ENABLED", "false")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="csrfproxymismatch", email="csrfproxymismatch@example.com")
+
+    with TestClient(app, base_url="http://backend:8000", client=("127.0.0.1", 50000)) as client:
+        forwarded_headers = {
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "albums.lan.example",
+        }
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "csrfproxymismatch@example.com", "password": "open-sesame"},
+            headers=forwarded_headers,
+        )
+        assert login.status_code == 200
+
+        blocked = client.post(
+            "/api/v1/user/me/api-key",
+            headers={
+                **forwarded_headers,
+                **browser_session_headers("https://other.lan.example", "/settings"),
+            },
+        )
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == "CSRF protection blocked the request."
+
+
 def test_browser_session_mutation_rejects_malformed_referer_without_origin(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
