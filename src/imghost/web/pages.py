@@ -134,14 +134,15 @@ async def album_detail_page(request: Request, album_id: str) -> HTMLResponse:
 async def manage_album_page(request: Request, album_id: str, token: str | None = None) -> HTMLResponse:
     if not is_valid_id(album_id, ALBUM_ID_LENGTH):
         raise HTTPException(status_code=404)
-    if not token:
+    active_token = token or request.cookies.get(f"imghost_manage_{album_id}")
+    if not active_token:
         raise HTTPException(status_code=403, detail="Missing manage token.")
     state = get_state(request)
     viewer = await authenticated_user(request, required=False)
     album = await state.repository.get_album(album_id)
     if album is None or is_expired(album.expires_at) or album.delete_token is None:
         raise HTTPException(status_code=404)
-    if token != album.delete_token:
+    if active_token != album.delete_token:
         raise HTTPException(status_code=403, detail="Invalid manage token.")
     return await render_template_page(
         request,
@@ -153,7 +154,7 @@ async def manage_album_page(request: Request, album_id: str, token: str | None =
                 album_id,
                 access_mode="token",
                 post_delete_url="/",
-                delete_token=token,
+                delete_token=active_token,
             )
         },
         script_paths=["js/upload-box.js", "js/album-detail.js"],

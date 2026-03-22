@@ -29,6 +29,21 @@ const state = {
 let albumUploadController = null;
 let titleToastTimer = null;
 
+const initializeAnonymousManageAccess = () => {
+  if (state.accessMode !== "token" || !state.albumId || !state.deleteToken) {
+    return;
+  }
+  const currentUrl = new URL(window.location.href);
+  const urlHasToken = currentUrl.searchParams.has("token");
+  window.imghostAnonAlbums?.remember?.({ albumId: state.albumId, deleteToken: state.deleteToken });
+  if (!urlHasToken) {
+    return;
+  }
+  currentUrl.searchParams.delete("token");
+  const nextPath = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
+  window.history.replaceState({}, document.title, nextPath || currentUrl.pathname);
+};
+
 const showMessage = (message) => {
   if (flash) {
     flash.textContent = message || "";
@@ -92,6 +107,10 @@ const requestJson = async (url, options = {}) => {
 };
 
 const publicAlbumUrl = (albumId) => `${window.location.origin}/a/${albumId}`;
+const manageAlbumUrl = (albumId) =>
+  state.deleteToken && window.imghostAnonAlbums?.manageUrl
+    ? `${window.location.origin}${window.imghostAnonAlbums.manageUrl(albumId, state.deleteToken)}`
+    : "";
 
 const splitLinkControl = (label, url, ariaLabel) => `
   <div class="split-link-control">
@@ -137,7 +156,11 @@ const setUploadModalOpen = (open) => {
 
 const renderActions = (album) => {
   if (actionsNode) {
-    actionsNode.innerHTML = splitLinkControl("Public Page", publicAlbumUrl(album.id), "Public page URL");
+    const links = [splitLinkControl("Public Page", publicAlbumUrl(album.id), "Public page URL")];
+    if (state.accessMode === "token" && state.deleteToken) {
+      links.push(splitLinkControl("Manage Link", manageAlbumUrl(album.id), "Private manage link URL"));
+    }
+    actionsNode.innerHTML = links.join("");
   }
   if (metadataActionsNode) {
     metadataActionsNode.innerHTML = `
@@ -262,6 +285,8 @@ const loadAlbum = async () => {
   const album = await requestJson(withAlbumAccess(`/api/v1/album/${state.albumId}`));
   renderAlbum(album);
 };
+
+initializeAnonymousManageAccess();
 
 const persistOrder = async (mediaIds, successMessage = "Album order updated.") => {
   if (!state.albumId || !mediaIds.length || state.reorderInFlight) {
