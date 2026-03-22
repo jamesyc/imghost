@@ -100,11 +100,18 @@ Delete-token album manage requests are not bearer-authenticated. If the browser 
 
 When Redis is down and `REDIS_MODE=auto`:
 
+- new browser sessions can still be created
 - sessions fall back to signed-cookie validation
 - rate limits fall back to in-memory counters
 - Redis task queue falls back to in-process async enqueue
 
 That degraded state should still be reflected as ready by `/health/ready` unless Redis is configured as required.
+
+Availability-first tradeoff:
+
+- browser auth keeps working
+- logout still clears the cookie in the current browser
+- Redis-backed revocation is temporarily unavailable until Redis recovers
 
 ## Current Docker operational caveats
 

@@ -8,7 +8,7 @@ uv run pytest -q
 
 Current full-suite baseline:
 
-- 196 passing tests
+- 206 passing tests
 
 ## Test database safety
 
@@ -42,6 +42,7 @@ Current tests cover:
 - auth redirect normalization
 - API keys and ShareX behavior
 - Redis fallback behavior
+- Redis session creation and logout behavior during outages
 - proxy/origin handling
 - page bootstrap/view-model helpers
 - media processors

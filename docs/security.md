@@ -26,6 +26,12 @@ The app intentionally prefers graceful availability:
 
 This means a Redis outage degrades revocation semantics rather than hard-failing authentication.
 
+Explicit posture:
+
+- keep the app usable during Redis outages
+- accept that Redis-backed session invalidation is temporarily weaker in that state
+- rely on browser cookie clearing for logout in the current client while degraded
+
 ## Browser-session CSRF posture
 
 - browser-session-authenticated `POST`, `PATCH`, and `DELETE` routes require a trusted `Origin` or `Referer`

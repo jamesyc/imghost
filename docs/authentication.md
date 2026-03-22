@@ -35,9 +35,15 @@ Behavior:
 Session storage model:
 
 - when Redis is healthy and enabled, a Redis session record is written and the cookie is marked `store=redis`
-- when Redis is unavailable, the signed cookie still authenticates the user
+- when Redis is unavailable, session creation and resolution fall back to signed-cookie behavior so browser auth keeps working
 
 This is intentionally availability-first rather than purely server-side.
+
+Operational consequence:
+
+- the app keeps working through Redis outages
+- logout still clears the browser cookie
+- server-side revocation semantics are weaker during the outage because Redis session records cannot be consulted
 
 ## Browser-session mutation protection
 

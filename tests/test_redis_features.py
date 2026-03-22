@@ -333,6 +333,31 @@ def test_app_session_auth_gracefully_falls_back_when_redis_is_down(tmp_path, mon
         assert me.json()["username"] == "cookiefallback"
 
 
+def test_app_registration_still_creates_a_working_session_when_redis_is_down_from_start(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    fake.fail = True
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "fallbackcreate",
+                "email": "fallbackcreate@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 200
+        assert me.json()["username"] == "fallbackcreate"
+
+
 def test_app_logout_still_clears_cookie_when_redis_delete_fails(tmp_path, monkeypatch) -> None:
     fake = FakeRedis()
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
