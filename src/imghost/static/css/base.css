@@ -328,6 +328,10 @@ body::after {
   gap: 24px;
 }
 
+.section-gap-top {
+  margin-top: 24px;
+}
+
 .admin-overview-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
