@@ -16,6 +16,7 @@ from .web.health import router as health_router
 from .web.media import router as media_router
 from .web.pages import router as pages_router
 from .web.public_api import router as public_api_router
+from .web.request_context import assign_request_context
 from .web.security_headers import add_security_headers
 from .web.user_api import router as user_api_router
 
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="imghost V1", lifespan=lifespan)
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.middleware("http")(assign_request_context)
 app.middleware("http")(add_security_headers)
 app.middleware("http")(enforce_session_csrf)
 app.middleware("http")(clear_stale_session_cookie)

@@ -141,6 +141,14 @@ class AuditEvent:
     correlation_id: str
     metadata: dict[str, Any]
     created_at: datetime
+    action: str | None = None
+    result: str | None = None
+    source: str | None = None
+    actor_type: str | None = None
+    request_id: str | None = None
+    route: str | None = None
+    method: str | None = None
+    reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -154,4 +162,12 @@ class AuditEvent:
         values.setdefault("actor_id", None)
         values.setdefault("actor_ip_hash", None)
         values.setdefault("metadata", {})
+        values.setdefault("action", None)
+        values.setdefault("result", None)
+        values.setdefault("source", None)
+        values.setdefault("actor_type", None)
+        values.setdefault("request_id", None)
+        values.setdefault("route", None)
+        values.setdefault("method", None)
+        values.setdefault("reason", None)
         return cls(**values)

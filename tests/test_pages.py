@@ -688,6 +688,10 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert "<h2>Admin-only runtime details</h2>" in ops.text
         assert "<h2>Network trust</h2>" in ops.text
         assert 'id="admin-audit-form"' in ops.text
+        assert 'name="action"' in ops.text
+        assert 'name="result"' in ops.text
+        assert 'name="source"' in ops.text
+        assert 'name="request_id"' in ops.text
         assert 'value="25"' in ops.text
         assert 'class="row row-actions section-gap-top"' in ops.text
         assert 'id="admin-audit-prev"' in ops.text

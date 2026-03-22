@@ -52,6 +52,32 @@
             <input type="text" name="event_type" placeholder="album_deleted">
           </label>
           <label>
+            <strong>Action</strong>
+            <input type="text" name="action" placeholder="auth.login.success">
+          </label>
+          <label>
+            <strong>Result</strong>
+            <select name="result">
+              <option value="">Any</option>
+              <option value="success">Success</option>
+              <option value="denied">Denied</option>
+              <option value="error">Error</option>
+            </select>
+          </label>
+          <label>
+            <strong>Source</strong>
+            <select name="source">
+              <option value="">Any</option>
+              <option value="web">web</option>
+              <option value="api">api</option>
+              <option value="cli">cli</option>
+              <option value="worker">worker</option>
+              <option value="system">system</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-grid">
+          <label>
             <strong>Actor ID</strong>
             <input type="text" name="actor_id" placeholder="User who triggered it">
           </label>
@@ -62,6 +88,10 @@
           <label>
             <strong>Correlation ID</strong>
             <input type="text" name="correlation_id" placeholder="Trace a request">
+          </label>
+          <label>
+            <strong>Request ID</strong>
+            <input type="text" name="request_id" placeholder="Trace a single request">
           </label>
         </div>
         <div class="form-grid">

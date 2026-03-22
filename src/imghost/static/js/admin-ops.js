@@ -64,13 +64,19 @@ if (adminRuntimeStatus && adminAuditRoot) {
             <div class="admin-audit-entry-header">
               <div>
                 <p class="eyebrow">${window.escapeAdminHtml(entry.event_type)}</p>
-                <h3>${window.escapeAdminHtml(entry.target_type)} · ${window.escapeAdminHtml(entry.target_id)}</h3>
+                <h3>${window.escapeAdminHtml(entry.action || "unknown.action")}</h3>
               </div>
               <p class="hint">${window.adminFormatDateTime(entry.created_at)}</p>
             </div>
             <div class="admin-audit-meta">
-              <p><strong>Actor:</strong> ${window.escapeAdminHtml(entry.actor_id || "Anonymous")}</p>
-              <p><strong>Correlation:</strong> ${window.escapeAdminHtml(entry.correlation_id)}</p>
+              <p><strong>Result:</strong> ${window.escapeAdminHtml(entry.result || "unknown")}</p>
+              <p><strong>Source:</strong> ${window.escapeAdminHtml(entry.source || "unknown")}</p>
+              <p><strong>Actor:</strong> ${window.escapeAdminHtml(entry.actor_id || "Anonymous")} (${window.escapeAdminHtml(entry.actor_type || "unknown")})</p>
+              <p><strong>Target:</strong> ${window.escapeAdminHtml(entry.target_type)} · ${window.escapeAdminHtml(entry.target_id)}</p>
+              <p><strong>Route:</strong> ${window.escapeAdminHtml(entry.method || "UNKNOWN")} ${window.escapeAdminHtml(entry.route || "n/a")}</p>
+              <p><strong>Correlation:</strong> ${window.escapeAdminHtml(entry.correlation_id || "n/a")}</p>
+              <p><strong>Request ID:</strong> ${window.escapeAdminHtml(entry.request_id || "n/a")}</p>
+              <p><strong>Reason:</strong> ${window.escapeAdminHtml(entry.reason || "n/a")}</p>
               <p><strong>Event ID:</strong> ${window.escapeAdminHtml(entry.id)}</p>
             </div>
             ${metadata}

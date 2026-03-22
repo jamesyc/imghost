@@ -5,6 +5,9 @@ from urllib.parse import urlsplit
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from ..audit import actions
+from ..audit.context import anonymous_actor, build_request_context, build_runtime_process_context, hash_client_ip
+from ..audit.models import AuditObject
 from ..config import Settings
 from ..public_origin import (
     _forwarded_origin,
@@ -62,5 +65,18 @@ async def enforce_session_csrf(request: Request, call_next):
     if not request.cookies.get(state.settings.session_cookie_name):
         return await call_next(request)
     if not _has_trusted_csrf_source(request, state.settings):
+        request_context = build_request_context(request, auth_method="session")
+        await state.audit.emit_action(
+            event_type=actions.CSRF_BLOCKED,
+            action="csrf.blocked",
+            result="denied",
+            actor=anonymous_actor(),
+            object=AuditObject(type="request", id=request.url.path),
+            metadata={"source": "web", "correlation_id": request_context.correlation_id},
+            request=request_context,
+            process=build_runtime_process_context("web"),
+            reason="untrusted_csrf_source",
+            actor_ip_hash=hash_client_ip(request_context.client_ip),
+        )
         return JSONResponse({"detail": "CSRF protection blocked the request."}, status_code=403)
     return await call_next(request)

@@ -6,6 +6,9 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
+from ..audit import actions
+from ..audit.context import build_request_context, build_runtime_process_context, hash_client_ip, user_actor
+from ..audit.models import AuditObject
 from ..events import ConfigChanged
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..payloads import album_to_payload
@@ -16,6 +19,37 @@ from .pagination import validate_pagination
 from .request_context import correlation_id, get_state
 
 router = APIRouter()
+
+
+async def _audit_admin_read(
+    request: Request,
+    *,
+    admin,
+    resource: str,
+    object_type: str = "admin_api",
+    object_id: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    state = get_state(request)
+    request_context = build_request_context(request)
+    payload = {
+        "resource": resource,
+        "source": "api",
+        "correlation_id": correlation_id(request),
+    }
+    if metadata:
+        payload.update(metadata)
+    await state.audit.emit_action(
+        event_type=actions.ADMIN_API_READ,
+        action=f"{resource}.read",
+        result="success",
+        actor=user_actor(admin, actor_type="admin"),
+        object=AuditObject(type=object_type, id=object_id or request.url.path),
+        metadata=payload,
+        request=request_context,
+        process=build_runtime_process_context("api"),
+        actor_ip_hash=hash_client_ip(request_context.client_ip),
+    )
 
 
 class AdminUserCreateRequest(BaseModel):
@@ -67,7 +101,7 @@ async def admin_list_users(
     offset: int = 0,
 ) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     validate_pagination(limit, offset)
     payload = await state.uploads.list_users_with_usage_page(
         q=(q or "").strip() or None,
@@ -76,35 +110,51 @@ async def admin_list_users(
         limit=limit,
         offset=offset,
     )
+    await _audit_admin_read(
+        request,
+        admin=admin,
+        resource="admin.users",
+        metadata={"query": {"q": q, "is_admin": is_admin, "suspended": suspended, "limit": limit, "offset": offset}},
+    )
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
 @router.get("/api/v1/admin/users/{user_id}")
 async def admin_get_user(request: Request, user_id: str) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     payload = await state.uploads.get_user_with_usage_for_admin(user_id)
+    await _audit_admin_read(request, admin=admin, resource="admin.user", object_type="user", object_id=user_id)
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
 @router.get("/api/v1/admin/users/{user_id}/stats")
 async def admin_get_user_stats(request: Request, user_id: str) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     payload = await state.uploads.get_user_storage_stats_for_admin(user_id)
+    await _audit_admin_read(request, admin=admin, resource="admin.user_stats", object_type="user", object_id=user_id)
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
 @router.get("/api/v1/admin/users/{user_id}/albums")
 async def admin_list_user_albums(request: Request, user_id: str, limit: int = 10, offset: int = 0) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     validate_pagination(limit, offset)
     payload = await state.uploads.list_albums_for_user_admin_page(
         user_id,
         base_url=public_base_url(request, state.settings),
         limit=limit,
         offset=offset,
+    )
+    await _audit_admin_read(
+        request,
+        admin=admin,
+        resource="admin.user_albums",
+        object_type="user",
+        object_id=user_id,
+        metadata={"query": {"limit": limit, "offset": offset}},
     )
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
@@ -119,7 +169,7 @@ async def admin_list_albums(
     offset: int = 0,
 ) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     validate_pagination(limit, offset)
     payload = await state.uploads.list_albums_for_admin_page(
         q=(q or "").strip() or None,
@@ -128,6 +178,12 @@ async def admin_list_albums(
         limit=limit,
         offset=offset,
     )
+    await _audit_admin_read(
+        request,
+        admin=admin,
+        resource="admin.albums",
+        metadata={"query": {"q": q, "owner": owner, "anonymous": anonymous, "limit": limit, "offset": offset}},
+    )
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
@@ -135,26 +191,56 @@ async def admin_list_albums(
 async def admin_list_audit(
     request: Request,
     event_type: str | None = None,
+    action: str | None = None,
+    result: str | None = None,
+    source: str | None = None,
     actor_id: str | None = None,
     user_id: str | None = None,
     correlation_id_filter: str | None = Query(default=None, alias="correlation_id"),
+    request_id: str | None = None,
     after: datetime | None = None,
     before: datetime | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     validate_pagination(limit, offset, max_limit=500)
     events = await state.audit.query_audit_log(
         event_type=event_type,
+        action=action,
+        result=result,
+        source=source,
         actor_id=actor_id,
         user_id=user_id,
         correlation_id=correlation_id_filter,
+        request_id=request_id,
         after=after,
         before=before,
         limit=limit,
         offset=offset,
+    )
+    await _audit_admin_read(
+        request,
+        admin=admin,
+        resource="admin.audit",
+        metadata={
+            "query": {
+                "event_type": event_type,
+                "action": action,
+                "result": result,
+                "source": source,
+                "actor_id": actor_id,
+                "user_id": user_id,
+                "correlation_id": correlation_id_filter,
+                "request_id": request_id,
+                "after": after.isoformat() if after is not None else None,
+                "before": before.isoformat() if before is not None else None,
+                "limit": limit,
+                "offset": offset,
+            },
+            "result_count": len(events),
+        },
     )
     return JSONResponse([event.to_dict() for event in events], headers={"X-Correlation-ID": correlation_id(request)})
 
@@ -162,8 +248,9 @@ async def admin_list_audit(
 @router.get("/api/v1/admin/config")
 async def admin_get_config(request: Request) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     payload = await state.runtime_config.list_effective()
+    await _audit_admin_read(request, admin=admin, resource="admin.config")
     return JSONResponse({key: value.to_dict() for key, value in payload.items()}, headers={"X-Correlation-ID": correlation_id(request)})
 
 

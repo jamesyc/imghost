@@ -3,6 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from ..audit import actions
+from ..audit.context import build_request_context, build_runtime_process_context, hash_client_ip, user_actor
+from ..audit.models import AuditObject
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..public_origin import public_base_url
 from .auth_context import (
@@ -20,6 +23,22 @@ from .page_views import (
 from .request_context import get_state
 
 router = APIRouter()
+
+
+async def _audit_admin_page_view(request: Request, user, page_name: str, *, object_id: str | None = None) -> None:
+    state = get_state(request)
+    request_context = build_request_context(request)
+    await state.audit.emit_action(
+        event_type=actions.ADMIN_PAGE_VIEWED,
+        action=f"{page_name}.view",
+        result="success",
+        actor=user_actor(user, actor_type="admin"),
+        object=AuditObject(type="admin_page", id=object_id or request.url.path),
+        metadata={"page": page_name, "source": "web", "correlation_id": request_context.correlation_id},
+        request=request_context,
+        process=build_runtime_process_context("web"),
+        actor_ip_hash=hash_client_ip(request_context.client_ip),
+    )
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -187,6 +206,7 @@ async def admin_page(request: Request) -> HTMLResponse:
         return user_or_redirect
     user = user_or_redirect
     session_user = await state.uploads.get_current_user_summary(user)
+    await _audit_admin_page_view(request, user, "admin.overview")
     return await render_template_page(
         request,
         "pages/admin.html",
@@ -203,6 +223,7 @@ async def admin_users_page(request: Request) -> HTMLResponse:
     if isinstance(user_or_redirect, RedirectResponse):
         return user_or_redirect
     user = user_or_redirect
+    await _audit_admin_page_view(request, user, "admin.users")
     return await render_template_page(
         request,
         "pages/admin-users.html",
@@ -218,6 +239,7 @@ async def admin_users_new_page(request: Request) -> HTMLResponse:
     if isinstance(user_or_redirect, RedirectResponse):
         return user_or_redirect
     user = user_or_redirect
+    await _audit_admin_page_view(request, user, "admin.users_new")
     return await render_template_page(
         request,
         "pages/admin-users-new.html",
@@ -235,6 +257,7 @@ async def admin_user_detail_page(request: Request, user_id: str) -> HTMLResponse
         return user_or_redirect
     user = user_or_redirect
     admin_user = await state.uploads.get_user_with_usage_for_admin(user_id)
+    await _audit_admin_page_view(request, user, "admin.user_detail", object_id=user_id)
     return await render_template_page(
         request,
         "pages/admin-user-detail.html",
@@ -251,6 +274,7 @@ async def admin_albums_page(request: Request) -> HTMLResponse:
     if isinstance(user_or_redirect, RedirectResponse):
         return user_or_redirect
     user = user_or_redirect
+    await _audit_admin_page_view(request, user, "admin.albums")
     return await render_template_page(
         request,
         "pages/admin-albums.html",
@@ -266,6 +290,7 @@ async def admin_config_page(request: Request) -> HTMLResponse:
     if isinstance(user_or_redirect, RedirectResponse):
         return user_or_redirect
     user = user_or_redirect
+    await _audit_admin_page_view(request, user, "admin.config")
     return await render_template_page(
         request,
         "pages/admin-config.html",
@@ -281,6 +306,7 @@ async def admin_ops_page(request: Request) -> HTMLResponse:
     if isinstance(user_or_redirect, RedirectResponse):
         return user_or_redirect
     user = user_or_redirect
+    await _audit_admin_page_view(request, user, "admin.ops")
     return await render_template_page(
         request,
         "pages/admin-ops.html",

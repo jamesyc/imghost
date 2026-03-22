@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .audit import PostgresAuditLog, register_audit_listeners
+from .audit import AuditService, JsonLogAuditSink, PostgresAuditSink, actions, register_audit_subscribers
+from .audit.context import build_runtime_process_context
+from .audit.models import AuditActor, AuditObject
 from .config import Settings
 from .db import Database
 from .events import EventBus, MediaUploaded
@@ -27,7 +29,11 @@ class AppState:
         self.observability = ObservabilityState()
         self.event_bus = EventBus()
         self.repository = PostgresRepository(self.database)
-        self.audit = PostgresAuditLog(self.database)
+        audit_db_sink = PostgresAuditSink(self.database)
+        self.audit = AuditService(
+            [audit_db_sink, JsonLogAuditSink(logging.getLogger("imghost.audit"))],
+            query_backend=audit_db_sink,
+        )
         self.runtime_config = PostgresRuntimeConfig(self.database)
         self.redis = RedisHandle(settings)
         self.session_backend: SessionBackend = build_session_backend(settings, self.redis, self.observability)
@@ -49,7 +55,7 @@ class AppState:
         )
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
-        register_audit_listeners(self.event_bus, self.audit)
+        register_audit_subscribers(self.event_bus, self.audit)
 
     def _build_task_queue(self) -> TaskQueue:
         context = TaskContext(self.repository, self.storage, self.processors)
@@ -69,10 +75,61 @@ class AppState:
         await self.database.connect()
         await self.redis.ensure_startup_ready()
         await self.tasks.start()
-        await self.recover_thumbnails(include_failed=False)
+        recovered = await self.recover_thumbnails(include_failed=False)
+        await self._audit_system_event(
+            event_type=actions.SYSTEM_STARTUP,
+            action="system.startup",
+            source="system",
+            metadata={
+                "base_url": self.settings.base_url,
+                "public_origin_enabled": self.settings.public_origin_enabled,
+                "trusted_proxy_cidrs_enabled": self.settings.trusted_proxy_cidrs_enabled,
+                "storage_backend": self.settings.storage_backend,
+                "redis_enabled": self.redis.enabled,
+                "redis_mode": self.settings.redis_mode,
+                "task_queue_mode": self.settings.task_queue_mode,
+                "task_worker_enabled": self.settings.task_worker_enabled,
+                "run_task_worker": self.run_task_worker,
+                "thumbnail_worker_count": self.settings.thumbnail_worker_count,
+                "session_redis_fail_closed": self.settings.session_redis_fail_closed,
+                "recovered_thumbnail_count": recovered,
+            },
+        )
+        if self.run_task_worker:
+            await self._audit_system_event(
+                event_type=actions.WORKER_STARTED,
+                action="worker.start",
+                source="worker",
+                metadata={
+                    "task_queue_mode": self.settings.task_queue_mode,
+                    "thumbnail_worker_count": self.settings.thumbnail_worker_count,
+                    "recovered_thumbnail_count": recovered,
+                },
+            )
 
     async def stop(self) -> None:
         await self.tasks.stop()
+        if self.run_task_worker:
+            await self._audit_system_event(
+                event_type=actions.WORKER_STOPPED,
+                action="worker.stop",
+                source="worker",
+                metadata={
+                    "task_queue_mode": self.settings.task_queue_mode,
+                    "thumbnail_worker_count": self.settings.thumbnail_worker_count,
+                },
+            )
+        await self._audit_system_event(
+            event_type=actions.SYSTEM_SHUTDOWN,
+            action="system.shutdown",
+            source="system",
+            metadata={
+                "task_queue_mode": self.settings.task_queue_mode,
+                "run_task_worker": self.run_task_worker,
+                "last_worker_started_at": self.observability.last_worker_started_at,
+                "last_worker_stopped_at": self.observability.last_worker_stopped_at,
+            },
+        )
         await self.redis.close()
         await self.database.close()
 
@@ -194,3 +251,21 @@ class AppState:
                 "mode": runtime["tasks"]["mode"],
             },
         }
+
+    async def _audit_system_event(
+        self,
+        *,
+        event_type: str,
+        action: str,
+        source: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        await self.audit.emit_action(
+            event_type=event_type,
+            action=action,
+            result="success",
+            actor=AuditActor(id=None, type=source),
+            object=AuditObject(type="system", id="imghost"),
+            metadata={**metadata, "source": source},
+            process=build_runtime_process_context(source),
+        )

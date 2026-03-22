@@ -833,8 +833,9 @@ def test_admin_audit_log_tracks_events_and_supports_filters(tmp_path, monkeypatc
         )
         assert upload_events.status_code == 200
         upload_payload = upload_events.json()
-        assert [item["event_type"] for item in upload_payload] == ["media_uploaded", "album_created"]
-        assert all(item["actor_id"] == user_id for item in upload_payload)
+        assert [item["event_type"] for item in upload_payload] == ["media_uploaded", "album_created", "api_key_authenticated"]
+        domain_events = [item for item in upload_payload if item["event_type"] != "api_key_authenticated"]
+        assert all(item["actor_id"] == user_id for item in domain_events)
         assert all(item["correlation_id"] == "audit-upload" for item in upload_payload)
 
         suspended_events = client.get(
@@ -1004,6 +1005,82 @@ def test_admin_audit_listing_supports_limit_offset_and_validation_contract(tmp_p
         )
         assert bad_offset_type.status_code == 422
         assert any(item["loc"][-1] == "offset" for item in bad_offset_type.json()["detail"])
+
+
+def test_admin_audit_listing_supports_action_result_source_and_request_id_filters(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "audit-filter-secret")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="auditfilteradmin", email="auditfilteradmin@example.com")
+    user_id, user_key = create_user_and_api_key(capsys, username="auditfilteruser", email="auditfilteruser@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, admin_id, "admin-pass")
+        set_user_password(client, user_id, "user-pass")
+
+        admin_login = client.post(
+            "/api/v1/auth/login",
+            headers={"X-Correlation-ID": "audit-filter-admin-login"},
+            json={"login": "auditfilteradmin", "password": "admin-pass"},
+        )
+        assert admin_login.status_code == 200
+
+        user_login = client.post(
+            "/api/v1/auth/login",
+            headers={"X-Correlation-ID": "audit-filter-user-login"},
+            json={"login": "auditfilteruser", "password": "user-pass"},
+        )
+        assert user_login.status_code == 200
+        user_request_id = user_login.headers["X-Request-ID"]
+
+        denied = client.get(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {user_key}", "X-Correlation-ID": "audit-filter-denied"},
+        )
+        assert denied.status_code == 403
+        denied_request_id = denied.headers["X-Request-ID"]
+
+        cli_events = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "cli_command_executed", "source": "cli"},
+        )
+        assert cli_events.status_code == 200
+        cli_payload = cli_events.json()
+        assert cli_payload
+        assert all(item["source"] == "cli" for item in cli_payload)
+
+        login_success = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"action": "auth.login.success", "result": "success", "request_id": user_request_id},
+        )
+        assert login_success.status_code == 200
+        success_payload = login_success.json()
+        assert len(success_payload) == 1
+        assert success_payload[0]["event_type"] == "user_login"
+        assert success_payload[0]["source"] == "web"
+        assert success_payload[0]["request_id"] == user_request_id
+        assert success_payload[0]["actor_id"] == user_id
+
+        denial = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={
+                "action": "auth.admin.denied",
+                "result": "denied",
+                "source": "api",
+                "request_id": denied_request_id,
+            },
+        )
+        assert denial.status_code == 200
+        denial_payload = denial.json()
+        assert len(denial_payload) == 1
+        assert denial_payload[0]["event_type"] == "admin_access_denied"
+        assert denial_payload[0]["request_id"] == denied_request_id
+        assert denial_payload[0]["reason"] == "admin_required"
+        assert denial_payload[0]["actor_id"] == user_id
 
 
 def test_admin_config_can_be_read_updated_and_audited(tmp_path, monkeypatch, capsys) -> None:
