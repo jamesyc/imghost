@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% include "partials/flash.html" %}
 <script id="album-detail-bootstrap" type="application/json">{{ workspace_bootstrap|tojson }}</script>
 <section class="stack albums-shell">
   <section class="card album-workspace" id="album-detail-root">
@@ -13,6 +12,7 @@
           <input id="album-detail-title-input" class="hidden" type="text" name="title" placeholder="Album title" aria-label="Album title">
         </div>
         <p class="hint" id="album-detail-summary">Loading album details.</p>
+        <p id="album-detail-status" class="inline-status hidden" aria-live="polite"></p>
       </div>
       <div class="row row-actions album-detail-actions" id="album-detail-actions"></div>
     </div>
@@ -42,6 +42,7 @@
       <button type="button" class="secondary" id="album-upload-modal-close">Close</button>
     </div>
     <form id="album-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="true" data-max-upload-bytes="{{ runtime_flags.max_upload_bytes if runtime_flags.max_upload_bytes is defined else '' }}">
+      <p class="upload-inline-status hidden" data-upload-feedback aria-live="polite"></p>
       <div class="upload-dropzone">
         <span class="upload-title-wrap">
           <input type="text" name="title" placeholder="Album title (optional)">

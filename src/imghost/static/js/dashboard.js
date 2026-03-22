@@ -1,4 +1,3 @@
-const flash = document.getElementById("flash");
 const bootstrapNode = document.getElementById("dashboard-bootstrap");
 const usageSummary = document.getElementById("dashboard-usage-summary");
 const usageCopy = document.getElementById("dashboard-usage-copy");
@@ -6,6 +5,7 @@ const quotaCopy = document.getElementById("dashboard-quota-copy");
 const usageBar = document.getElementById("dashboard-usage-bar");
 const recentAlbumsRoot = document.getElementById("dashboard-recent-albums");
 const emptyState = document.getElementById("dashboard-recent-albums-empty");
+const recentAlbumsStatus = document.getElementById("dashboard-recent-albums-status");
 const bootstrap = bootstrapNode ? JSON.parse(bootstrapNode.textContent || "{}") : {};
 const uploadForm = document.getElementById("dashboard-upload-form");
 const uploadPasteInput = document.getElementById("dashboard-upload-paste-input");
@@ -14,10 +14,12 @@ const state = {
   user: bootstrap.session_user || null,
 };
 
-const showMessage = (message) => {
-  if (flash) {
-    flash.textContent = message || "";
+const setRecentAlbumsStatus = (message = "") => {
+  if (!recentAlbumsStatus) {
+    return;
   }
+  recentAlbumsStatus.textContent = message || "";
+  recentAlbumsStatus.classList.toggle("hidden", !message);
 };
 
 const formatBytes = window.albumCardFormatBytes;
@@ -55,6 +57,7 @@ const refreshUser = async () => {
 };
 
 const refreshRecentAlbums = async () => {
+  setRecentAlbumsStatus("");
   const payload = await requestJson("/api/v1/user/me/albums?limit=5&offset=0");
   const recentAlbums = payload.items || [];
   recentAlbumsRoot.innerHTML = recentAlbums.length ? recentAlbums.map((album) => window.renderAlbumCard(album)).join("") : "";
@@ -62,13 +65,13 @@ const refreshRecentAlbums = async () => {
 };
 
 updateUsageSummary();
-Promise.all([refreshUser(), refreshRecentAlbums()]).catch((error) => {
-  showMessage(error.message);
+refreshUser().catch(() => {});
+refreshRecentAlbums().catch((error) => {
+  setRecentAlbumsStatus(error.message);
 });
 window.attachUploadBox?.({
   uploadForm,
   pasteInput: uploadPasteInput,
   isAuthenticated: true,
-  onError: showMessage,
 });
 window.attachAlbumCardNavigation?.(recentAlbumsRoot);

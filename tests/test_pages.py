@@ -76,6 +76,9 @@ def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> 
         assert 'id="login-form"' not in response.text
         assert 'id="register-form"' not in response.text
         assert 'id="upload-form"' in response.text
+        assert 'id="upload-form" class="upload-form-modern"' in response.text
+        assert 'data-upload-feedback' in response.text
+        assert 'id="flash"' not in response.text
         assert "Anonymous uploads currently expire after 24 hour(s)." in response.text
 
 
@@ -127,7 +130,62 @@ def test_home_page_shows_session_state_when_logged_in(tmp_path, monkeypatch) -> 
         assert "Anonymous uploads currently expire after 24 hour(s)." not in page.text
         assert 'data-logout-form' in page.text
         assert 'id="upload-form"' in page.text
+        assert 'data-upload-feedback' in page.text
+        assert 'id="flash"' not in page.text
         assert 'name="album_id"' not in page.text
+
+
+def test_dashboard_page_uses_local_upload_feedback_anchor(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "dashuser",
+                "email": "dash@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        page = client.get("/dashboard")
+        assert page.status_code == 200
+        assert 'id="dashboard-upload-form"' in page.text
+        assert 'data-upload-feedback' in page.text
+
+
+def test_album_detail_page_uses_local_upload_feedback_anchor(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "albumowner",
+                "email": "albumowner@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        created = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Album detail"},
+            headers=browser_session_headers(),
+        )
+        assert created.status_code == 200
+        album_id = created.json()["album_id"]
+        media_id = created.json()["items"][0]["media_id"]
+        wait_for_thumbnail(client, media_id)
+
+        page = client.get(f"/albums/{album_id}")
+        assert page.status_code == 200
+        assert 'id="album-upload-form"' in page.text
+        assert 'data-upload-feedback' in page.text
 
 
 def test_login_page_renders_form_and_register_link(tmp_path, monkeypatch) -> None:
@@ -139,6 +197,8 @@ def test_login_page_renders_form_and_register_link(tmp_path, monkeypatch) -> Non
         assert response.status_code == 200
         assert 'id="login-form"' in response.text
         assert 'data-auth-form' in response.text
+        assert 'class="form-error hidden"' in response.text
+        assert 'id="flash"' not in response.text
         assert 'href="/register"' in response.text
         assert '<script src="/static/js/auth.js" defer></script>' in response.text
 
@@ -170,6 +230,8 @@ def test_register_page_renders_form_when_enabled(tmp_path, monkeypatch) -> None:
         assert response.status_code == 200
         assert 'id="register-form"' in response.text
         assert 'data-auth-form' in response.text
+        assert 'class="form-error hidden"' in response.text
+        assert 'id="flash"' not in response.text
         assert 'href="/login"' in response.text
 
 
@@ -344,6 +406,8 @@ def test_dashboard_page_focuses_on_uploads_recent_albums_and_links_to_settings(t
         assert 'id="dashboard-upload-form"' in page.text
         assert 'name="album_id"' not in page.text
         assert 'id="dashboard-recent-albums"' in page.text
+        assert 'id="dashboard-recent-albums-status"' in page.text
+        assert 'id="flash"' not in page.text
         assert 'href="/albums"' in page.text
         assert 'href="/settings"' in page.text
         assert "This is a quick resume view. Use the albums page for the full list." not in page.text
@@ -372,6 +436,9 @@ def test_albums_page_focuses_on_album_list_and_has_no_primary_upload_box(tmp_pat
         assert "Recent albums appear first. Open an album to continue managing it." not in page.text
         assert '<script src="/static/js/album-cards.js" defer></script>' in page.text
         assert 'id="owned-albums"' in page.text
+        assert 'id="owned-albums-status"' in page.text
+        assert 'id="owned-albums-pagination-status"' in page.text
+        assert 'id="flash"' not in page.text
         assert 'id="albums-upload-form"' not in page.text
         assert 'href="/dashboard"' in page.text
         assert 'href="/settings"' in page.text
@@ -411,6 +478,8 @@ def test_private_album_page_renders_owner_workspace_shell(tmp_path, monkeypatch,
         assert '"delete_token": null' in page.text
         assert 'id="album-detail-title"' in page.text
         assert 'id="album-detail-title-input"' in page.text
+        assert 'id="album-detail-status"' in page.text
+        assert 'id="flash"' not in page.text
         assert 'id="album-detail-add-images-button"' in page.text
         assert 'id="album-upload-form"' in page.text
         assert '<script src="/static/js/upload-box.js" defer></script>' in page.text
@@ -445,6 +514,7 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         assert '"file_size_display"' in anonymous_page.text
         assert '<script src="/static/js/public-album.js" defer></script>' in anonymous_page.text
         assert "Public album" in anonymous_page.text
+        assert 'id="flash"' not in anonymous_page.text
         assert "Edit Album" not in anonymous_page.text
         assert "delete_token=" not in anonymous_page.text
 
@@ -473,6 +543,27 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         assert "Edit Album" not in stranger_page.text
 
 
+def test_public_user_albums_page_does_not_render_flash_markup(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    user_id, api_key = create_user_and_api_key(capsys, username="galleryowner", email="galleryowner@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("gallery.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Gallery Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+
+        page = client.get("/u/galleryowner")
+        assert page.status_code == 200
+        assert "galleryowner" in page.text
+        assert 'id="flash"' not in page.text
+
+
 def test_anonymous_manage_page_reuses_album_workspace_shell(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -495,6 +586,8 @@ def test_anonymous_manage_page_reuses_album_workspace_shell(tmp_path, monkeypatc
         assert '"post_delete_url": "/"' in page.text
         assert '"delete_token": "' in page.text
         assert "Manage view" in page.text
+        assert 'id="album-detail-status"' in page.text
+        assert 'id="flash"' not in page.text
         assert 'id="album-detail-add-images-button"' in page.text
         assert 'id="album-upload-form"' in page.text
         assert '<script src="/static/js/upload-box.js" defer></script>' in page.text

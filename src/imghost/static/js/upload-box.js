@@ -13,6 +13,7 @@ window.resolveUploadDestination = ({ albumId, albumUrl, isAuthenticated }) => {
 
 window.createUploadStatusController = (uploadForm) => {
   const summaryNode = uploadForm?.querySelector(".upload-file-summary");
+  const feedbackNode = uploadForm?.querySelector("[data-upload-feedback]");
   const storageKey = uploadForm?.id ? `imghost-upload-status:${uploadForm.id}` : "";
 
   const setStatus = (message, tone = "") => {
@@ -29,6 +30,23 @@ window.createUploadStatusController = (uploadForm) => {
     }
     summaryNode.textContent = "";
     delete summaryNode.dataset.tone;
+  };
+
+  const setFeedback = (message, tone = "") => {
+    if (!feedbackNode) {
+      return;
+    }
+    feedbackNode.textContent = message || "";
+    feedbackNode.classList.toggle("hidden", !message);
+    if (tone) {
+      feedbackNode.dataset.tone = tone;
+    } else {
+      delete feedbackNode.dataset.tone;
+    }
+  };
+
+  const clearFeedback = () => {
+    setFeedback("");
   };
 
   const readStoredStatus = () => {
@@ -67,7 +85,7 @@ window.createUploadStatusController = (uploadForm) => {
       clearStatus();
       return;
     }
-      setStatus(
+    setStatus(
       fileCount === 1 ? input.files[0].name : `${fileCount} files selected`,
       "",
     );
@@ -95,18 +113,22 @@ window.createUploadStatusController = (uploadForm) => {
 
   return {
     clearStatus,
+    clearFeedback,
     persistSuccess(message) {
       storeStatus(message, "success");
       setStatus(message, "success");
     },
     setError(message) {
-      setStatus(message, "error");
+      setFeedback(message, "error");
     },
     setInfo(message) {
       setStatus(message, "");
     },
     setSuccess(message) {
-      setStatus(message, "success");
+      setFeedback(message, "success");
+    },
+    setPending(message) {
+      setFeedback(message, "pending");
     },
     syncSelection,
   };
@@ -221,8 +243,10 @@ window.attachUploadBox = ({
     }
 
     let shouldResetInputs = true;
+    uploadStatus?.clearFeedback();
     setUploadingState(true);
     updateFileSummary(statusMessage || `Uploading ${fileList.length} file${fileList.length === 1 ? "" : "s"}...`);
+    uploadStatus?.setPending(statusMessage || `Uploading ${fileList.length} file${fileList.length === 1 ? "" : "s"}...`);
 
     try {
       const formData = new FormData();
@@ -285,6 +309,8 @@ window.attachUploadBox = ({
       resetTransientInputs();
       if (successResult?.successMessage) {
         uploadStatus?.setSuccess(successResult.successMessage);
+      } else {
+        uploadStatus?.clearFeedback();
       }
     } catch (error) {
       const message = error.message || statusMessage || "Upload failed";
@@ -313,7 +339,9 @@ window.attachUploadBox = ({
       uploadStatus?.setError("Paste a valid image URL.");
       return;
     }
+    uploadStatus?.clearFeedback();
     updateFileSummary("Fetching image URL...");
+    uploadStatus?.setPending("Fetching image URL...");
     try {
       const response = await fetch(url);
       if (!response.ok) {
@@ -347,6 +375,9 @@ window.attachUploadBox = ({
   });
 
   uploadInput?.addEventListener("change", updateFileSummary);
+  uploadInput?.addEventListener("change", () => {
+    uploadStatus?.clearFeedback();
+  });
   updateFileSummary();
 
   uploadDropzone?.addEventListener("drop", (event) => {

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from imghost.__main__ import main as cli_main
 from imghost.main import app
 from imghost.models import utcnow
-from imghost.processors import MediaMetadata, SanitizedFile, ThumbnailResult, ValidationResult
+from imghost.processors import MediaMetadata, SanitizedFile, ThumbnailResult, ValidationResult, VideoProcessingError
 
 from .helpers import (
     PNG_1X1,
@@ -251,3 +251,175 @@ def test_failed_video_thumbnail_does_not_block_next_job_and_original_media_stays
 
         failed_thumb = client.get(f"/t/{failed_media_id}.jpg")
         assert failed_thumb.status_code == 404
+
+
+def test_thumbnail_timeout_marks_only_that_media_failed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+
+    async def fake_validate(self, payload: bytes) -> ValidationResult:
+        return ValidationResult(ok=True)
+
+    async def fake_extract_metadata(self, payload: bytes, format_hint: str) -> MediaMetadata:
+        return MediaMetadata(
+            width=640,
+            height=360,
+            duration_secs=2.0,
+            codec_hint=None,
+            is_animated=True,
+            mime_type="video/mp4",
+            format="mp4",
+        )
+
+    async def fake_sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
+        return SanitizedFile(data=payload, mime_type="video/mp4", format="mp4")
+
+    async def fake_generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
+        if payload == b"timeout-video":
+            raise VideoProcessingError(tool="ffmpeg", timed_out=True, stderr_excerpt="timeout tail")
+        return ThumbnailResult(data=b"jpg-thumb", thumb_is_orig=False, format="jpg", size=len(b"jpg-thumb"))
+
+    monkeypatch.setattr("imghost.processors.Mp4Processor.validate", fake_validate)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.extract_metadata", fake_extract_metadata)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.sanitize", fake_sanitize)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.generate_thumbnail", fake_generate_thumbnail)
+
+    with TestClient(app) as client:
+        failed_upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("timeout.mp4", BytesIO(b"timeout-video"), "video/mp4"))],
+        )
+        assert failed_upload.status_code == 200
+        failed_media_id = failed_upload.json()["media_id"]
+
+        successful_upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("good.mp4", BytesIO(b"good-video"), "video/mp4"))],
+        )
+        assert successful_upload.status_code == 200
+        success_media_id = successful_upload.json()["media_id"]
+
+        wait_for_failed_thumbnail(client, failed_media_id)
+        wait_for_thumbnail(client, success_media_id)
+
+        failed_media = client.portal.call(client.app.state.imghost.repository.get_media, failed_media_id)
+        success_media = client.portal.call(client.app.state.imghost.repository.get_media, success_media_id)
+        assert failed_media is not None
+        assert success_media is not None
+        assert failed_media.thumb_status == "failed"
+        assert success_media.thumb_status == "done"
+
+
+def test_failed_video_thumbnail_can_recover_on_retry_after_processor_fix(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+
+    should_fail = {"value": True}
+
+    async def fake_validate(self, payload: bytes) -> ValidationResult:
+        return ValidationResult(ok=True)
+
+    async def fake_extract_metadata(self, payload: bytes, format_hint: str) -> MediaMetadata:
+        return MediaMetadata(
+            width=640,
+            height=360,
+            duration_secs=2.0,
+            codec_hint=None,
+            is_animated=True,
+            mime_type="video/mp4",
+            format="mp4",
+        )
+
+    async def fake_sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
+        return SanitizedFile(data=payload, mime_type="video/mp4", format="mp4")
+
+    async def fake_generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
+        if should_fail["value"]:
+            raise VideoProcessingError(tool="ffmpeg", timed_out=True, stderr_excerpt="timeout tail")
+        return ThumbnailResult(data=b"jpg-thumb", thumb_is_orig=False, format="jpg", size=len(b"jpg-thumb"))
+
+    monkeypatch.setattr("imghost.processors.Mp4Processor.validate", fake_validate)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.extract_metadata", fake_extract_metadata)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.sanitize", fake_sanitize)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.generate_thumbnail", fake_generate_thumbnail)
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("flaky.mp4", BytesIO(b"flaky-video"), "video/mp4"))],
+        )
+        assert upload.status_code == 200
+        media_id = upload.json()["media_id"]
+
+        wait_for_failed_thumbnail(client, media_id)
+        assert client.get(f"/t/{media_id}.jpg").status_code == 404
+
+        should_fail["value"] = False
+        requeued = client.portal.call(lambda: client.app.state.imghost.recover_thumbnails(include_failed=True))
+        assert requeued >= 1
+        wait_for_thumbnail(client, media_id)
+        assert client.get(f"/t/{media_id}.jpg").status_code == 200
+
+        media = client.portal.call(client.app.state.imghost.repository.get_media, media_id)
+        assert media is not None
+        assert media.thumb_status == "done"
+
+
+def test_failed_video_thumbnail_does_not_block_image_uploads(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+
+    async def fake_validate(self, payload: bytes) -> ValidationResult:
+        return ValidationResult(ok=True)
+
+    async def fake_extract_metadata(self, payload: bytes, format_hint: str) -> MediaMetadata:
+        return MediaMetadata(
+            width=640,
+            height=360,
+            duration_secs=2.0,
+            codec_hint=None,
+            is_animated=True,
+            mime_type="video/mp4",
+            format="mp4",
+        )
+
+    async def fake_sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
+        return SanitizedFile(data=payload, mime_type="video/mp4", format="mp4")
+
+    async def fake_generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
+        raise VideoProcessingError(tool="ffmpeg", timed_out=True, stderr_excerpt="timeout tail")
+
+    monkeypatch.setattr("imghost.processors.Mp4Processor.validate", fake_validate)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.extract_metadata", fake_extract_metadata)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.sanitize", fake_sanitize)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.generate_thumbnail", fake_generate_thumbnail)
+
+    with TestClient(app) as client:
+        failed_upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("bad.mp4", BytesIO(b"bad-video"), "video/mp4"))],
+        )
+        assert failed_upload.status_code == 200
+        failed_media_id = failed_upload.json()["media_id"]
+
+        image_upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("good.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert image_upload.status_code == 200
+        image_media_id = image_upload.json()["media_id"]
+
+        wait_for_failed_thumbnail(client, failed_media_id)
+        wait_for_thumbnail(client, image_media_id)
+
+        failed_media = client.portal.call(client.app.state.imghost.repository.get_media, failed_media_id)
+        image_media = client.portal.call(client.app.state.imghost.repository.get_media, image_media_id)
+        assert failed_media is not None
+        assert image_media is not None
+        assert failed_media.thumb_status == "failed"
+        assert image_media.thumb_status == "done"
+        assert client.get(f"/i/{image_media_id}.png").status_code == 200
+        assert client.get(f"/t/{image_media_id}.jpg").status_code == 200

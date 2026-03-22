@@ -1,4 +1,5 @@
 import asyncio
+import math
 import subprocess
 import threading
 from io import BytesIO
@@ -17,6 +18,8 @@ from imghost.processors import (
     ANIMATED_THUMB_MAX_SOURCE_FRAMES,
     VIDEO_ANIMATED_THUMB_TIMEOUT_SECS,
     VIDEO_COMMAND_STDERR_LIMIT_BYTES,
+    VIDEO_THUMB_MAX_INTERVAL_SECS,
+    VIDEO_THUMB_MIN_INTERVAL_SECS,
     VIDEO_PROBE_TIMEOUT_SECS,
     VIDEO_REMUX_TIMEOUT_SECS,
     VIDEO_SINGLE_FRAME_TIMEOUT_SECS,
@@ -76,6 +79,23 @@ def sample_video_metadata(*, duration_secs: float = 4.0) -> MediaMetadata:
     return MediaMetadata(
         width=640,
         height=360,
+        duration_secs=duration_secs,
+        codec_hint=None,
+        is_animated=True,
+        mime_type="video/mp4",
+        format="mp4",
+    )
+
+
+def sample_video_metadata_with(
+    *,
+    width: int | None = 640,
+    height: int | None = 360,
+    duration_secs: float | None = 4.0,
+) -> MediaMetadata:
+    return MediaMetadata(
+        width=width,
+        height=height,
         duration_secs=duration_secs,
         codec_hint=None,
         is_animated=True,
@@ -538,6 +558,139 @@ def test_video_processor_probe_timeout_uses_bounded_stderr_excerpt(monkeypatch) 
         assert exc.stderr_excerpt.endswith("PROBE-TIMEOUT")
     else:
         raise AssertionError("expected bounded probe timeout failure")
+
+
+def test_video_processor_rejects_zero_width_metadata(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    monkeypatch.setattr(processor, "_probe", lambda payload: sample_video_metadata_with(width=0))
+
+    validation = asyncio.run(processor.validate(b"fake-mp4"))
+
+    assert validation.ok is False
+    assert validation.rejection_reason == "Unsupported or invalid video file."
+
+
+def test_video_processor_rejects_zero_height_metadata(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    monkeypatch.setattr(processor, "_probe", lambda payload: sample_video_metadata_with(height=0))
+
+    validation = asyncio.run(processor.validate(b"fake-mp4"))
+
+    assert validation.ok is False
+
+
+def test_video_processor_rejects_negative_dimensions(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    monkeypatch.setattr(processor, "_probe", lambda payload: sample_video_metadata_with(width=-1, height=-10))
+
+    validation = asyncio.run(processor.validate(b"fake-mp4"))
+
+    assert validation.ok is False
+
+
+def test_video_processor_rejects_negative_duration(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    monkeypatch.setattr(processor, "_probe", lambda payload: sample_video_metadata_with(duration_secs=-1.0))
+
+    validation = asyncio.run(processor.validate(b"fake-mp4"))
+
+    assert validation.ok is False
+
+
+def test_video_processor_rejects_nan_duration(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    monkeypatch.setattr(processor, "_probe", lambda payload: sample_video_metadata_with(duration_secs=math.nan))
+
+    validation = asyncio.run(processor.validate(b"fake-mp4"))
+
+    assert validation.ok is False
+
+
+def test_video_processor_rejects_infinite_duration(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    monkeypatch.setattr(processor, "_probe", lambda payload: sample_video_metadata_with(duration_secs=math.inf))
+
+    validation = asyncio.run(processor.validate(b"fake-mp4"))
+
+    assert validation.ok is False
+
+
+def test_video_processor_missing_duration_falls_back_to_single_frame(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    calls: list[tuple[str, float]] = []
+
+    def fake_single_frame(payload: bytes, extension: str, *, seek_seconds: float) -> bytes:
+        calls.append(("single", seek_seconds))
+        return b"jpg-thumb"
+
+    def fake_animated(payload: bytes, extension: str, duration_secs: float) -> bytes | None:
+        calls.append(("animated", duration_secs))
+        return b"webp-thumb"
+
+    monkeypatch.setattr(processor, "_single_frame_thumbnail", fake_single_frame)
+    monkeypatch.setattr(processor, "_animated_thumbnail", fake_animated)
+
+    thumbnail = asyncio.run(processor.generate_thumbnail(b"fake-mp4", sample_video_metadata_with(duration_secs=None)))
+
+    assert thumbnail.format == "jpg"
+    assert calls == [("single", 0.0)]
+
+
+def test_video_processor_very_long_duration_clamps_interval(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    seen_filters: list[str] = []
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        seen_filters.append(args[args.index("-vf") + 1])
+        output_path = args[-1]
+        Path(output_path).write_bytes(b"webp-thumb")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="")
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    animated = processor._animated_thumbnail(b"fake-mp4", "mp4", VIDEO_THUMB_MAX_INTERVAL_SECS * 1000)
+
+    assert animated == b"webp-thumb"
+    assert seen_filters == [f"fps=1/{VIDEO_THUMB_MAX_INTERVAL_SECS:.6f},scale=375:-1"]
+
+
+def test_video_processor_tiny_positive_duration_clamps_interval(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    seen_filters: list[str] = []
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        seen_filters.append(args[args.index("-vf") + 1])
+        output_path = args[-1]
+        Path(output_path).write_bytes(b"webp-thumb")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="")
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    animated = processor._animated_thumbnail(b"fake-mp4", "mp4", VIDEO_THUMB_MIN_INTERVAL_SECS / 1000)
+
+    assert animated == b"webp-thumb"
+    assert seen_filters == [f"fps=1/{VIDEO_THUMB_MIN_INTERVAL_SECS:.6f},scale=375:-1"]
+
+
+def test_video_processor_normal_duration_behavior_is_unchanged(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    calls: list[str] = []
+
+    def fake_animated(payload: bytes, extension: str, duration_secs: float) -> bytes | None:
+        calls.append("animated")
+        return b"webp-thumb"
+
+    def fake_single_frame(payload: bytes, extension: str, *, seek_seconds: float) -> bytes:
+        calls.append("single")
+        return b"jpg-thumb"
+
+    monkeypatch.setattr(processor, "_animated_thumbnail", fake_animated)
+    monkeypatch.setattr(processor, "_single_frame_thumbnail", fake_single_frame)
+
+    thumbnail = asyncio.run(processor.generate_thumbnail(b"x" * 50, sample_video_metadata_with(duration_secs=5.0)))
+
+    assert thumbnail.format == "webp"
+    assert calls == ["animated"]
 
 
 def test_video_processing_error_handles_empty_stderr(monkeypatch) -> None:

@@ -21,7 +21,6 @@
   --line-strong: rgba(121, 157, 212, 0.36);
   --text-muted: rgba(22, 36, 60, 0.62);
   --text-hint: rgba(22, 36, 60, 0.68);
-  --flash: #355b96;
   --accent: linear-gradient(135deg, #4f95ff 0%, #78b0ff 45%, #9dc4ff 100%);
   --accent-secondary: rgba(255, 255, 255, 0.34);
   --accent-danger: linear-gradient(135deg, #d86f76 0%, #cb565f 100%);
@@ -47,7 +46,6 @@
   --line-strong: rgba(169, 192, 241, 0.24);
   --text-muted: rgba(244, 247, 255, 0.64);
   --text-hint: rgba(244, 247, 255, 0.74);
-  --flash: #d5e4ff;
   --accent: linear-gradient(135deg, #255ec7 0%, #2f6fdf 46%, #4c86ef 100%);
   --accent-secondary: rgba(255, 255, 255, 0.08);
   --accent-danger: linear-gradient(135deg, #e18484 0%, #c85f67 100%);
@@ -613,8 +611,15 @@ body::after {
   color: #ffd2d2;
 }
 
-.settings-inline-status {
+.inline-status {
   margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-input);
+  line-height: 1.5;
+}
+
+.upload-inline-status {
+  margin: 0 0 12px;
   padding: 12px 14px;
   border-radius: var(--radius-input);
   line-height: 1.5;
@@ -624,28 +629,64 @@ body::after {
   margin-top: 0.45rem;
 }
 
-.settings-inline-status[data-tone="error"] {
+.inline-status[data-tone="error"] {
   background: rgba(210, 66, 79, 0.14);
   border: 1px solid rgba(210, 66, 79, 0.26);
   color: #b42318;
 }
 
-.settings-inline-status[data-tone="success"] {
+.inline-status[data-tone="success"] {
   background: rgba(42, 111, 76, 0.12);
   border: 1px solid rgba(55, 124, 78, 0.26);
   color: #17663b;
 }
 
-:root[data-theme="dark"] .settings-inline-status[data-tone="error"] {
+.upload-inline-status[data-tone="error"] {
+  background: rgba(210, 66, 79, 0.14);
+  border: 1px solid rgba(210, 66, 79, 0.26);
+  color: #b42318;
+}
+
+.upload-inline-status[data-tone="success"] {
+  background: rgba(42, 111, 76, 0.12);
+  border: 1px solid rgba(55, 124, 78, 0.26);
+  color: #17663b;
+}
+
+.upload-inline-status[data-tone="pending"] {
+  background: rgba(184, 119, 24, 0.12);
+  border: 1px solid rgba(184, 119, 24, 0.24);
+  color: #8a5800;
+}
+
+:root[data-theme="dark"] .inline-status[data-tone="error"] {
   background: rgba(209, 94, 103, 0.18);
   border-color: rgba(229, 132, 132, 0.3);
   color: #ffd5d9;
 }
 
-:root[data-theme="dark"] .settings-inline-status[data-tone="success"] {
+:root[data-theme="dark"] .inline-status[data-tone="success"] {
   background: rgba(58, 124, 87, 0.18);
   border-color: rgba(101, 173, 129, 0.3);
   color: #dbffe3;
+}
+
+:root[data-theme="dark"] .upload-inline-status[data-tone="error"] {
+  background: rgba(209, 94, 103, 0.18);
+  border-color: rgba(229, 132, 132, 0.3);
+  color: #ffd5d9;
+}
+
+:root[data-theme="dark"] .upload-inline-status[data-tone="success"] {
+  background: rgba(58, 124, 87, 0.18);
+  border-color: rgba(101, 173, 129, 0.3);
+  color: #dbffe3;
+}
+
+:root[data-theme="dark"] .upload-inline-status[data-tone="pending"] {
+  background: rgba(166, 123, 47, 0.2);
+  border-color: rgba(219, 179, 96, 0.28);
+  color: #ffe0a6;
 }
 
 .usage-meter {
@@ -1397,25 +1438,6 @@ button.danger {
   background: rgba(209, 94, 103, 0.18);
   border-color: rgba(229, 132, 132, 0.3);
   color: #ffd5d9;
-}
-
-.flash {
-  min-height: 1.4rem;
-  margin-bottom: 10px;
-  color: var(--flash);
-}
-
-.album-detail-toast {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 30;
-  padding: 12px 16px;
-  border: 1px solid rgba(109, 214, 150, 0.34);
-  border-radius: var(--radius-pill);
-  background: rgba(34, 72, 48, 0.92);
-  color: #f4fff7;
-  box-shadow: 0 16px 40px rgba(10, 18, 14, 0.28);
 }
 
 .hidden {

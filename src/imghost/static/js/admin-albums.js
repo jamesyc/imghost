@@ -44,7 +44,7 @@ if (adminAlbumsRoot) {
               <button type="button" class="danger admin-album-delete">Delete Album</button>
             </div>
           </form>
-          <p class="settings-inline-status hidden admin-item-status" aria-live="polite"></p>
+          <p class="inline-status hidden admin-item-status" aria-live="polite"></p>
         </section>
       `,
       )

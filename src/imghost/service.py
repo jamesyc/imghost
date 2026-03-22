@@ -37,7 +37,7 @@ from .events import (
 from .ids import generate_album_id, generate_media_id
 from .models import Album, ApiKey, Media, User, utcnow
 from .observability import ObservabilityState
-from .processors import ProcessorRegistry
+from .processors import ProcessorRegistry, VideoProcessingError
 from .rate_limits import RateLimiter
 from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
@@ -187,6 +187,7 @@ class UploadService:
                 user=actor.user,
             )
         await self._enforce_storage_quotas(actor.user, incoming_bytes=len(payload))
+        created_album = album_id is None
         album = await self._get_or_create_album(
             album_id=album_id,
             title=title,
@@ -196,7 +197,12 @@ class UploadService:
         )
         if len(await self.repository.list_album_media(album.id)) >= MAX_ALBUM_ITEMS:
             raise HTTPException(status_code=413, detail="Album item limit reached.")
-        media = await self._create_media(album.id, file, payload, correlation_id, actor=actor)
+        try:
+            media = await self._create_media(album.id, file, payload, correlation_id, actor=actor)
+        except Exception:
+            if created_album and not await self.repository.list_album_media(album.id):
+                await self.repository.delete_album(album.id)
+            raise
         album.updated_at = utcnow()
         if not album.title and title:
             album.title = title
@@ -282,11 +288,17 @@ class UploadService:
                 raise HTTPException(status_code=415, detail="Unsupported image format.")
             raise HTTPException(status_code=415, detail="Unsupported video format.")
 
-        validation = await processor.validate(payload)
-        if not validation.ok:
-            raise HTTPException(status_code=415, detail=validation.rejection_reason)
-        metadata = await processor.extract_metadata(payload, fmt)
-        sanitized = await processor.sanitize(payload, metadata)
+        try:
+            validation = await processor.validate(payload)
+            if not validation.ok:
+                raise HTTPException(status_code=415, detail=validation.rejection_reason)
+            metadata = await processor.extract_metadata(payload, fmt)
+            sanitized = await processor.sanitize(payload, metadata)
+        except HTTPException:
+            raise
+        except VideoProcessingError:
+            detail = "Unsupported or invalid image file." if media_type == "image" else "Unsupported or invalid video file."
+            raise HTTPException(status_code=415, detail=detail) from None
         payload = sanitized.data
         content_type = sanitized.mime_type
         fmt = sanitized.format

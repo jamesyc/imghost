@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from io import BytesIO
 import json
+import math
 import subprocess
 import tempfile
 from pathlib import Path
@@ -22,6 +23,8 @@ VIDEO_REMUX_TIMEOUT_SECS = 60
 VIDEO_SINGLE_FRAME_TIMEOUT_SECS = 30
 VIDEO_ANIMATED_THUMB_TIMEOUT_SECS = 40
 VIDEO_COMMAND_STDERR_LIMIT_BYTES = 8192
+VIDEO_THUMB_MIN_INTERVAL_SECS = 0.1
+VIDEO_THUMB_MAX_INTERVAL_SECS = 60.0
 UNSAFE_URL_PREFIXES = ("http:", "https:", "//", "javascript:", "data:", "file:")
 SVG_DANGEROUS_ELEMENTS = {"script", "foreignobject", "iframe", "object", "embed", "audio", "video", "style"}
 SVG_URL_ATTRS = {"href", "src"}
@@ -421,7 +424,9 @@ class VideoProcessor(MediaProcessor):
             metadata = await asyncio.to_thread(self._probe, payload)
         except RuntimeError:
             return ValidationResult(ok=False, rejection_reason="Unsupported or invalid video file.")
-        if metadata.width is None or metadata.height is None:
+        if not self._has_valid_dimensions(metadata):
+            return ValidationResult(ok=False, rejection_reason="Unsupported or invalid video file.")
+        if not self._has_valid_duration(metadata):
             return ValidationResult(ok=False, rejection_reason="Unsupported or invalid video file.")
         if metadata.width * metadata.height > self.max_pixels:
             return ValidationResult(ok=False, rejection_reason="Image exceeds maximum pixel count.")
@@ -438,7 +443,10 @@ class VideoProcessor(MediaProcessor):
         )
 
     async def generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
-        duration = metadata.duration_secs or 0.0
+        duration = self._normalized_duration_secs(metadata)
+        if duration is None:
+            data = await asyncio.to_thread(self._single_frame_thumbnail, payload, metadata.format, seek_seconds=0.0)
+            return ThumbnailResult(data=data, thumb_is_orig=False, format="jpg", size=len(data))
         if duration < 1.0:
             data = await asyncio.to_thread(
                 self._single_frame_thumbnail,
@@ -539,7 +547,8 @@ class VideoProcessor(MediaProcessor):
             return output_path.read_bytes()
 
     def _animated_thumbnail(self, payload: bytes, extension: str, duration_secs: float) -> bytes | None:
-        interval = max(duration_secs / self.thumb_frames, 0.001)
+        interval = max(duration_secs / self.thumb_frames, VIDEO_THUMB_MIN_INTERVAL_SECS)
+        interval = min(interval, VIDEO_THUMB_MAX_INTERVAL_SECS)
         with self._temp_file(payload, extension) as input_path, self._temp_output_file("webp") as output_path:
             self._run_ffmpeg_command(
                 [
@@ -644,6 +653,24 @@ class VideoProcessor(MediaProcessor):
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    def _has_valid_dimensions(self, metadata: MediaMetadata) -> bool:
+        if metadata.width is None or metadata.height is None:
+            return False
+        return metadata.width > 0 and metadata.height > 0
+
+    def _has_valid_duration(self, metadata: MediaMetadata) -> bool:
+        if metadata.duration_secs is None:
+            return True
+        return math.isfinite(metadata.duration_secs) and metadata.duration_secs >= 0.0
+
+    def _normalized_duration_secs(self, metadata: MediaMetadata) -> float | None:
+        duration = metadata.duration_secs
+        if duration is None:
+            return None
+        if not math.isfinite(duration) or duration < 0.0:
+            return None
+        return duration
 
 
 class Mp4Processor(VideoProcessor):

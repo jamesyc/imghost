@@ -1,7 +1,7 @@
-const flash = document.getElementById("flash");
 const bootstrapNode = document.getElementById("album-detail-bootstrap");
 const titleNode = document.getElementById("album-detail-title");
 const summaryNode = document.getElementById("album-detail-summary");
+const statusNode = document.getElementById("album-detail-status");
 const actionsNode = document.getElementById("album-detail-actions");
 const metadataForm = document.getElementById("album-detail-metadata-form");
 const metadataActionsNode = document.getElementById("album-detail-metadata-actions");
@@ -27,7 +27,6 @@ const state = {
 };
 
 let albumUploadController = null;
-let titleToastTimer = null;
 
 const initializeAnonymousManageAccess = () => {
   if (state.accessMode !== "token" || !state.albumId || !state.deleteToken) {
@@ -44,27 +43,12 @@ const initializeAnonymousManageAccess = () => {
   window.history.replaceState({}, document.title, nextPath || currentUrl.pathname);
 };
 
-const showMessage = (message) => {
-  if (flash) {
-    flash.textContent = message || "";
+const setPageStatus = (message = "") => {
+  if (!statusNode) {
+    return;
   }
-};
-
-const showToast = (message) => {
-  let toast = document.getElementById("album-detail-toast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "album-detail-toast";
-    toast.className = "album-detail-toast hidden";
-    toast.setAttribute("aria-live", "polite");
-    document.body.append(toast);
-  }
-  toast.textContent = message || "";
-  toast.classList.remove("hidden");
-  window.clearTimeout(titleToastTimer);
-  titleToastTimer = window.setTimeout(() => {
-    toast.classList.add("hidden");
-  }, 2200);
+  statusNode.textContent = message || "";
+  statusNode.classList.toggle("hidden", !message);
 };
 
 const escapeHtml = (value) =>
@@ -278,9 +262,10 @@ const renderAlbum = (album) => {
 
 const loadAlbum = async () => {
   if (!state.albumId) {
-    showMessage("Missing album ID.");
+    setPageStatus("Missing album ID.");
     return;
   }
+  setPageStatus("");
   const album = await requestJson(withAlbumAccess(`/api/v1/album/${state.albumId}`));
   renderAlbum(album);
 };
@@ -292,7 +277,6 @@ const persistOrder = async (mediaIds, successMessage = "Album order updated.") =
     return;
   }
   state.reorderInFlight = true;
-  showMessage("Saving album order...");
   try {
     const album = await requestJson(withAlbumAccess(`/api/v1/album/${state.albumId}/order`), {
       method: "PATCH",
@@ -303,9 +287,8 @@ const persistOrder = async (mediaIds, successMessage = "Album order updated.") =
       }))),
     });
     renderAlbum(album);
-    showMessage(successMessage);
   } catch (error) {
-    showMessage(error.message);
+    window.alert(error.message);
     await loadAlbum();
   } finally {
     state.reorderInFlight = false;
@@ -347,9 +330,8 @@ const persistTitle = async ({ keepEditingOnError = true } = {}) => {
     });
     renderAlbum(album);
     setTitleEditing(false);
-    showToast("Album title updated.");
   } catch (error) {
-    showMessage(error.message);
+    window.alert(error.message);
     if (!keepEditingOnError) {
       titleInput.value = state.album.title || "";
       setTitleEditing(false);
@@ -371,7 +353,6 @@ const persistCover = async (mediaId) => {
     body: JSON.stringify({ cover_media_id: mediaId }),
   });
   renderAlbum(album);
-  showMessage("Cover updated.");
 };
 
 metadataForm?.addEventListener("submit", async (event) => {
@@ -420,7 +401,7 @@ metadataActionsNode?.addEventListener("click", async (event) => {
     await requestJson(withAlbumAccess(`/api/v1/album/${state.albumId}`), { method: "DELETE" });
     window.location.assign(state.postDeleteUrl);
   } catch (error) {
-    showMessage(error.message);
+    window.alert(error.message);
   }
 });
 
@@ -442,7 +423,7 @@ itemsRoot?.addEventListener("click", async (event) => {
     try {
       await persistCover(coverButton.dataset.mediaId);
     } catch (error) {
-      showMessage(error.message);
+      window.alert(error.message);
     }
     return;
   }
@@ -459,9 +440,8 @@ itemsRoot?.addEventListener("click", async (event) => {
         return;
       }
       await loadAlbum();
-      showMessage("Media deleted.");
     } catch (error) {
-      showMessage(error.message);
+      window.alert(error.message);
     }
   }
 });
@@ -560,7 +540,6 @@ albumUploadController = window.attachUploadBox?.({
   isAuthenticated: state.accessMode === "owner",
   fixedAlbumId: state.albumId,
   fixedDeleteToken: state.deleteToken,
-  onError: showMessage,
   onSuccess: async ({ response }) => {
     await loadAlbum();
     const addedCount = Array.isArray(response.items) ? response.items.length : 0;
@@ -576,7 +555,7 @@ if (state.deleteToken) {
 }
 
 loadAlbum().catch((error) => {
-  showMessage(error.message);
+  setPageStatus(error.message);
   titleNode.textContent = "Album unavailable";
   summaryNode.textContent = "This album could not be loaded.";
 });

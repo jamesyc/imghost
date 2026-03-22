@@ -1,11 +1,3 @@
-const authFlash = document.getElementById("flash");
-
-const showAuthMessage = (message) => {
-  if (authFlash) {
-    authFlash.textContent = message || "";
-  }
-};
-
 for (const form of document.querySelectorAll("[data-auth-form]")) {
   const passwordInput = form.querySelector('input[name="password"]');
   const confirmPasswordInput = form.querySelector('input[name="confirm_password"]');
@@ -68,12 +60,7 @@ for (const form of document.querySelectorAll("[data-auth-form]")) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         const message = data.detail || "Request failed.";
-        if (form.id === "login-form" && message === "Invalid credentials." && inlineError) {
-          inlineError.textContent = message;
-          inlineError.classList.remove("hidden");
-          return;
-        }
-        if (form.id === "register-form" && inlineError) {
+        if (inlineError) {
           inlineError.textContent = message;
           inlineError.classList.remove("hidden");
           return;
@@ -82,7 +69,10 @@ for (const form of document.querySelectorAll("[data-auth-form]")) {
       }
       window.location.assign(form.dataset.successUrl || "/dashboard");
     } catch (error) {
-      showAuthMessage(error.message);
+      if (inlineError) {
+        inlineError.textContent = error.message || "Request failed.";
+        inlineError.classList.remove("hidden");
+      }
     }
   });
 }

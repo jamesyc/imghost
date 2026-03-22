@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% include "partials/flash.html" %}
 <script id="dashboard-bootstrap" type="application/json">{{ {"session_user": session_user}|tojson }}</script>
 <section class="stack dashboard-shell">
   <section class="card hero-card dashboard-hero">
@@ -35,6 +34,7 @@
       </div>
     </div>
     <form id="dashboard-upload-form" class="upload-form-modern" action="/api/v1/upload" method="post" enctype="multipart/form-data" data-is-authenticated-upload="true" data-max-upload-bytes="{{ runtime_flags.max_upload_bytes if runtime_flags.max_upload_bytes is defined else '' }}">
+      <p class="upload-inline-status hidden" data-upload-feedback aria-live="polite"></p>
       <div class="upload-dropzone">
         <span class="upload-title-wrap">
           <input type="text" name="title" placeholder="Album title (optional)">
@@ -76,6 +76,7 @@
         <h2>Pick up where you left off.</h2>
       </div>
     </div>
+    <p id="dashboard-recent-albums-status" class="inline-status hidden" aria-live="polite"></p>
     <div id="dashboard-recent-albums-empty" class="albums-empty-state hidden">
       <h3>No albums yet.</h3>
       <p class="hint">Upload from the panel above to create your first album.</p>

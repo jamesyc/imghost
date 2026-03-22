@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from imghost.main import app
-from imghost.processors import VideoProcessingError
+from imghost.processors import MediaMetadata, SanitizedFile, ValidationResult, VideoProcessingError
 
 from .helpers import PNG_1X1, wait_for_thumbnail
 
@@ -216,6 +216,102 @@ def test_invalid_video_upload_does_not_leak_ffmpeg_stderr_excerpt(tmp_path, monk
         assert response.status_code == 415
         assert response.json()["detail"] == "Unsupported or invalid video file."
         assert "ffmpeg-internal-secret-tail" not in response.text
+
+
+def test_invalid_weird_video_metadata_still_returns_coarse_415(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    async def fake_validate(self, payload: bytes):
+        from imghost.processors import ValidationResult
+
+        return ValidationResult(ok=False, rejection_reason="Unsupported or invalid video file.")
+
+    monkeypatch.setattr("imghost.processors.Mp4Processor.validate", fake_validate)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("weird.mp4", BytesIO(b"weird-video"), "video/mp4"))],
+        )
+
+        assert response.status_code == 415
+        assert response.json()["detail"] == "Unsupported or invalid video file."
+
+
+def test_malformed_video_upload_returns_415_and_persists_nothing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    async def fake_validate(self, payload: bytes) -> ValidationResult:
+        return ValidationResult(ok=False, rejection_reason="Unsupported or invalid video file.")
+
+    monkeypatch.setattr("imghost.processors.Mp4Processor.validate", fake_validate)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("bad.mp4", BytesIO(b"bad-video"), "video/mp4"))],
+            data={"title": "Should Not Persist"},
+        )
+
+        assert response.status_code == 415
+        assert response.json()["detail"] == "Unsupported or invalid video file."
+
+        state = client.app.state.imghost
+        albums = client.portal.call(state.repository.list_albums)
+        media_items = client.portal.call(state.repository.list_all_media)
+        assert albums == []
+        assert media_items == []
+
+    assert not list(tmp_path.rglob("originals/**/*"))
+    assert not list(tmp_path.rglob("thumbnails/**/*"))
+
+
+def test_video_sanitize_timeout_returns_415_and_stores_nothing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    async def fake_validate(self, payload: bytes) -> ValidationResult:
+        return ValidationResult(ok=True)
+
+    async def fake_extract_metadata(self, payload: bytes, format_hint: str) -> MediaMetadata:
+        return MediaMetadata(
+            width=640,
+            height=360,
+            duration_secs=2.0,
+            codec_hint=None,
+            is_animated=True,
+            mime_type="video/mp4",
+            format="mp4",
+        )
+
+    async def fake_sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
+        raise VideoProcessingError(tool="ffmpeg", timed_out=True, stderr_excerpt="slow tail")
+
+    monkeypatch.setattr("imghost.processors.Mp4Processor.validate", fake_validate)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.extract_metadata", fake_extract_metadata)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.sanitize", fake_sanitize)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("slow.mp4", BytesIO(b"slow-video"), "video/mp4"))],
+            data={"title": "Should Not Persist"},
+        )
+
+        assert response.status_code == 415
+        assert response.json()["detail"] == "Unsupported or invalid video file."
+        assert "slow tail" not in response.text
+
+        state = client.app.state.imghost
+        albums = client.portal.call(state.repository.list_albums)
+        media_items = client.portal.call(state.repository.list_all_media)
+        assert albums == []
+        assert media_items == []
+
+    assert not list(tmp_path.rglob("originals/**/*"))
+    assert not list(tmp_path.rglob("thumbnails/**/*"))
 
 
 def test_upload_over_limit_is_rejected_without_processing(tmp_path, monkeypatch) -> None:

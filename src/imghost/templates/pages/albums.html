@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% include "partials/flash.html" %}
 <section class="stack albums-shell">
   <section class="card">
     <div class="albums-section-header row albums-list-header">
@@ -11,6 +10,7 @@
       </div>
       <button id="refresh-albums" type="button" class="secondary">Refresh Albums</button>
     </div>
+    <p id="owned-albums-status" class="inline-status hidden" aria-live="polite"></p>
     <p id="owned-albums-summary" class="hint albums-list-summary"></p>
     <div id="owned-albums-empty" class="albums-empty-state hidden">
       <h3>No albums yet.</h3>
@@ -21,6 +21,7 @@
       <button id="owned-albums-prev" type="button" class="secondary">Previous</button>
       <button id="owned-albums-next" type="button" class="secondary">Next</button>
     </div>
+    <p id="owned-albums-pagination-status" class="inline-status hidden" aria-live="polite"></p>
   </section>
 </section>
 {% endblock %}

@@ -1,19 +1,22 @@
-const flash = document.getElementById("flash");
 const albumsRoot = document.getElementById("owned-albums");
 const emptyState = document.getElementById("owned-albums-empty");
 const refreshButton = document.getElementById("refresh-albums");
 const albumsSummary = document.getElementById("owned-albums-summary");
+const albumsStatus = document.getElementById("owned-albums-status");
 const albumsPrev = document.getElementById("owned-albums-prev");
 const albumsNext = document.getElementById("owned-albums-next");
-
-const showMessage = (message) => {
-  if (flash) {
-    flash.textContent = message || "";
-  }
-};
+const albumsPaginationStatus = document.getElementById("owned-albums-pagination-status");
 
 const formatBytes = window.albumCardFormatBytes;
 const state = { limit: 10, offset: 0, total: 0 };
+
+const setInlineStatus = (node, message = "") => {
+  if (!node) {
+    return;
+  }
+  node.textContent = message || "";
+  node.classList.toggle("hidden", !message);
+};
 
 const requestJson = async (url, options = {}) => {
   const response = await fetch(url, options);
@@ -25,6 +28,8 @@ const requestJson = async (url, options = {}) => {
 };
 
 const refreshAlbums = async () => {
+  setInlineStatus(albumsStatus);
+  setInlineStatus(albumsPaginationStatus);
   const payload = await requestJson(`/api/v1/user/me/albums?limit=${state.limit}&offset=${state.offset}`);
   const albums = payload.items || [];
   state.total = payload.total || 0;
@@ -68,18 +73,16 @@ albumsRoot?.addEventListener("click", async (event) => {
       state.offset = Math.max(0, state.offset - state.limit);
     }
     await refreshAlbums();
-    showMessage("Album deleted.");
   } catch (error) {
-    showMessage(error.message);
+    window.alert(error.message);
   }
 });
 
 refreshButton?.addEventListener("click", async () => {
   try {
     await refreshAlbums();
-    showMessage("Albums refreshed.");
   } catch (error) {
-    showMessage(error.message);
+    setInlineStatus(albumsStatus, error.message);
   }
 });
 
@@ -88,7 +91,7 @@ albumsPrev?.addEventListener("click", async () => {
   try {
     await refreshAlbums();
   } catch (error) {
-    showMessage(error.message);
+    setInlineStatus(albumsPaginationStatus, error.message);
   }
 });
 
@@ -97,11 +100,11 @@ albumsNext?.addEventListener("click", async () => {
   try {
     await refreshAlbums();
   } catch (error) {
-    showMessage(error.message);
+    setInlineStatus(albumsPaginationStatus, error.message);
   }
 });
 
 refreshAlbums().catch((error) => {
-  showMessage(error.message);
+  setInlineStatus(albumsStatus, error.message);
 });
 window.attachAlbumCardNavigation?.(albumsRoot);

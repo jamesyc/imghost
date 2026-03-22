@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
 {% block content %}
-{% include "partials/flash.html" %}
 <script id="public-album-bootstrap" type="application/json">{{ album_payload|tojson }}</script>
 <section class="stack public-album-shell">
   <section class="card hero-card public-album-hero">
