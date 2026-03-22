@@ -10,7 +10,8 @@ from .app_state import AppState
 from .config import load_settings
 from .web.admin_api import router as admin_api_router
 from .web.auth import router as auth_router
-from .web.context import clear_stale_session_cookie, enforce_session_csrf
+from .web.context import clear_stale_session_cookie
+from .web.csrf import enforce_session_csrf
 from .web.health import router as health_router
 from .web.media import router as media_router
 from .web.pages import router as pages_router

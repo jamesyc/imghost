@@ -10,9 +10,8 @@ from .context import (
     apply_session_cookie,
     authenticated_user,
     clear_session_cookie,
-    correlation_id,
-    get_state,
 )
+from .request_context import correlation_id, get_state
 
 router = APIRouter()
 

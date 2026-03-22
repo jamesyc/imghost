@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .context import get_state
+from .request_context import get_state
 from .utils import is_expired, thumb_media_type, validate_media_id_or_404
 
 router = APIRouter()

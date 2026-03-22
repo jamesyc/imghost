@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from .context import get_state
+from .request_context import get_state
 
 router = APIRouter()
 

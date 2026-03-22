@@ -11,7 +11,8 @@ from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..payloads import album_to_payload
 from ..public_origin import public_base_url
 from ..service import AdminAlbumUpdateInput, UNSET, UserCreateInput, UserUpdateInput
-from .context import correlation_id, get_state, require_admin_user
+from .context import require_admin_user
+from .request_context import correlation_id, get_state
 
 router = APIRouter()
 

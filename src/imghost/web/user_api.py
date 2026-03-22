@@ -6,7 +6,8 @@ from fastapi.responses import JSONResponse, Response
 
 from ..service import PasswordChangeInput
 from ..public_origin import public_base_url
-from .context import authenticated_principal, authenticated_user, correlation_id, get_state
+from .context import authenticated_principal, authenticated_user
+from .request_context import correlation_id, get_state
 
 router = APIRouter()
 
