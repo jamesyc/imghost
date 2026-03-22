@@ -6,7 +6,13 @@ from fastapi.testclient import TestClient
 from imghost.main import app
 from imghost.models import utcnow
 
-from .helpers import PNG_1X1, browser_session_headers, create_admin_and_api_key, create_user_and_api_key, set_user_password
+from .helpers import (
+    PNG_1X1,
+    browser_session_headers,
+    create_admin_and_api_key,
+    create_user_and_api_key,
+    set_user_password,
+)
 
 
 def assert_paginated_envelope(payload: dict, *, limit: int, offset: int, total: int, has_more: bool) -> None:
@@ -48,6 +54,88 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert "subsystems" in payload["redis"]
         assert "worker" in payload
         assert "tasks" in payload
+        assert payload["bootstrap_admin"] == {
+            "enabled": False,
+            "configured_username": None,
+            "matched": False,
+            "already_admin": False,
+            "promoted": False,
+            "user_id": None,
+            "warning": None,
+        }
+
+
+def test_admin_runtime_status_reports_bootstrap_admin_promotion_state(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="statusbootstrapadmin", email="statusbootstrapadmin@example.com")
+    _, user_key = create_user_and_api_key(capsys, username="statusbootstrapuser", email="statusbootstrapuser@example.com")
+
+    monkeypatch.setenv("PROMOTE_USERNAME_TO_ADMIN", "statusbootstrapuser")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {user_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["bootstrap_admin"]["enabled"] is True
+        assert payload["bootstrap_admin"]["configured_username"] == "statusbootstrapuser"
+        assert payload["bootstrap_admin"]["matched"] is True
+        assert payload["bootstrap_admin"]["already_admin"] is False
+        assert payload["bootstrap_admin"]["promoted"] is True
+        assert payload["bootstrap_admin"]["user_id"] is not None
+        assert payload["bootstrap_admin"]["warning"] is None
+
+
+def test_admin_runtime_status_reports_bootstrap_admin_already_admin_state(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("PROMOTE_USERNAME_TO_ADMIN", "statusalreadyadmin")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="statusalreadyadmin", email="statusalreadyadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["bootstrap_admin"]["enabled"] is True
+        assert payload["bootstrap_admin"]["configured_username"] == "statusalreadyadmin"
+        assert payload["bootstrap_admin"]["matched"] is True
+        assert payload["bootstrap_admin"]["already_admin"] is True
+        assert payload["bootstrap_admin"]["promoted"] is False
+        assert payload["bootstrap_admin"]["user_id"] is not None
+        assert payload["bootstrap_admin"]["warning"] is None
+
+
+def test_admin_runtime_status_reports_missing_bootstrap_admin_username(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("PROMOTE_USERNAME_TO_ADMIN", "missing-bootstrap-user")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="statusmissingadmin", email="statusmissingadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["bootstrap_admin"]["enabled"] is True
+        assert payload["bootstrap_admin"]["configured_username"] == "missing-bootstrap-user"
+        assert payload["bootstrap_admin"]["matched"] is False
+        assert payload["bootstrap_admin"]["already_admin"] is False
+        assert payload["bootstrap_admin"]["promoted"] is False
+        assert payload["bootstrap_admin"]["user_id"] is None
+        assert payload["bootstrap_admin"]["warning"] == (
+            "PROMOTE_USERNAME_TO_ADMIN set to 'missing-bootstrap-user', but no matching user exists."
+        )
 
 
 def test_admin_runtime_status_warns_when_proxy_trust_is_permissive(tmp_path, monkeypatch, capsys) -> None:

@@ -262,6 +262,126 @@ def test_app_lifespan_writes_system_startup_and_shutdown_audit(tmp_path, monkeyp
     assert shutdown_rows[0]["source"] == "system"
 
 
+def test_startup_promotes_configured_existing_user_to_admin_and_audits_it(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    user_id, user_key = create_user_and_api_key(capsys, username="bootstrapuser", email="bootstrapuser@example.com")
+    monkeypatch.setenv("PROMOTE_USERNAME_TO_ADMIN", "bootstrapuser")
+
+    with TestClient(app) as client:
+        me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {user_key}"})
+        assert me.status_code == 200
+        assert me.json()["is_admin"] is True
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {user_key}"},
+            params={"event_type": "system_bootstrap_admin_promoted"},
+        )
+        assert audit.status_code == 200
+        payload = audit.json()
+        assert len(payload) == 1
+        assert payload[0]["action"] == "system.bootstrap_admin.promote"
+        assert payload[0]["target_type"] == "user"
+        assert payload[0]["target_id"] == user_id
+        assert payload[0]["metadata"]["username"] == "bootstrapuser"
+
+
+def test_bootstrap_admin_promotion_is_only_audited_once_per_startup(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    user_id, user_key = create_user_and_api_key(capsys, username="bootstraponce", email="bootstraponce@example.com")
+    monkeypatch.setenv("PROMOTE_USERNAME_TO_ADMIN", "bootstraponce")
+
+    with TestClient(app) as client:
+        first_status = client.get("/api/v1/admin/runtime-status", headers={"Authorization": f"Bearer {user_key}"})
+        second_status = client.get("/api/v1/admin/runtime-status", headers={"Authorization": f"Bearer {user_key}"})
+        assert first_status.status_code == 200
+        assert second_status.status_code == 200
+        assert first_status.json()["bootstrap_admin"]["promoted"] is True
+        assert second_status.json()["bootstrap_admin"]["promoted"] is True
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {user_key}"},
+            params={"event_type": "system_bootstrap_admin_promoted"},
+        )
+        assert audit.status_code == 200
+        payload = audit.json()
+        assert len(payload) == 1
+        assert payload[0]["target_id"] == user_id
+
+
+def test_startup_does_not_audit_bootstrap_admin_when_user_already_admin(tmp_path, monkeypatch, capsys, caplog) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="bootstrapalreadyadmin", email="bootstrapalreadyadmin@example.com")
+    monkeypatch.setenv("PROMOTE_USERNAME_TO_ADMIN", "bootstrapalreadyadmin")
+
+    with caplog.at_level(logging.INFO):
+        with TestClient(app) as client:
+            runtime = client.get(
+                "/api/v1/admin/runtime-status",
+                headers={"Authorization": f"Bearer {admin_key}"},
+            )
+            assert runtime.status_code == 200
+            assert runtime.json()["bootstrap_admin"]["enabled"] is True
+            assert runtime.json()["bootstrap_admin"]["configured_username"] == "bootstrapalreadyadmin"
+            assert runtime.json()["bootstrap_admin"]["matched"] is True
+            assert runtime.json()["bootstrap_admin"]["already_admin"] is True
+            assert runtime.json()["bootstrap_admin"]["promoted"] is False
+            assert runtime.json()["bootstrap_admin"]["user_id"] is not None
+            assert runtime.json()["bootstrap_admin"]["warning"] is None
+
+            audit = client.get(
+                "/api/v1/admin/audit",
+                headers={"Authorization": f"Bearer {admin_key}"},
+                params={"event_type": "system_bootstrap_admin_promoted"},
+            )
+            assert audit.status_code == 200
+            assert audit.json() == []
+
+    assert any(record.message == "bootstrap_admin_user_already_admin" for record in caplog.records)
+
+
+def test_startup_warns_when_bootstrap_admin_username_is_missing(tmp_path, monkeypatch, capsys, caplog) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("PROMOTE_USERNAME_TO_ADMIN", "not-a-real-user")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="bootstrapwarnadmin", email="bootstrapwarnadmin@example.com")
+
+    with caplog.at_level(logging.WARNING):
+        with TestClient(app) as client:
+            runtime = client.get(
+                "/api/v1/admin/runtime-status",
+                headers={"Authorization": f"Bearer {admin_key}"},
+            )
+            assert runtime.status_code == 200
+            assert runtime.json()["bootstrap_admin"]["enabled"] is True
+            assert runtime.json()["bootstrap_admin"]["configured_username"] == "not-a-real-user"
+            assert runtime.json()["bootstrap_admin"]["matched"] is False
+            assert runtime.json()["bootstrap_admin"]["already_admin"] is False
+            assert runtime.json()["bootstrap_admin"]["promoted"] is False
+            assert runtime.json()["bootstrap_admin"]["user_id"] is None
+            assert runtime.json()["bootstrap_admin"]["warning"] == (
+                "PROMOTE_USERNAME_TO_ADMIN set to 'not-a-real-user', but no matching user exists."
+            )
+
+            audit = client.get(
+                "/api/v1/admin/audit",
+                headers={"Authorization": f"Bearer {admin_key}"},
+                params={"event_type": "system_bootstrap_admin_promoted"},
+            )
+            assert audit.status_code == 200
+            assert audit.json() == []
+
+    assert any(record.message == "bootstrap_admin_user_missing" for record in caplog.records)
+
+
 def test_app_state_worker_lifecycle_is_audited_and_suppressed_when_disabled(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

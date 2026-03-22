@@ -40,6 +40,7 @@ class Settings:
     task_queue_mode: str
     task_worker_enabled: bool
     thumbnail_worker_count: int
+    promote_username_to_admin: str | None = None
 
 
 def _env_bool(name: str) -> bool | None:
@@ -117,6 +118,7 @@ def load_settings() -> Settings:
         s3_bucket=(os.getenv("S3_BUCKET") or "").strip() or None,
         s3_region=os.getenv("S3_REGION", "garage").strip() or "garage",
         secret_key=os.getenv("SECRET_KEY", "dev-secret-key"),
+        promote_username_to_admin=(os.getenv("PROMOTE_USERNAME_TO_ADMIN") or "").strip() or None,
         session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "imghost_session"),
         session_cookie_secure=session_cookie_secure,
         session_redis_fail_closed=session_redis_fail_closed,

@@ -9,6 +9,7 @@ from .audit.models import AuditActor, AuditObject
 from .config import Settings
 from .db import Database
 from .events import EventBus, MediaUploaded
+from .models import utcnow
 from .observability import ObservabilityState
 from .processors import build_processor_registry
 from .rate_limits import build_rate_limiter
@@ -56,6 +57,15 @@ class AppState:
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
         register_audit_subscribers(self.event_bus, self.audit)
+        self.bootstrap_admin_status: dict[str, Any] = {
+            "enabled": bool(settings.promote_username_to_admin),
+            "configured_username": settings.promote_username_to_admin,
+            "matched": False,
+            "already_admin": False,
+            "promoted": False,
+            "user_id": None,
+            "warning": None,
+        }
 
     def _build_task_queue(self) -> TaskQueue:
         context = TaskContext(self.repository, self.storage, self.processors)
@@ -73,6 +83,7 @@ class AppState:
 
     async def start(self) -> None:
         await self.database.connect()
+        await self._apply_bootstrap_admin_promotion()
         await self.redis.ensure_startup_ready()
         await self.tasks.start()
         recovered = await self.recover_thumbnails(include_failed=False)
@@ -231,7 +242,46 @@ class AppState:
             "proxy_trust_warning": proxy_trust_warning,
             "trusted_proxy_cidrs_enabled": self.settings.trusted_proxy_cidrs_enabled,
             "trusted_proxy_cidrs": list(self.settings.trusted_proxy_cidrs),
+            "bootstrap_admin": dict(self.bootstrap_admin_status),
         }
+
+    async def _apply_bootstrap_admin_promotion(self) -> None:
+        username = self.settings.promote_username_to_admin
+        if not username:
+            return
+        user = await self.repository.get_user_by_username(username)
+        self.bootstrap_admin_status = {
+            "enabled": True,
+            "configured_username": username,
+            "matched": user is not None,
+            "already_admin": bool(user.is_admin) if user is not None else False,
+            "promoted": False,
+            "user_id": user.id if user is not None else None,
+            "warning": None,
+        }
+        logger = logging.getLogger(__name__)
+        if user is None:
+            warning = f"PROMOTE_USERNAME_TO_ADMIN set to {username!r}, but no matching user exists."
+            self.bootstrap_admin_status["warning"] = warning
+            logger.warning("bootstrap_admin_user_missing", extra={"username": username})
+            return
+        if user.is_admin:
+            logger.info("bootstrap_admin_user_already_admin", extra={"username": username, "user_id": user.id})
+            return
+
+        user.is_admin = True
+        user.updated_at = utcnow()
+        await self.repository.update_user(user)
+        self.bootstrap_admin_status["promoted"] = True
+        logger.warning("bootstrap_admin_user_promoted", extra={"username": username, "user_id": user.id})
+        await self._audit_system_event(
+            event_type=actions.SYSTEM_BOOTSTRAP_ADMIN_PROMOTED,
+            action="system.bootstrap_admin.promote",
+            source="system",
+            object_type="user",
+            object_id=user.id,
+            metadata={"username": username},
+        )
 
     async def readiness_status(self) -> dict[str, Any]:
         runtime = await self.runtime_status()
@@ -258,6 +308,8 @@ class AppState:
         event_type: str,
         action: str,
         source: str,
+        object_type: str = "system",
+        object_id: str = "imghost",
         metadata: dict[str, Any],
     ) -> None:
         await self.audit.emit_action(
@@ -265,7 +317,7 @@ class AppState:
             action=action,
             result="success",
             actor=AuditActor(id=None, type=source),
-            object=AuditObject(type="system", id="imghost"),
+            object=AuditObject(type=object_type, id=object_id),
             metadata={**metadata, "source": source},
             process=build_runtime_process_context(source),
         )
