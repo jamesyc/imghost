@@ -137,6 +137,7 @@ class AppState:
             "redis": {
                 "configured": redis_configured,
                 "reachable": redis_reachable,
+                "session_fail_closed": self.settings.session_redis_fail_closed,
                 "subsystems": {
                     "sessions": self.observability.subsystem_snapshot(
                         "sessions",

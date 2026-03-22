@@ -35,6 +35,7 @@ def _settings(*, enabled: bool, cidrs: tuple[str, ...] = ()) -> Settings:
         secret_key="test-secret",
         session_cookie_name="imghost_session",
         session_cookie_secure=True,
+        session_redis_fail_closed=False,
         session_remember_days=30,
         max_upload_bytes=1024,
         anon_expiry_hours=24,

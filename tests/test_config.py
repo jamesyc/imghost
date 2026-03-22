@@ -43,3 +43,21 @@ def test_load_settings_uses_redis_password_when_present(monkeypatch, tmp_path) -
     settings = load_settings()
     assert settings.redis_password == "s3cret!"
     assert settings.redis_url == "redis://:s3cret%21@redis:6379/0"
+
+
+def test_load_settings_defaults_session_redis_fail_closed_to_false(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.delenv("SESSION_REDIS_FAIL_CLOSED", raising=False)
+
+    settings = load_settings()
+    assert settings.session_redis_fail_closed is False
+
+
+def test_load_settings_parses_session_redis_fail_closed(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+
+    settings = load_settings()
+    assert settings.session_redis_fail_closed is True

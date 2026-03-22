@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from ..events import AdminLoggedIn
 from ..service import LocalLoginInput, UserCreateInput
+from ..sessions import SessionBackendUnavailable
 from .auth_context import (
     apply_session_cookie,
     authenticated_user,
@@ -44,7 +45,10 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
                 correlation_id=cid,
             )
         )
-    token, expires_at = await state.session_backend.create_session(user, remember_me=payload.remember_me)
+    try:
+        token, expires_at = await state.session_backend.create_session(user, remember_me=payload.remember_me)
+    except SessionBackendUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     summary = await state.uploads.get_current_user_summary(user)
     response = JSONResponse({"authenticated": True, "user": summary}, headers={"X-Correlation-ID": cid})
     apply_session_cookie(response, state.settings, token, expires_at=expires_at)
@@ -69,7 +73,10 @@ async def register(request: Request, payload: RegistrationRequest) -> JSONRespon
         correlation_id=cid,
         source="web",
     )
-    token, expires_at = await state.session_backend.create_session(created, remember_me=payload.remember_me)
+    try:
+        token, expires_at = await state.session_backend.create_session(created, remember_me=payload.remember_me)
+    except SessionBackendUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     summary = await state.uploads.get_current_user_summary(created)
     response = JSONResponse({"authenticated": True, "user": summary}, headers={"X-Correlation-ID": cid})
     apply_session_cookie(response, state.settings, token, expires_at=expires_at)

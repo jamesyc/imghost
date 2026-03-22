@@ -82,7 +82,7 @@ window.renderAdminRuntimeCards = (payload) => {
       label: "Redis",
       status: payload.redis?.configured ? (payload.redis?.reachable ? "Reachable" : "Configured, not reachable") : "Disabled",
       tone: payload.redis?.configured ? (payload.redis?.reachable ? "ok" : "warn") : "neutral",
-      hint: `Sessions ${payload.redis?.subsystems?.sessions?.mode || "unknown"} · Rate limits ${payload.redis?.subsystems?.rate_limits?.mode || "unknown"}`,
+      hint: `Sessions ${payload.redis?.subsystems?.sessions?.mode || "unknown"}${payload.redis?.session_fail_closed ? " (fail closed)" : " (graceful fallback)"} · Rate limits ${payload.redis?.subsystems?.rate_limits?.mode || "unknown"}`,
     },
     {
       label: "Task queue",
@@ -160,6 +160,12 @@ window.renderAdminNetworkTrust = (payload) => `
         <div>
           <strong>Trusted proxy CIDRs</strong>
           <p class="hint">${window.escapeAdminHtml((payload.trusted_proxy_cidrs || []).join(", ") || "None configured")}</p>
+        </div>
+      </article>
+      <article class="admin-list-row">
+        <div>
+          <strong>Redis session outage mode</strong>
+          <p class="hint">${window.escapeAdminHtml(payload.redis?.session_fail_closed ? "Fail closed: browser sessions require Redis." : "Graceful fallback: signed cookies keep browser auth working if Redis is down.")}</p>
         </div>
       </article>
       ${

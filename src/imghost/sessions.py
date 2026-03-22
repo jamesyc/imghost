@@ -55,6 +55,10 @@ class SessionBackend:
         raise NotImplementedError
 
 
+class SessionBackendUnavailable(RuntimeError):
+    pass
+
+
 class CookieSessionBackend(SessionBackend):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -97,6 +101,9 @@ class RedisBackedSessionBackend(SessionBackend):
                 operation="create session",
                 reason="redis_unavailable",
             )
+            if self.settings.session_redis_fail_closed:
+                logger.warning("session_backend_unavailable", extra={"reason": "redis_unavailable", "action": "create"})
+                raise SessionBackendUnavailable("Redis-backed sessions are currently unavailable.")
             logger.warning("session_backend_fallback", extra={"reason": "redis_unavailable", "action": "create"})
             return token, expires_at
         self.observability.mark_subsystem_recovered("sessions", operation="create session")
@@ -119,6 +126,9 @@ class RedisBackedSessionBackend(SessionBackend):
                 operation="resolve session",
                 reason="redis_unavailable",
             )
+            if self.settings.session_redis_fail_closed:
+                logger.warning("session_backend_unavailable", extra={"reason": "redis_unavailable", "action": "resolve"})
+                return None
             logger.warning("session_backend_fallback", extra={"reason": "redis_unavailable", "action": "resolve"})
             return payload.user_id
         self.observability.mark_subsystem_recovered("sessions", operation="resolve session")

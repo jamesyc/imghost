@@ -19,6 +19,7 @@ def _runtime_status_payload(
         "redis": {
             "configured": redis_configured,
             "reachable": redis_reachable,
+            "session_fail_closed": False,
             "subsystems": {
                 "sessions": {"configured": redis_configured, "mode": "redis" if redis_configured else "disabled"},
                 "rate_limits": {"configured": redis_configured, "mode": "redis" if redis_configured else "disabled"},
@@ -188,3 +189,23 @@ def test_health_ready_exposes_dependency_snapshot_when_not_ready(tmp_path, monke
         assert body["redis"]["reachable"] is False
         assert "worker" in body
         assert "tasks" in body
+
+
+def test_health_ready_includes_redis_session_fail_closed_flag(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    payload = _runtime_status_payload()
+    payload["redis"]["session_fail_closed"] = True
+
+    async def fake_runtime_status(self: AppState) -> dict[str, object]:
+        return payload.copy()
+
+    monkeypatch.setattr(AppState, "runtime_status", fake_runtime_status)
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is True
+        assert body["redis"]["session_fail_closed"] is True

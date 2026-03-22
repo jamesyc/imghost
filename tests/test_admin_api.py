@@ -23,6 +23,7 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
     monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://testserver")
     monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
     monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,172.16.0.0/12")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
 
     _, admin_key = create_admin_and_api_key(capsys, username="statusadmin", email="statusadmin@example.com")
 
@@ -43,6 +44,7 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert payload["proxy_trust_warning"] is None
         assert payload["trusted_proxy_cidrs_enabled"] is True
         assert payload["trusted_proxy_cidrs"] == ["127.0.0.1/32", "172.16.0.0/12"]
+        assert payload["redis"]["session_fail_closed"] is True
 
 
 def test_admin_runtime_status_warns_when_proxy_trust_is_permissive(tmp_path, monkeypatch, capsys) -> None:
@@ -83,6 +85,7 @@ def test_admin_runtime_status_reports_direct_request_public_origin_mode(tmp_path
         payload = response.json()
         assert payload["public_origin_enabled"] is False
         assert payload["public_origin_mode"] == "direct_request"
+        assert payload["redis"]["session_fail_closed"] is False
 
 
 def test_admin_runtime_status_reports_redis_disabled_when_redis_queue_mode_is_not_backed_by_redis(

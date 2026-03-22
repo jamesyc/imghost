@@ -15,9 +15,10 @@ from imghost.observability import ObservabilityState
 from imghost.rate_limits import InMemoryRateLimiter, RedisRateLimiter
 from imghost.redis_support import RedisHandle
 from imghost.sessions import RedisBackedSessionBackend
+from imghost.sessions import SessionBackendUnavailable
 from imghost.tasks import RedisTaskQueue, TaskContext
 
-from .helpers import browser_session_headers
+from .helpers import browser_session_headers, create_user_and_api_key, set_user_password
 
 
 class FakeRedis:
@@ -135,6 +136,7 @@ def make_settings(**overrides: object) -> Settings:
         "secret_key": "secret",
         "session_cookie_name": "imghost_session",
         "session_cookie_secure": True,
+        "session_redis_fail_closed": False,
         "session_remember_days": 30,
         "max_upload_bytes": 50 * 1024 * 1024,
         "anon_expiry_hours": 24,
@@ -201,6 +203,35 @@ def test_redis_session_backend_uses_redis_when_available_and_gracefully_falls_ba
     fake.fail = False
     session_key = next(key for key in fake.values if ":session:" in key)
     asyncio.run(fake.delete(session_key))
+    assert asyncio.run(backend.resolve_user(token)) is None
+
+
+def test_redis_session_backend_strict_mode_rejects_session_creation_when_redis_is_down() -> None:
+    fake = FakeRedis()
+    fake.fail = True
+    settings = make_settings(redis_url="redis://fake", session_redis_fail_closed=True)
+    backend = RedisBackedSessionBackend(
+        settings,
+        RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
+        ObservabilityState(),
+    )
+
+    with pytest.raises(SessionBackendUnavailable, match="Redis-backed sessions"):
+        asyncio.run(backend.create_session(make_user(), remember_me=True))
+
+
+def test_redis_session_backend_strict_mode_fails_closed_when_redis_goes_down_after_login() -> None:
+    fake = FakeRedis()
+    settings = make_settings(redis_url="redis://fake", session_redis_fail_closed=True)
+    backend = RedisBackedSessionBackend(
+        settings,
+        RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
+        ObservabilityState(),
+    )
+
+    token, _ = asyncio.run(backend.create_session(make_user(), remember_me=True))
+    fake.fail = True
+
     assert asyncio.run(backend.resolve_user(token)) is None
 
 
@@ -356,6 +387,109 @@ def test_app_registration_still_creates_a_working_session_when_redis_is_down_fro
         me = client.get("/api/v1/user/me")
         assert me.status_code == 200
         assert me.json()["username"] == "fallbackcreate"
+
+
+def test_app_login_returns_503_when_redis_sessions_fail_closed_and_redis_is_down(tmp_path, monkeypatch, capsys) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    user_id, _ = create_user_and_api_key(capsys, username="strictloginseed", email="strictloginseed@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "secret-pass")
+        fake.fail = True
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "strictloginseed@example.com", "password": "secret-pass"},
+        )
+        assert login.status_code == 503
+        assert login.json()["detail"] == "Redis-backed sessions are currently unavailable."
+
+
+def test_app_registration_returns_503_when_redis_sessions_fail_closed_and_redis_is_down(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        fake.fail = True
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "strictregister",
+                "email": "strictregister@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 503
+        assert registered.json()["detail"] == "Redis-backed sessions are currently unavailable."
+
+
+def test_app_existing_browser_session_fails_closed_when_redis_sessions_are_strict_and_redis_goes_down(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "strictresolve",
+                "email": "strictresolve@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        fake.fail = True
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 401
+
+
+def test_app_logout_still_clears_cookie_when_redis_sessions_fail_closed_and_redis_is_down(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "strictlogout",
+                "email": "strictlogout@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        fake.fail = True
+        logout = client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
+        assert logout.status_code == 200
+        assert "imghost_session=" in logout.headers["set-cookie"]
+
+        after_logout = client.get("/api/v1/user/me")
+        assert after_logout.status_code == 401
 
 
 def test_app_logout_still_clears_cookie_when_redis_delete_fails(tmp_path, monkeypatch) -> None:

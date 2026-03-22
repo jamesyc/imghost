@@ -29,6 +29,7 @@ class Settings:
     secret_key: str
     session_cookie_name: str
     session_cookie_secure: bool
+    session_redis_fail_closed: bool
     session_remember_days: int
     max_upload_bytes: int
     anon_expiry_hours: int
@@ -82,6 +83,7 @@ def load_settings() -> Settings:
     session_cookie_secure = _env_bool("SESSION_COOKIE_SECURE")
     public_origin_enabled = _env_bool("PUBLIC_ORIGIN_ENABLED")
     trusted_proxy_cidrs_enabled = _env_bool("TRUSTED_PROXY_CIDRS_ENABLED")
+    session_redis_fail_closed = _env_bool("SESSION_REDIS_FAIL_CLOSED")
     trusted_proxy_cidrs = _env_csv("TRUSTED_PROXY_CIDRS")
     redis_password = (os.getenv("REDIS_PASSWORD") or "").strip() or None
     if session_cookie_secure is None:
@@ -90,6 +92,8 @@ def load_settings() -> Settings:
         public_origin_enabled = True
     if trusted_proxy_cidrs_enabled is None:
         trusted_proxy_cidrs_enabled = False
+    if session_redis_fail_closed is None:
+        session_redis_fail_closed = False
     if trusted_proxy_cidrs_enabled and not trusted_proxy_cidrs:
         raise ValueError("TRUSTED_PROXY_CIDRS_ENABLED=true requires TRUSTED_PROXY_CIDRS to be set.")
     for cidr in trusted_proxy_cidrs:
@@ -115,6 +119,7 @@ def load_settings() -> Settings:
         secret_key=os.getenv("SECRET_KEY", "dev-secret-key"),
         session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "imghost_session"),
         session_cookie_secure=session_cookie_secure,
+        session_redis_fail_closed=session_redis_fail_closed,
         session_remember_days=max(1, int(os.getenv("SESSION_REMEMBER_DAYS", "30"))),
         max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))),
         anon_expiry_hours=int(os.getenv("ANON_EXPIRY_HOURS", "24")),
