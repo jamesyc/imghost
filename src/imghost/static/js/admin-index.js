@@ -1,5 +1,6 @@
 const adminOverviewStats = document.getElementById("admin-overview-stats");
 const adminOverviewRuntime = document.getElementById("admin-overview-runtime");
+const adminOverviewNetworkTrust = document.getElementById("admin-overview-network-trust");
 const adminOverviewStatsStatus = document.getElementById("admin-overview-stats-status");
 const adminOverviewRuntimeStatus = document.getElementById("admin-overview-runtime-status-text");
 
@@ -55,10 +56,10 @@ if (adminOverviewStats && adminOverviewRuntime) {
   };
 
   const renderRuntime = (payload) => {
-    adminOverviewRuntime.innerHTML = `
-      ${window.renderAdminRuntimeCards(payload)}
-      ${window.renderAdminNetworkTrust(payload)}
-    `;
+    adminOverviewRuntime.innerHTML = window.renderAdminRuntimeCards(payload);
+    if (adminOverviewNetworkTrust) {
+      adminOverviewNetworkTrust.innerHTML = window.renderAdminNetworkTrust(payload);
+    }
   };
 
   const refreshStats = async () => {

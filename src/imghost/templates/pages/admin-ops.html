@@ -24,7 +24,22 @@
       </div>
       <p id="admin-runtime-status-text" class="settings-inline-status hidden" aria-live="polite"></p>
       <div id="admin-runtime-status" class="stack admin-runtime-layout"></div>
-      <div id="admin-network-trust" class="stack admin-overview-subsection section-gap-top"></div>
+    </section>
+
+    <section class="card admin-card">
+      <div class="admin-section-header">
+        <h2>Admin-only runtime details</h2>
+        <p class="hint">Admin-only runtime details for queue, Redis, worker, and network trust.</p>
+      </div>
+      <div id="admin-runtime-details" class="stack admin-overview-subsection"></div>
+    </section>
+
+    <section class="card admin-card">
+      <div class="admin-section-header">
+        <h2>Network trust</h2>
+        <p class="hint">Origins and proxy trust that affect request handling.</p>
+      </div>
+      <div id="admin-network-trust" class="stack admin-overview-subsection"></div>
     </section>
 
     <section class="card admin-card">
@@ -71,7 +86,7 @@
       <p id="admin-audit-status" class="settings-inline-status hidden" aria-live="polite"></p>
       <p id="admin-audit-summary" class="hint"></p>
       <div id="admin-audit" class="stack admin-audit-list"></div>
-      <div class="row row-actions">
+      <div class="row row-actions section-gap-top">
         <button id="admin-audit-prev" type="button" class="secondary">Previous</button>
         <button id="admin-audit-next" type="button" class="secondary">Next</button>
       </div>

@@ -632,7 +632,9 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert 'id="admin-overview-stats"' in overview.text
         assert 'id="admin-overview-stats-status"' in overview.text
         assert 'id="admin-overview-runtime"' in overview.text
+        assert 'id="admin-overview-network-trust"' in overview.text
         assert 'id="admin-overview-runtime-status-text"' in overview.text
+        assert "<h2>Network trust</h2>" in overview.text
 
         users = client.get("/admin/users")
         assert users.status_code == 200
@@ -680,10 +682,14 @@ def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> No
         assert '<script src="/static/js/admin-common.js" defer></script>' in ops.text
         assert '<script src="/static/js/admin-ops.js" defer></script>' in ops.text
         assert 'id="admin-runtime-status"' in ops.text
+        assert 'id="admin-runtime-details"' in ops.text
         assert 'id="admin-network-trust"' in ops.text
         assert "Admin-only runtime details for queue, Redis, worker, and network trust." in ops.text
+        assert "<h2>Admin-only runtime details</h2>" in ops.text
+        assert "<h2>Network trust</h2>" in ops.text
         assert 'id="admin-audit-form"' in ops.text
         assert 'value="25"' in ops.text
+        assert 'class="row row-actions section-gap-top"' in ops.text
         assert 'id="admin-audit-prev"' in ops.text
         assert 'id="admin-audit-next"' in ops.text
         assert 'href="/admin/users/new"' in ops.text

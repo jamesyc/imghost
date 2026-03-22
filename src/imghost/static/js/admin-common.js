@@ -59,6 +59,16 @@ window.adminFormatDateTime = (value) => {
   return date.toLocaleString();
 };
 
+window.adminFormatForwardedHeadersPolicy = (value) => {
+  if (value === "trusted_proxies_only") {
+    return "Trusted proxies only";
+  }
+  if (value === "permissive") {
+    return "Permissive local mode";
+  }
+  return value || "Unknown";
+};
+
 window.renderAdminRuntimeCards = (payload) => {
   const hasSeparateWorkerService = payload.redis?.configured && payload.tasks?.mode === "redis";
   const queueDetails = Object.entries(payload.tasks?.queues || {})
@@ -114,7 +124,7 @@ window.renderAdminRuntimeCards = (payload) => {
     },
     {
       label: "Proxy trust",
-      status: payload.forwarded_headers_policy || "Unknown",
+      status: window.adminFormatForwardedHeadersPolicy(payload.forwarded_headers_policy),
       tone: payload.trusted_proxy_cidrs_enabled ? "ok" : "warn",
       hint: payload.proxy_trust_warning || `${(payload.trusted_proxy_cidrs || []).length} trusted CIDR(s)`,
     },
@@ -138,50 +148,44 @@ window.renderAdminRuntimeCards = (payload) => {
 };
 
 window.renderAdminNetworkTrust = (payload) => `
-  <section class="admin-overview-subsection">
-    <div class="admin-section-header">
-      <h3>Network trust</h3>
-      <p class="hint">Origins and proxy trust that affect request handling.</p>
-    </div>
-    <div class="item-list">
-      <article class="admin-list-row">
-        <div>
-          <strong>Public origin mode</strong>
-          <p class="hint">${window.escapeAdminHtml(payload.public_origin_enabled ? "Strict allowlist mode" : "Direct request mode")}</p>
-        </div>
-      </article>
-      <article class="admin-list-row">
-        <div>
-          <strong>Trusted public origins</strong>
-          <p class="hint">${window.escapeAdminHtml((payload.trusted_public_origins || []).join(", ") || "None configured")}</p>
-        </div>
-      </article>
-      <article class="admin-list-row">
-        <div>
-          <strong>Trusted proxy CIDRs</strong>
-          <p class="hint">${window.escapeAdminHtml((payload.trusted_proxy_cidrs || []).join(", ") || "None configured")}</p>
-        </div>
-      </article>
-      <article class="admin-list-row">
-        <div>
-          <strong>Redis session outage mode</strong>
-          <p class="hint">${window.escapeAdminHtml(payload.redis?.session_fail_closed ? "Fail closed: browser sessions require Redis." : "Graceful fallback: signed cookies keep browser auth working if Redis is down.")}</p>
-        </div>
-      </article>
-      ${
-        payload.proxy_trust_warning
-          ? `
-            <article class="admin-list-row">
-              <div>
-                <strong>Proxy trust note</strong>
-                <p class="hint">${window.escapeAdminHtml(payload.proxy_trust_warning)}</p>
-              </div>
-            </article>
-          `
-          : ""
-      }
-    </div>
-  </section>
+  <div class="item-list">
+    <article class="admin-list-row">
+      <div>
+        <strong>Public origin mode</strong>
+        <p class="hint">${window.escapeAdminHtml(payload.public_origin_enabled ? "Strict allowlist mode" : "Direct request mode")}</p>
+      </div>
+    </article>
+    <article class="admin-list-row">
+      <div>
+        <strong>Trusted public origins</strong>
+        <p class="hint">${window.escapeAdminHtml((payload.trusted_public_origins || []).join(", ") || "None configured")}</p>
+      </div>
+    </article>
+    <article class="admin-list-row">
+      <div>
+        <strong>Trusted proxy CIDRs</strong>
+        <p class="hint">${window.escapeAdminHtml((payload.trusted_proxy_cidrs || []).join(", ") || "None configured")}</p>
+      </div>
+    </article>
+    <article class="admin-list-row">
+      <div>
+        <strong>Redis session outage mode</strong>
+        <p class="hint">${window.escapeAdminHtml(payload.redis?.session_fail_closed ? "Fail closed: browser sessions require Redis." : "Graceful fallback: signed cookies keep browser auth working if Redis is down.")}</p>
+      </div>
+    </article>
+    ${
+      payload.proxy_trust_warning
+        ? `
+          <article class="admin-list-row">
+            <div>
+              <strong>Proxy trust note</strong>
+              <p class="hint">${window.escapeAdminHtml(payload.proxy_trust_warning)}</p>
+            </div>
+          </article>
+        `
+        : ""
+    }
+  </div>
 `;
 
 window.renderAdminRuntimeDetails = (payload) => {
@@ -225,44 +229,38 @@ window.renderAdminRuntimeDetails = (payload) => {
     .join("");
 
   return `
-    <section class="admin-overview-subsection">
-      <div class="admin-section-header">
-        <h3>Admin-only runtime details</h3>
-        <p class="hint">Admin-only runtime details for queue, Redis, worker, and network trust.</p>
-      </div>
-      <div class="item-list">
-        <article class="admin-list-row">
-          <div>
-            <strong>Worker</strong>
-            <p class="hint">
-              enabled in this process=${window.escapeAdminHtml(String(Boolean(payload.worker?.enabled_in_this_process)))} ·
-              last started=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_started_at))} ·
-              last stopped=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_stopped_at))}
-            </p>
-            <p class="hint">
-              last task failure at=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_task_failure_at))} ·
-              last task failure=${window.escapeAdminHtml(payload.worker?.last_task_failure ? JSON.stringify(payload.worker.last_task_failure) : "Not recorded")}
-            </p>
-          </div>
-        </article>
-        <article class="admin-list-row">
-          <div>
-            <strong>Tasks</strong>
-            <p class="hint">
-              mode=${window.escapeAdminHtml(payload.tasks?.mode || "unknown")} ·
-              backend=${window.escapeAdminHtml(payload.tasks?.queue_backend || "unknown")} ·
-              queue depth=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.queue_depth || 0))}
-            </p>
-            <p class="hint">
-              worker count=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.worker_count || 0))} ·
-              active workers=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_workers || 0))} ·
-              active jobs=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_jobs || 0))}
-            </p>
-          </div>
-        </article>
-        ${queueRows}
-        ${subsystemRows}
-      </div>
-    </section>
+    <div class="item-list">
+      <article class="admin-list-row">
+        <div>
+          <strong>Worker</strong>
+          <p class="hint">
+            enabled in this process=${window.escapeAdminHtml(String(Boolean(payload.worker?.enabled_in_this_process)))} ·
+            last started=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_started_at))} ·
+            last stopped=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_stopped_at))}
+          </p>
+          <p class="hint">
+            last task failure at=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_task_failure_at))} ·
+            last task failure=${window.escapeAdminHtml(payload.worker?.last_task_failure ? JSON.stringify(payload.worker.last_task_failure) : "Not recorded")}
+          </p>
+        </div>
+      </article>
+      <article class="admin-list-row">
+        <div>
+          <strong>Tasks</strong>
+          <p class="hint">
+            mode=${window.escapeAdminHtml(payload.tasks?.mode || "unknown")} ·
+            backend=${window.escapeAdminHtml(payload.tasks?.queue_backend || "unknown")} ·
+            queue depth=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.queue_depth || 0))}
+          </p>
+          <p class="hint">
+            worker count=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.worker_count || 0))} ·
+            active workers=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_workers || 0))} ·
+            active jobs=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_jobs || 0))}
+          </p>
+        </div>
+      </article>
+      ${queueRows}
+      ${subsystemRows}
+    </div>
   `;
 };

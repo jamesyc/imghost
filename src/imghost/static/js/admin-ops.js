@@ -1,4 +1,5 @@
 const adminRuntimeStatus = document.getElementById("admin-runtime-status");
+const adminRuntimeDetails = document.getElementById("admin-runtime-details");
 const adminAuditRoot = document.getElementById("admin-audit");
 const adminAuditForm = document.getElementById("admin-audit-form");
 const adminAuditStatus = document.getElementById("admin-audit-status");
@@ -17,10 +18,10 @@ if (adminRuntimeStatus && adminAuditRoot) {
   };
 
   const renderRuntime = (payload) => {
-    adminRuntimeStatus.innerHTML = `
-      ${window.renderAdminRuntimeCards(payload)}
-      ${window.renderAdminRuntimeDetails(payload)}
-    `;
+    adminRuntimeStatus.innerHTML = window.renderAdminRuntimeCards(payload);
+    if (adminRuntimeDetails) {
+      adminRuntimeDetails.innerHTML = window.renderAdminRuntimeDetails(payload);
+    }
     if (adminNetworkTrust) {
       adminNetworkTrust.innerHTML = window.renderAdminNetworkTrust(payload);
     }
