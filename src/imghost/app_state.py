@@ -53,6 +53,7 @@ class AppState:
             self.processors,
             self.runtime_config,
             self.rate_limiter,
+            self.observability,
         )
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)

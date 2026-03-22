@@ -21,6 +21,7 @@ VIDEO_PROBE_TIMEOUT_SECS = 20
 VIDEO_REMUX_TIMEOUT_SECS = 60
 VIDEO_SINGLE_FRAME_TIMEOUT_SECS = 30
 VIDEO_ANIMATED_THUMB_TIMEOUT_SECS = 40
+VIDEO_COMMAND_STDERR_LIMIT_BYTES = 8192
 UNSAFE_URL_PREFIXES = ("http:", "https:", "//", "javascript:", "data:", "file:")
 SVG_DANGEROUS_ELEMENTS = {"script", "foreignobject", "iframe", "object", "embed", "audio", "video", "style"}
 SVG_URL_ATTRS = {"href", "src"}
@@ -56,6 +57,26 @@ class ThumbnailResult:
     thumb_is_orig: bool
     format: str
     size: int
+
+
+class VideoProcessingError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        tool: str,
+        exit_code: int | None = None,
+        timed_out: bool = False,
+        stderr_excerpt: str = "",
+    ) -> None:
+        self.tool = tool
+        self.exit_code = exit_code
+        self.timed_out = timed_out
+        self.stderr_excerpt = stderr_excerpt
+        reason = "timed out" if timed_out else f"failed with exit code {exit_code}" if exit_code is not None else "failed"
+        message = f"{tool} {reason}"
+        if stderr_excerpt:
+            message = f"{message}: {stderr_excerpt}"
+        super().__init__(message)
 
 
 class MediaProcessor(ABC):
@@ -436,9 +457,10 @@ class VideoProcessor(MediaProcessor):
 
     def _probe(self, payload: bytes) -> MediaMetadata:
         with self._temp_file(payload, self.supported_formats()[0]) as input_path:
-            completed = self._run_command(
+            completed = self._run_probe_command(
                 [
                     "ffprobe",
+                    "-hide_banner",
                     "-v",
                     "error",
                     "-show_streams",
@@ -474,9 +496,12 @@ class VideoProcessor(MediaProcessor):
 
     def _remux(self, payload: bytes, extension: str) -> bytes:
         with self._temp_file(payload, extension) as input_path, self._temp_output_file(extension) as output_path:
-            self._run_command(
+            self._run_ffmpeg_command(
                 [
                     "ffmpeg",
+                    "-hide_banner",
+                    "-v",
+                    "error",
                     "-y",
                     "-i",
                     str(input_path),
@@ -492,9 +517,12 @@ class VideoProcessor(MediaProcessor):
 
     def _single_frame_thumbnail(self, payload: bytes, extension: str, *, seek_seconds: float) -> bytes:
         with self._temp_file(payload, extension) as input_path, self._temp_output_file("jpg") as output_path:
-            self._run_command(
+            self._run_ffmpeg_command(
                 [
                     "ffmpeg",
+                    "-hide_banner",
+                    "-v",
+                    "error",
                     "-y",
                     "-ss",
                     f"{max(0.0, seek_seconds):.3f}",
@@ -513,9 +541,12 @@ class VideoProcessor(MediaProcessor):
     def _animated_thumbnail(self, payload: bytes, extension: str, duration_secs: float) -> bytes | None:
         interval = max(duration_secs / self.thumb_frames, 0.001)
         with self._temp_file(payload, extension) as input_path, self._temp_output_file("webp") as output_path:
-            self._run_command(
+            self._run_ffmpeg_command(
                 [
                     "ffmpeg",
+                    "-hide_banner",
+                    "-v",
+                    "error",
                     "-y",
                     "-i",
                     str(input_path),
@@ -533,11 +564,54 @@ class VideoProcessor(MediaProcessor):
                 return None
             return output_path.read_bytes()
 
-    def _run_command(self, args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-        try:
-            return subprocess.run(args, capture_output=True, text=True, check=True, timeout=timeout)
-        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            raise RuntimeError("video processing command failed") from exc
+    def _run_probe_command(self, args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        return self._run_command(args, timeout=timeout, capture_stdout=True)
+
+    def _run_ffmpeg_command(self, args: list[str], *, timeout: int) -> None:
+        self._run_command(args, timeout=timeout, capture_stdout=False)
+
+    def _run_command(self, args: list[str], *, timeout: int, capture_stdout: bool) -> subprocess.CompletedProcess[str]:
+        with tempfile.NamedTemporaryFile(mode="w+b") as stderr_handle:
+            try:
+                completed = subprocess.run(
+                    args,
+                    stdout=subprocess.PIPE if capture_stdout else subprocess.DEVNULL,
+                    stderr=stderr_handle,
+                    text=capture_stdout,
+                    timeout=timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise VideoProcessingError(
+                    tool=args[0],
+                    timed_out=True,
+                    stderr_excerpt=self._stderr_excerpt(stderr_handle),
+                ) from exc
+            except OSError as exc:
+                raise VideoProcessingError(
+                    tool=args[0],
+                    stderr_excerpt=self._stderr_excerpt(stderr_handle),
+                ) from exc
+            if completed.returncode != 0:
+                raise VideoProcessingError(
+                    tool=args[0],
+                    exit_code=completed.returncode,
+                    stderr_excerpt=self._stderr_excerpt(stderr_handle),
+                )
+            return completed
+
+    def _stderr_excerpt(self, handle) -> str:
+        handle.flush()
+        handle.seek(0, 2)
+        size = handle.tell()
+        start = max(0, size - VIDEO_COMMAND_STDERR_LIMIT_BYTES)
+        handle.seek(start)
+        raw = handle.read(VIDEO_COMMAND_STDERR_LIMIT_BYTES)
+        if isinstance(raw, str):
+            excerpt = raw
+        else:
+            excerpt = raw.decode("utf-8", errors="replace")
+        return excerpt.strip()
 
     def _temp_file(self, payload: bytes, extension: str):
         suffix = f".{extension}"

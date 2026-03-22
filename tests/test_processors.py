@@ -16,11 +16,13 @@ from imghost.main import app
 from imghost.processors import (
     ANIMATED_THUMB_MAX_SOURCE_FRAMES,
     VIDEO_ANIMATED_THUMB_TIMEOUT_SECS,
+    VIDEO_COMMAND_STDERR_LIMIT_BYTES,
     VIDEO_PROBE_TIMEOUT_SECS,
     VIDEO_REMUX_TIMEOUT_SECS,
     VIDEO_SINGLE_FRAME_TIMEOUT_SECS,
     MediaMetadata,
     ThumbnailResult,
+    VideoProcessingError,
 )
 from imghost.service import CurrentActor
 from imghost.processors import GifProcessor, MovProcessor, Mp4Processor
@@ -303,9 +305,12 @@ def test_mp4_processor_maps_ffprobe_metadata(monkeypatch) -> None:
     payload = b"fake-mp4"
     processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
 
-    def fake_run(args, capture_output, text, check, timeout):
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
         if args[0] == "ffprobe":
             assert timeout == VIDEO_PROBE_TIMEOUT_SECS
+            assert "-hide_banner" in args
+            assert args[args.index("-v") + 1] == "error"
+            assert stdout == subprocess.PIPE
             return subprocess.CompletedProcess(
                 args=args,
                 returncode=0,
@@ -340,8 +345,11 @@ def test_mp4_processor_maps_ffprobe_metadata(monkeypatch) -> None:
 def test_mov_processor_sets_hevc_codec_hint(monkeypatch) -> None:
     processor = MovProcessor(max_pixels=50_000_000, thumb_frames=10)
 
-    def fake_run(args, capture_output, text, check, timeout):
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
         assert timeout == VIDEO_PROBE_TIMEOUT_SECS
+        assert "-hide_banner" in args
+        assert args[args.index("-v") + 1] == "error"
+        assert stdout == subprocess.PIPE
         return subprocess.CompletedProcess(
             args=args,
             returncode=0,
@@ -413,9 +421,12 @@ def test_video_processor_uses_expected_command_timeouts(monkeypatch) -> None:
     processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
     timeouts: list[tuple[str, int]] = []
 
-    def fake_run(args, capture_output, text, check, timeout):
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
         timeouts.append((args[0], timeout))
         if args[0] == "ffprobe":
+            assert "-hide_banner" in args
+            assert args[args.index("-v") + 1] == "error"
+            assert stdout == subprocess.PIPE
             return subprocess.CompletedProcess(
                 args=args,
                 returncode=0,
@@ -435,6 +446,9 @@ def test_video_processor_uses_expected_command_timeouts(monkeypatch) -> None:
                 ),
                 stderr="",
             )
+        assert "-hide_banner" in args
+        assert args[args.index("-v") + 1] == "error"
+        assert stdout == subprocess.DEVNULL
         output_path = args[-1]
         if output_path.endswith(".mp4"):
             Path(output_path).write_bytes(b"remuxed")
@@ -463,7 +477,7 @@ def test_video_processor_uses_expected_command_timeouts(monkeypatch) -> None:
 def test_video_processor_converts_timeout_errors_into_runtime_failures(monkeypatch) -> None:
     processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
 
-    def fake_run(args, capture_output, text, check, timeout):
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
         raise subprocess.TimeoutExpired(cmd=args, timeout=timeout)
 
     monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
@@ -471,6 +485,125 @@ def test_video_processor_converts_timeout_errors_into_runtime_failures(monkeypat
     validation = asyncio.run(processor.validate(b"fake-mp4"))
     assert validation.ok is False
     assert validation.rejection_reason == "Unsupported or invalid video file."
+
+
+def test_video_processor_binds_ffmpeg_stderr_excerpt_to_tail_only(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    huge_stderr = ("a" * (VIDEO_COMMAND_STDERR_LIMIT_BYTES + 128)) + "TAIL-END"
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        assert stderr is not None
+        stderr.write(huge_stderr.encode("utf-8"))
+        stderr.flush()
+        return subprocess.CompletedProcess(args=args, returncode=9, stdout="")
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    try:
+        processor._run_ffmpeg_command(["ffmpeg", "-hide_banner", "-v", "error", "-i", "in.mp4", "out.mp4"], timeout=1)
+    except VideoProcessingError as exc:
+        assert exc.tool == "ffmpeg"
+        assert exc.exit_code == 9
+        assert exc.timed_out is False
+        assert len(exc.stderr_excerpt.encode("utf-8")) <= VIDEO_COMMAND_STDERR_LIMIT_BYTES
+        assert exc.stderr_excerpt.endswith("TAIL-END")
+        assert exc.stderr_excerpt != huge_stderr
+    else:
+        raise AssertionError("expected bounded ffmpeg failure")
+
+
+def test_video_processor_probe_timeout_uses_bounded_stderr_excerpt(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    timeout_stderr = ("b" * (VIDEO_COMMAND_STDERR_LIMIT_BYTES + 64)) + "PROBE-TIMEOUT"
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        assert stderr is not None
+        stderr.write(timeout_stderr.encode("utf-8"))
+        stderr.flush()
+        raise subprocess.TimeoutExpired(cmd=args, timeout=timeout)
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    validation = asyncio.run(processor.validate(b"fake-mp4"))
+    assert validation.ok is False
+    assert validation.rejection_reason == "Unsupported or invalid video file."
+
+    try:
+        processor._run_probe_command(["ffprobe", "-hide_banner", "-v", "error", "-of", "json", "in.mp4"], timeout=1)
+    except VideoProcessingError as exc:
+        assert exc.tool == "ffprobe"
+        assert exc.timed_out is True
+        assert exc.exit_code is None
+        assert len(exc.stderr_excerpt.encode("utf-8")) <= VIDEO_COMMAND_STDERR_LIMIT_BYTES
+        assert exc.stderr_excerpt.endswith("PROBE-TIMEOUT")
+    else:
+        raise AssertionError("expected bounded probe timeout failure")
+
+
+def test_video_processing_error_handles_empty_stderr(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        assert stderr is not None
+        stderr.flush()
+        return subprocess.CompletedProcess(args=args, returncode=3, stdout="")
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    try:
+        processor._run_ffmpeg_command(["ffmpeg", "-hide_banner", "-v", "error", "-i", "in.mp4", "out.mp4"], timeout=1)
+    except VideoProcessingError as exc:
+        assert exc.tool == "ffmpeg"
+        assert exc.exit_code == 3
+        assert exc.timed_out is False
+        assert exc.stderr_excerpt == ""
+        assert str(exc) == "ffmpeg failed with exit code 3"
+    else:
+        raise AssertionError("expected empty-stderr ffmpeg failure")
+
+
+def test_video_processing_error_decodes_non_utf8_stderr_with_replacement(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    payload = (b"\xff\xfe\xfd" * 4000) + b"TAIL"
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        assert stderr is not None
+        stderr.write(payload)
+        stderr.flush()
+        return subprocess.CompletedProcess(args=args, returncode=4, stdout="")
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    try:
+        processor._run_ffmpeg_command(["ffmpeg", "-hide_banner", "-v", "error", "-i", "in.mp4", "out.mp4"], timeout=1)
+    except VideoProcessingError as exc:
+        assert exc.tool == "ffmpeg"
+        assert exc.exit_code == 4
+        assert exc.timed_out is False
+        assert len(exc.stderr_excerpt.encode("utf-8")) <= VIDEO_COMMAND_STDERR_LIMIT_BYTES * 3
+        assert "\ufffd" in exc.stderr_excerpt
+        assert exc.stderr_excerpt.endswith("TAIL")
+    else:
+        raise AssertionError("expected non-utf8 ffmpeg failure")
+
+
+def test_video_processing_error_message_includes_tail_excerpt(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        assert stderr is not None
+        stderr.write(b"failure-tail")
+        stderr.flush()
+        return subprocess.CompletedProcess(args=args, returncode=7, stdout="")
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    try:
+        processor._run_probe_command(["ffprobe", "-hide_banner", "-v", "error", "-of", "json", "in.mp4"], timeout=1)
+    except VideoProcessingError as exc:
+        assert str(exc) == "ffprobe failed with exit code 7: failure-tail"
+    else:
+        raise AssertionError("expected probe failure with formatted message")
 
 
 def test_video_processor_extract_metadata_offloads_probe_to_thread(monkeypatch) -> None:

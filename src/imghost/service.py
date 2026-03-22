@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 import secrets
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ from .events import (
 )
 from .ids import generate_album_id, generate_media_id
 from .models import Album, ApiKey, Media, User, utcnow
+from .observability import ObservabilityState
 from .processors import ProcessorRegistry
 from .rate_limits import RateLimiter
 from .repositories import PostgresRepository
@@ -47,6 +49,7 @@ MAX_ALBUM_ITEMS = 1000
 UNSET = object()
 VIDEO_FORMATS = {"mp4", "mov", "webm"}
 MIN_PASSWORD_LENGTH = 8
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -131,6 +134,7 @@ class UploadService:
         processors: ProcessorRegistry,
         runtime_config: PostgresRuntimeConfig,
         rate_limiter: RateLimiter,
+        observability: ObservabilityState | None = None,
     ) -> None:
         self.settings = settings
         self.repository = repository
@@ -139,6 +143,7 @@ class UploadService:
         self.processors = processors
         self.runtime_config = runtime_config
         self.rate_limiter = rate_limiter
+        self.observability = observability
 
     def _require_password_value(self, password: str, *, label: str) -> str:
         if not password.strip():
@@ -338,10 +343,11 @@ class UploadService:
         media.thumb_status = "processing"
         await self.repository.update_media(media)
 
+        written_thumb_key: str | None = None
         try:
             processor = self.processors.get_processor(media.format)
             if processor is None:
-                raise ValueError(f"No processor for format {media.format}")
+                raise ValueError("processor_missing")
             payload = await self.storage.get_bytes(media.storage_key)
             metadata = await processor.extract_metadata(payload, media.format)
             thumbnail = await processor.generate_thumbnail(payload, metadata)
@@ -353,16 +359,84 @@ class UploadService:
                 thumb_ext = thumbnail.format if thumbnail.format != "jpeg" else "jpg"
                 thumb_key = f"thumbnails/{media.id}.{thumb_ext}"
                 await self.storage.put(thumb_key, thumbnail.data or b"")
+                written_thumb_key = thumb_key
                 media.thumb_is_orig = False
                 media.thumb_key = thumb_key
                 media.thumb_size = thumbnail.size
             media.thumb_status = "done"
-        except Exception:
+            await self.repository.update_media(media)
+            return
+        except Exception as exc:
+            reason = self._thumbnail_failure_reason(exc)
+            self._record_thumbnail_failure(
+                reason=reason,
+                media=media,
+                correlation_id=correlation_id,
+                error=exc,
+            )
             media.thumb_status = "failed"
             media.thumb_key = None
             media.thumb_size = None
             media.thumb_is_orig = False
-        await self.repository.update_media(media)
+            if written_thumb_key is not None:
+                try:
+                    await self.storage.delete(written_thumb_key)
+                except Exception as cleanup_exc:
+                    self._record_thumbnail_failure(
+                        reason="thumbnail_cleanup_failed",
+                        media=media,
+                        correlation_id=correlation_id,
+                        error=cleanup_exc,
+                    )
+            try:
+                await self.repository.update_media(media)
+            except Exception as update_exc:
+                if reason != "repository_update_failed":
+                    self._record_thumbnail_failure(
+                        reason="repository_update_failed",
+                        media=media,
+                        correlation_id=correlation_id,
+                        error=update_exc,
+                    )
+
+    def _thumbnail_failure_reason(self, exc: Exception) -> str:
+        if isinstance(exc, ValueError) and str(exc) == "processor_missing":
+            return "processor_missing"
+        message = str(exc).lower()
+        if "extract" in message and "metadata" in message:
+            return "metadata_extract_failed"
+        if "thumbnail" in message and "cleanup" not in message:
+            return "thumbnail_generate_failed"
+        if "store" in message or "write thumb" in message or "thumbnail_store" in message:
+            return "thumbnail_store_failed"
+        if "read source" in message or "storage read" in message or "get_bytes" in message:
+            return "storage_read_failed"
+        if "update media" in message or "repository update" in message:
+            return "repository_update_failed"
+        return "thumbnail_generate_failed"
+
+    def _record_thumbnail_failure(
+        self,
+        *,
+        reason: str,
+        media: Media,
+        correlation_id: str,
+        error: Exception,
+    ) -> None:
+        details = {
+            "reason": reason,
+            "media_id": media.id,
+            "correlation_id": correlation_id,
+            "storage_key": media.storage_key,
+            "format": media.format,
+        }
+        logger.warning(
+            "thumbnail_generation_failed",
+            extra={**details, "error_type": type(error).__name__},
+            exc_info=error,
+        )
+        if self.observability is not None:
+            self.observability.record_task_failure(task_name="generate_thumbnail", details=details)
 
     async def delete_album(
         self,

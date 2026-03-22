@@ -1,10 +1,12 @@
 from io import BytesIO
+from time import monotonic, sleep
 
 from fastapi.testclient import TestClient
 
 from imghost.__main__ import main as cli_main
 from imghost.main import app
 from imghost.models import utcnow
+from imghost.processors import MediaMetadata, SanitizedFile, ThumbnailResult, ValidationResult
 
 from .helpers import (
     PNG_1X1,
@@ -14,6 +16,17 @@ from .helpers import (
     update_media_record,
     wait_for_thumbnail,
 )
+
+
+def wait_for_failed_thumbnail(client: TestClient, media_id: str, *, timeout: float = 2.0) -> None:
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        media = client.portal.call(client.app.state.imghost.repository.get_media, media_id)
+        assert media is not None
+        if media.thumb_status == "failed":
+            return
+        sleep(0.02)
+    raise AssertionError(f"thumbnail for {media_id} did not enter failed state within {timeout} seconds")
 
 
 def test_async_thumbnail_worker_recovers_pending_items_on_startup(tmp_path, monkeypatch) -> None:
@@ -174,3 +187,67 @@ def test_retry_thumbnails_cli_recovers_failed_thumbnail(tmp_path, monkeypatch, c
 
     with TestClient(app) as client:
         wait_for_thumbnail(client, media_id)
+
+
+def test_failed_video_thumbnail_does_not_block_next_job_and_original_media_stays_accessible(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+
+    async def fake_validate(self, payload: bytes) -> ValidationResult:
+        return ValidationResult(ok=True)
+
+    async def fake_extract_metadata(self, payload: bytes, format_hint: str) -> MediaMetadata:
+        return MediaMetadata(
+            width=640,
+            height=360,
+            duration_secs=2.0,
+            codec_hint=None,
+            is_animated=True,
+            mime_type="video/mp4",
+            format="mp4",
+        )
+
+    async def fake_sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
+        return SanitizedFile(data=payload, mime_type="video/mp4", format="mp4")
+
+    async def fake_generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
+        if payload == b"bad-video":
+            raise RuntimeError("thumbnail generate failed")
+        return ThumbnailResult(data=b"jpg-thumb", thumb_is_orig=False, format="jpg", size=len(b"jpg-thumb"))
+
+    monkeypatch.setattr("imghost.processors.Mp4Processor.validate", fake_validate)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.extract_metadata", fake_extract_metadata)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.sanitize", fake_sanitize)
+    monkeypatch.setattr("imghost.processors.Mp4Processor.generate_thumbnail", fake_generate_thumbnail)
+
+    with TestClient(app) as client:
+        failed_upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("bad.mp4", BytesIO(b"bad-video"), "video/mp4"))],
+        )
+        assert failed_upload.status_code == 200
+        failed_media_id = failed_upload.json()["media_id"]
+
+        successful_upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("good.mp4", BytesIO(b"good-video"), "video/mp4"))],
+        )
+        assert successful_upload.status_code == 200
+        success_media_id = successful_upload.json()["media_id"]
+
+        wait_for_failed_thumbnail(client, failed_media_id)
+        wait_for_thumbnail(client, success_media_id)
+
+        failed_media = client.portal.call(client.app.state.imghost.repository.get_media, failed_media_id)
+        success_media = client.portal.call(client.app.state.imghost.repository.get_media, success_media_id)
+        assert failed_media is not None
+        assert success_media is not None
+        assert failed_media.thumb_status == "failed"
+        assert success_media.thumb_status == "done"
+
+        original = client.get(f"/i/{failed_media_id}.mp4")
+        assert original.status_code == 200
+
+        failed_thumb = client.get(f"/t/{failed_media_id}.jpg")
+        assert failed_thumb.status_code == 404

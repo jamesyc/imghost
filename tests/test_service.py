@@ -10,7 +10,9 @@ import pytest
 from fastapi import HTTPException
 from imghost.config import Settings
 from imghost.events import ApiKeyIssued, UserAdminStatusChanged, UserLimitsChanged, UserPasswordChanged
-from imghost.models import Album, ApiKey, User, utcnow
+from imghost.models import Album, ApiKey, Media, User, utcnow
+from imghost.observability import ObservabilityState
+from imghost.processors import MediaMetadata, ThumbnailResult
 from imghost.storage import StorageStream
 from imghost.payloads import album_to_payload
 from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UNSET, UploadService, UserCreateInput, UserUpdateInput
@@ -24,6 +26,9 @@ class DummyRepository:
         self.api_key: ApiKey | None = None
         self.album: Album | None = None
         self.album_media: list[object] = []
+        self.media: Media | None = None
+        self.update_media_calls = 0
+        self.fail_update_media_on_call: int | None = None
 
     async def get_user_by_email(self, email: str) -> User | None:
         if self.user and self.user.email == email:
@@ -69,11 +74,28 @@ class DummyRepository:
         self.api_key = api_key
         return api_key
 
+    async def get_media(self, media_id: str) -> Media | None:
+        if self.media and self.media.id == media_id:
+            return self.media
+        return None
+
+    async def update_media(self, media: Media) -> Media:
+        self.update_media_calls += 1
+        if self.fail_update_media_on_call == self.update_media_calls:
+            raise RuntimeError("repository update failed")
+        self.media = media
+        return media
+
 
 class DummyStorage:
     def __init__(self, payloads: dict[str, bytes]) -> None:
         self.payloads = payloads
         self.get_bytes_called = False
+        self.put_calls: list[tuple[str, bytes]] = []
+        self.delete_calls: list[str] = []
+        self.fail_get_bytes = False
+        self.fail_put = False
+        self.fail_delete = False
 
     async def get_stream(self, key: str, range_header: str | None = None) -> StorageStream:
         data = self.payloads[key]
@@ -94,7 +116,55 @@ class DummyStorage:
 
     async def get_bytes(self, key: str) -> bytes:
         self.get_bytes_called = True
+        if self.fail_get_bytes:
+            raise RuntimeError("storage read failed")
         return self.payloads[key]
+
+    async def put(self, key: str, data: bytes) -> None:
+        if self.fail_put:
+            raise RuntimeError("thumbnail_store_failed")
+        self.put_calls.append((key, data))
+        self.payloads[key] = data
+
+    async def delete(self, key: str) -> None:
+        self.delete_calls.append(key)
+        if self.fail_delete:
+            raise RuntimeError("thumbnail cleanup failed")
+        self.payloads.pop(key, None)
+
+
+class DummyProcessors:
+    def __init__(self, processor=None) -> None:
+        self.processor = processor
+
+    def get_processor(self, format_name: str):
+        return self.processor
+
+
+class DummyProcessor:
+    def __init__(self) -> None:
+        self.metadata = MediaMetadata(
+            width=640,
+            height=360,
+            duration_secs=1.0,
+            codec_hint=None,
+            is_animated=True,
+            mime_type="video/mp4",
+            format="mp4",
+        )
+        self.thumbnail = ThumbnailResult(data=b"thumb-bytes", thumb_is_orig=False, format="jpg", size=len(b"thumb-bytes"))
+        self.extract_error: Exception | None = None
+        self.generate_error: Exception | None = None
+
+    async def extract_metadata(self, payload: bytes, format_hint: str) -> MediaMetadata:
+        if self.extract_error is not None:
+            raise self.extract_error
+        return self.metadata
+
+    async def generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
+        if self.generate_error is not None:
+            raise self.generate_error
+        return self.thumbnail
 
 
 class DummyEventBus:
@@ -105,9 +175,10 @@ class DummyEventBus:
         self.events.append(event)
 
 
-def make_service(user: User | None = None, *, storage=None) -> tuple[UploadService, DummyRepository, DummyEventBus]:
+def make_service(user: User | None = None, *, storage=None, processors=None) -> tuple[UploadService, DummyRepository, DummyEventBus, ObservabilityState]:
     repository = DummyRepository(user)
     event_bus = DummyEventBus()
+    observability = ObservabilityState()
     settings = Settings(
         base_url="http://testserver",
         public_origin_enabled=True,
@@ -146,11 +217,37 @@ def make_service(user: User | None = None, *, storage=None) -> tuple[UploadServi
         repository=repository,
         storage=storage,  # type: ignore[arg-type]
         event_bus=event_bus,  # type: ignore[arg-type]
-        processors=None,  # type: ignore[arg-type]
+        processors=processors,  # type: ignore[arg-type]
         runtime_config=None,  # type: ignore[arg-type]
         rate_limiter=None,  # type: ignore[arg-type]
+        observability=observability,
     )
-    return service, repository, event_bus
+    return service, repository, event_bus, observability
+
+
+def make_media(*, media_type: str = "video", format: str = "mp4", storage_key: str = "originals/u/media.mp4") -> Media:
+    return Media(
+        id="media-1",
+        album_id="album-1",
+        user_id="user-1",
+        filename_orig="sample.mp4",
+        media_type=media_type,
+        format=format,
+        mime_type="video/mp4",
+        storage_key=storage_key,
+        thumb_key=None,
+        thumb_is_orig=False,
+        thumb_status="pending",
+        file_size=123,
+        thumb_size=None,
+        width=640,
+        height=360,
+        duration_secs=1.0,
+        is_animated=True,
+        codec_hint=None,
+        position=1000,
+        created_at=utcnow(),
+    )
 
 
 def make_user(*, password_hash: str) -> User:
@@ -171,7 +268,7 @@ def make_user(*, password_hash: str) -> User:
 
 
 def test_hash_password_uses_bcrypt_and_is_not_deterministic() -> None:
-    service, _, _ = make_service()
+    service, _, _, _ = make_service()
 
     first = service._hash_password("secret-pass")
     second = service._hash_password("secret-pass")
@@ -185,7 +282,7 @@ def test_hash_password_uses_bcrypt_and_is_not_deterministic() -> None:
 
 def test_authenticate_local_user_accepts_bcrypt_hash() -> None:
     password_hash = bcrypt.hashpw(b"secret-pass", bcrypt.gensalt()).decode("utf-8")
-    service, _, _ = make_service(make_user(password_hash=password_hash))
+    service, _, _, _ = make_service(make_user(password_hash=password_hash))
 
     user = asyncio.run(
         service.authenticate_local_user(LocalLoginInput(login="alice@example.com", password="secret-pass"))
@@ -197,7 +294,7 @@ def test_authenticate_local_user_accepts_bcrypt_hash() -> None:
 def test_change_password_replaces_hash_with_new_bcrypt_hash() -> None:
     old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
     user = make_user(password_hash=old_hash)
-    service, repository, _ = make_service(user)
+    service, repository, _, _ = make_service(user)
 
     updated = asyncio.run(
         service.change_password(
@@ -215,7 +312,7 @@ def test_change_password_replaces_hash_with_new_bcrypt_hash() -> None:
 def test_change_password_emits_audit_event_when_correlation_is_provided() -> None:
     old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
     user = make_user(password_hash=old_hash)
-    service, _, event_bus = make_service(user)
+    service, _, event_bus, _ = make_service(user)
 
     asyncio.run(
         service.change_password(
@@ -233,7 +330,7 @@ def test_change_password_emits_audit_event_when_correlation_is_provided() -> Non
 
 
 def test_create_user_rejects_password_shorter_than_eight_characters() -> None:
-    service, repository, _ = make_service()
+    service, repository, _, _ = make_service()
 
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(
@@ -256,7 +353,7 @@ def test_create_user_rejects_password_shorter_than_eight_characters() -> None:
 def test_reset_user_password_rejects_password_shorter_than_eight_characters() -> None:
     old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
     user = make_user(password_hash=old_hash)
-    service, repository, event_bus = make_service(user)
+    service, repository, event_bus, _ = make_service(user)
 
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(service.reset_user_password(user.id, "short7!", "reset-short"))
@@ -270,7 +367,7 @@ def test_reset_user_password_rejects_password_shorter_than_eight_characters() ->
 def test_change_password_rejects_password_shorter_than_eight_characters() -> None:
     old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
     user = make_user(password_hash=old_hash)
-    service, repository, _ = make_service(user)
+    service, repository, _, _ = make_service(user)
 
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(
@@ -286,7 +383,7 @@ def test_change_password_rejects_password_shorter_than_eight_characters() -> Non
 
 
 def test_verify_password_returns_false_for_invalid_stored_hash() -> None:
-    service, _, _ = make_service()
+    service, _, _, _ = make_service()
 
     assert service._verify_password("secret-pass", "not-a-bcrypt-hash") is False
 
@@ -294,7 +391,7 @@ def test_verify_password_returns_false_for_invalid_stored_hash() -> None:
 def test_issue_api_key_emits_event_with_replaced_existing_flag() -> None:
     old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
     user = make_user(password_hash=old_hash)
-    service, repository, event_bus = make_service(user)
+    service, repository, event_bus, _ = make_service(user)
     repository.api_key = ApiKey(
         id=str(uuid4()),
         user_id=user.id,
@@ -323,7 +420,7 @@ def test_issue_api_key_emits_event_with_replaced_existing_flag() -> None:
 
 def test_update_user_emits_admin_status_and_limits_events() -> None:
     user = make_user(password_hash=bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8"))
-    service, _, event_bus = make_service(user)
+    service, _, event_bus, _ = make_service(user)
 
     asyncio.run(
         service.update_user(
@@ -361,7 +458,7 @@ def test_update_user_skips_admin_and_limits_events_when_values_do_not_change() -
     user.rate_limit_rpm = 12
     user.rate_limit_bph = 4096
     user.quota_bytes = 2048
-    service, _, event_bus = make_service(user)
+    service, _, event_bus, _ = make_service(user)
 
     asyncio.run(
         service.update_user(
@@ -384,7 +481,7 @@ def test_update_user_skips_admin_and_limits_events_when_values_do_not_change() -
 
 
 def test_require_album_access_allows_owner_admin_or_valid_token() -> None:
-    service, _, _ = make_service()
+    service, _, _, _ = make_service()
     owner = make_user(password_hash=bcrypt.hashpw(b"x", bcrypt.gensalt()).decode("utf-8"))
     admin = make_user(password_hash=bcrypt.hashpw(b"y", bcrypt.gensalt()).decode("utf-8"))
     admin.id = "admin-1"
@@ -429,7 +526,7 @@ def test_require_album_access_allows_owner_admin_or_valid_token() -> None:
 
 
 def test_get_or_create_album_requires_delete_token_for_anonymous_append() -> None:
-    service, repository, _ = make_service()
+    service, repository, _, _ = make_service()
     repository.album = Album(
         id="album-2",
         title="Anon",
@@ -500,7 +597,7 @@ def test_album_to_payload_omits_delete_token_by_default() -> None:
 
 def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -> None:
     storage = DummyStorage({"media/original.png": b"png-data"})
-    service, repository, _ = make_service(storage=storage)
+    service, repository, _, _ = make_service(storage=storage)
     repository.album = Album(
         id="album-1",
         title="Album",
@@ -530,3 +627,104 @@ def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -
         assert extracted.namelist() == ["sample.png"]
         assert extracted.read("sample.png") == b"png-data"
     assert storage.get_bytes_called is False
+
+
+def test_generate_thumbnail_records_processor_missing_failure(caplog) -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(None))
+    repository.media = make_media()
+
+    with caplog.at_level("WARNING"):
+        asyncio.run(service.generate_thumbnail("media-1", "thumb-cid"))
+
+    assert repository.media is not None
+    assert repository.media.thumb_status == "failed"
+    assert observability.last_task_failure is not None
+    assert observability.last_task_failure["reason"] == "processor_missing"
+    assert observability.last_task_failure["media_id"] == "media-1"
+    assert observability.last_task_failure["correlation_id"] == "thumb-cid"
+    assert any(record.message == "thumbnail_generation_failed" for record in caplog.records)
+
+
+def test_generate_thumbnail_records_storage_read_failure() -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    storage.fail_get_bytes = True
+    processor = DummyProcessor()
+    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    repository.media = make_media()
+
+    asyncio.run(service.generate_thumbnail("media-1", "thumb-read-fail"))
+
+    assert repository.media is not None
+    assert repository.media.thumb_status == "failed"
+    assert observability.last_task_failure is not None
+    assert observability.last_task_failure["reason"] == "storage_read_failed"
+
+
+def test_generate_thumbnail_records_metadata_extract_failure() -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    processor = DummyProcessor()
+    processor.extract_error = RuntimeError("metadata extract failed")
+    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    repository.media = make_media()
+
+    asyncio.run(service.generate_thumbnail("media-1", "thumb-metadata-fail"))
+
+    assert repository.media is not None
+    assert repository.media.thumb_status == "failed"
+    assert observability.last_task_failure is not None
+    assert observability.last_task_failure["reason"] == "metadata_extract_failed"
+
+
+def test_generate_thumbnail_records_thumbnail_generation_failure_and_clears_fields() -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    processor = DummyProcessor()
+    processor.generate_error = RuntimeError("thumbnail generate failed")
+    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    repository.media = make_media()
+
+    asyncio.run(service.generate_thumbnail("media-1", "thumb-generate-fail"))
+
+    assert repository.media is not None
+    assert repository.media.thumb_status == "failed"
+    assert repository.media.thumb_key is None
+    assert repository.media.thumb_size is None
+    assert repository.media.thumb_is_orig is False
+    assert observability.last_task_failure is not None
+    assert observability.last_task_failure["reason"] == "thumbnail_generate_failed"
+
+
+def test_generate_thumbnail_cleans_up_written_thumbnail_on_repository_update_failure() -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    processor = DummyProcessor()
+    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    repository.media = make_media()
+    repository.fail_update_media_on_call = 2
+
+    asyncio.run(service.generate_thumbnail("media-1", "thumb-update-fail"))
+
+    assert repository.media is not None
+    assert repository.media.thumb_status == "failed"
+    assert repository.media.thumb_key is None
+    assert "thumbnails/media-1.jpg" in storage.delete_calls
+    assert "thumbnails/media-1.jpg" not in storage.payloads
+    assert observability.last_task_failure is not None
+    assert observability.last_task_failure["reason"] == "repository_update_failed"
+
+
+def test_generate_thumbnail_records_cleanup_failure_but_keeps_failed_state() -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    storage.fail_delete = True
+    processor = DummyProcessor()
+    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    repository.media = make_media()
+    repository.fail_update_media_on_call = 2
+
+    asyncio.run(service.generate_thumbnail("media-1", "thumb-cleanup-fail"))
+
+    assert repository.media is not None
+    assert repository.media.thumb_status == "failed"
+    assert repository.media.thumb_key is None
+    assert "thumbnails/media-1.jpg" in storage.delete_calls
+    assert observability.last_task_failure is not None
+    assert observability.last_task_failure["reason"] == "thumbnail_cleanup_failed"

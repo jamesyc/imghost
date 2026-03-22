@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from imghost.main import app
+from imghost.processors import VideoProcessingError
 
 from .helpers import PNG_1X1, wait_for_thumbnail
 
@@ -191,6 +192,30 @@ def test_truncated_jpeg_upload_is_rejected_without_500(tmp_path, monkeypatch) ->
 
         assert response.status_code == 415
         assert response.json()["detail"] == "Unsupported or invalid image file."
+
+
+def test_invalid_video_upload_does_not_leak_ffmpeg_stderr_excerpt(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    def fake_probe(self, payload: bytes):
+        raise VideoProcessingError(
+            tool="ffprobe",
+            exit_code=1,
+            stderr_excerpt="ffmpeg-internal-secret-tail",
+        )
+
+    monkeypatch.setattr("imghost.processors.Mp4Processor._probe", fake_probe)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("bad.mp4", BytesIO(b"not-a-real-video"), "video/mp4"))],
+        )
+
+        assert response.status_code == 415
+        assert response.json()["detail"] == "Unsupported or invalid video file."
+        assert "ffmpeg-internal-secret-tail" not in response.text
 
 
 def test_upload_over_limit_is_rejected_without_processing(tmp_path, monkeypatch) -> None:
