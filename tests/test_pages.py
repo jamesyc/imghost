@@ -215,6 +215,12 @@ def test_login_and_register_pages_show_google_button_when_enabled(tmp_path, monk
         register = client.get("/register")
         assert '/auth/google/start?mode=login' in login.text
         assert '/auth/google/start?mode=login' in register.text
+        assert 'class="auth-oauth-button auth-oauth-button-google"' in login.text
+        assert 'class="auth-oauth-button auth-oauth-button-google"' in register.text
+        assert "Continue with Google" in login.text
+        assert "Continue with Google" in register.text
+        assert "<svg viewBox=\"0 0 18 18\"" in login.text
+        assert "<svg viewBox=\"0 0 18 18\"" in register.text
 
 
 def test_login_page_normalizes_next_to_internal_paths(tmp_path, monkeypatch) -> None:
