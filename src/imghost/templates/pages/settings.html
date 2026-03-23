@@ -60,7 +60,7 @@
     <section class="card settings-card">
       <p class="eyebrow">Security</p>
       <h2>Change password</h2>
-      <p class="hint" id="settings-password-hint">Use a local password to sign in directly and to keep a recovery path if you disconnect external providers later.</p>
+      <p class="hint" id="settings-password-hint">Add a local password so you can sign in directly even if Google sign-in is unavailable later.</p>
       <form id="settings-password-form" class="stack settings-form">
         <input type="password" name="current_password" placeholder="Current password">
         <input type="password" name="new_password" placeholder="New password" required minlength="8">
@@ -75,6 +75,7 @@
     <section class="card settings-card">
       <p class="eyebrow">Connected Accounts</p>
       <h2>External sign-in</h2>
+      <p class="hint" id="settings-oauth-hint">Connect Google only after signing in locally if you are attaching it to an existing account. If the email already belongs to a local account, imghost will not merge it automatically.</p>
       <div id="settings-sso-summary" class="stack settings-form"></div>
       <div class="row row-actions settings-action-row">
         {% if runtime_flags.google_oauth_enabled %}

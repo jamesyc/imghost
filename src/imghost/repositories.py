@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .db import Database
-from .models import Album, ApiKey, Media, User, UserSsoLink
+from .models import Album, ApiKey, Media, OAuthStateNonce, User, UserSsoLink
 from .repository_media import AlbumMediaRepository
 from .repository_users import UserRepository
 
@@ -50,6 +50,18 @@ class PostgresRepository:
 
     async def delete_user_sso_link(self, user_id: str, provider: str) -> UserSsoLink | None:
         return await self.users.delete_user_sso_link(user_id, provider)
+
+    async def create_oauth_state_nonce(self, nonce: OAuthStateNonce) -> OAuthStateNonce:
+        return await self.users.create_oauth_state_nonce(nonce)
+
+    async def consume_oauth_state_nonce(self, jti: str) -> OAuthStateNonce | None:
+        return await self.users.consume_oauth_state_nonce(jti)
+
+    async def delete_expired_oauth_state_nonces(self) -> None:
+        await self.users.delete_expired_oauth_state_nonces()
+
+    async def get_oauth_state_nonce(self, jti: str) -> OAuthStateNonce | None:
+        return await self.users.get_oauth_state_nonce(jti)
 
     async def list_user_media(self, user_id: str) -> list[Media]:
         return await self.users.list_user_media(user_id)

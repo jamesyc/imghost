@@ -43,6 +43,7 @@ from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
 from .payloads import album_to_payload
 from .storage import StorageBackend
+from .web.display_helpers import is_expired
 from .zip_streaming import AsyncIterableBridge
 
 MAX_ALBUM_ITEMS = 1000
@@ -186,7 +187,7 @@ class UploadService:
     ) -> Album:
         if album_id:
             album = await self.repository.get_album(album_id)
-            if album is None:
+            if album is None or is_expired(album.expires_at):
                 raise HTTPException(status_code=404, detail="Album not found.")
             if actor.user is not None:
                 if album.user_id != actor.user.id:
@@ -414,7 +415,7 @@ class UploadService:
         album = await self.repository.get_album(album_id)
         if album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
-        self._require_album_access(album, delete_token, actor_user)
+        self._require_album_access(album, delete_token, actor_user, allow_expired=bool(actor_user and actor_user.is_admin))
 
         media_items = await self.repository.list_album_media(album_id)
         for media in media_items:
@@ -711,7 +712,16 @@ class UploadService:
         if album.delete_token and delete_token != album.delete_token:
             raise HTTPException(status_code=403, detail="Invalid delete token.")
 
-    def _require_album_access(self, album: Album, delete_token: str | None, actor_user: User | None) -> None:
+    def _require_album_access(
+        self,
+        album: Album,
+        delete_token: str | None,
+        actor_user: User | None,
+        *,
+        allow_expired: bool = False,
+    ) -> None:
+        if not allow_expired and is_expired(album.expires_at):
+            raise HTTPException(status_code=404, detail="Album not found.")
         if actor_user is not None and (actor_user.is_admin or album.user_id == actor_user.id):
             return
         if album.delete_token is None:

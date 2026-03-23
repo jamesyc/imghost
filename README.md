@@ -152,6 +152,34 @@ Docker/infra defaults:
 - ShareX config download now works from either a browser session or bearer API key auth.
 - Because API keys are stored hash-only, browser-session ShareX download rotates or auto-issues the user API key before embedding it into the exported `.sxcu` file.
 
+## Google OAuth Setup
+
+Google sign-in is optional and stays disabled unless all three settings are configured:
+
+```env
+GOOGLE_OAUTH_ENABLED=true
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+```
+
+When creating the OAuth client in Google Cloud Console:
+
+- application type: `Web application`
+- `Authorized JavaScript origins`: leave blank
+- `Authorized redirect URIs`: add your public callback URL exactly:
+
+```text
+https://your-domain.example/auth/google/callback
+```
+
+Important behavior:
+
+- `BASE_URL` must match the same public origin users actually visit
+- the callback URL must match Google Console exactly, including scheme and hostname
+- when `ALLOW_REGISTRATION=false`, existing linked Google users may still sign in, but Google cannot create new accounts
+- if a Google account email already belongs to an existing local account, imghost does not auto-merge it; the user must sign in locally first and then connect Google from `/settings`
+- Google is just an extra sign-in method; users can set a local password later from `/settings`
+
 ## Queue And Rate-Limit Notes
 
 - `TASK_QUEUE_MODE=redis` enables Redis-backed thumbnail dispatch.

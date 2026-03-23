@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
+import bcrypt
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from imghost.main import app
 from imghost.models import User, UserSsoLink, utcnow
+from imghost.sessions import _decode_signed_token
 
 from .helpers import browser_session_headers, create_admin_and_api_key, set_user_password
+from .test_redis_features import FakeRedis
 
 
 @dataclass
@@ -47,13 +51,20 @@ class FakeGoogleProvider:
         return self.identity
 
 
-def _create_raw_user(client: TestClient, *, username: str, email: str, suspended: bool = False) -> User:
+def _create_raw_user(
+    client: TestClient,
+    *,
+    username: str,
+    email: str,
+    suspended: bool = False,
+    password_hash: str | None = None,
+) -> User:
     now = utcnow()
     user = User(
         id=str(uuid4()),
         username=username,
         email=email,
-        password_hash=None,
+        password_hash=password_hash,
         is_admin=False,
         suspended=suspended,
         quota_bytes=None,
@@ -87,6 +98,11 @@ def _oauth_state_from_redirect(response) -> str:
     location = response.headers["location"]
     query = parse_qs(urlparse(location).query)
     return query["state"][0]
+
+
+def _oauth_jti_from_state(client: TestClient, value: str) -> str:
+    payload = client.app.state.imghost.oauth_state.loads(value)
+    return payload.jti
 
 
 def _set_browser_session(client: TestClient, user: User) -> None:
@@ -136,6 +152,46 @@ def test_google_oauth_start_redirects_to_provider_with_signed_state(tmp_path, mo
         assert response.headers["location"].startswith("https://fake.google/auth?")
         assert provider.last_redirect_uri == "https://testserver/auth/google/callback"
         assert provider.last_state
+
+
+def test_google_oauth_start_uses_trusted_forwarded_public_origin_for_callback_url(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://imghost.public.example")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS_ENABLED", "true")
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="http://backend", client=("127.0.0.1", 50000)) as client:
+        provider = _install_fake_google_provider(client, FakeGoogleProvider())
+        response = client.get(
+            "/auth/google/start",
+            headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "imghost.public.example"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert provider.last_redirect_uri == "https://imghost.public.example/auth/google/callback"
+
+
+def test_google_oauth_start_falls_back_to_base_url_for_untrusted_forwarded_public_origin(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://trusted.example")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="http://backend") as client:
+        provider = _install_fake_google_provider(client, FakeGoogleProvider())
+        response = client.get(
+            "/auth/google/start",
+            headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "evil.example"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert provider.last_redirect_uri == "https://fallback.example.com/auth/google/callback"
 
 
 def test_google_oauth_link_mode_requires_signed_in_user(tmp_path, monkeypatch) -> None:
@@ -203,6 +259,30 @@ def test_google_oauth_existing_link_logs_user_in(tmp_path, monkeypatch) -> None:
         assert response.headers["location"] == "/albums"
         assert "imghost_session=" in response.headers["set-cookie"]
         assert provider.last_code == "abc"
+        assert client.portal.call(client.app.state.imghost.repository.get_oauth_state_nonce, _oauth_jti_from_state(client, state)) is None
+
+
+def test_google_oauth_login_state_is_single_use(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="replay-google", email="replay@example.com")),
+        )
+        started = client.get("/auth/google/start", params={"next": "/albums"}, follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        first = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert first.status_code == 303
+        assert first.headers["location"] == "/albums"
+        second = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert second.status_code == 303
+        assert second.headers["location"].startswith("/login?")
+        assert "oauth_error=Google+sign-in+could+not+be+verified." in second.headers["location"]
 
 
 def test_google_oauth_signed_in_user_can_link_account(tmp_path, monkeypatch) -> None:
@@ -215,7 +295,6 @@ def test_google_oauth_signed_in_user_can_link_account(tmp_path, monkeypatch) -> 
 
     with TestClient(app, base_url="https://testserver") as client:
         user = _create_raw_user(client, username="localuser", email="local@example.com")
-        set_user_password(client, user.id, "secret-pass")
         _set_browser_session(client, user)
         provider = _install_fake_google_provider(
             client,
@@ -231,6 +310,32 @@ def test_google_oauth_signed_in_user_can_link_account(tmp_path, monkeypatch) -> 
         assert links[0].provider == "google"
 
 
+def test_google_oauth_link_state_is_single_use(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("SECRET_KEY", "oauth-link-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        user = _create_raw_user(client, username="relinkuser", email="relink@example.com")
+        _set_browser_session(client, user)
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="link-replay-google", email="linkreplay@example.com")),
+        )
+        started = client.get("/auth/google/start", params={"mode": "link", "next": "/settings"}, follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        first = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert first.status_code == 303
+        assert "oauth_status=Google+account+connected." in first.headers["location"]
+        second = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert second.status_code == 303
+        assert second.headers["location"].startswith("/login?")
+        assert "oauth_error=Google+sign-in+could+not+be+verified." in second.headers["location"]
+
+
 def test_google_oauth_linking_fails_if_identity_linked_elsewhere(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
@@ -243,7 +348,6 @@ def test_google_oauth_linking_fails_if_identity_linked_elsewhere(tmp_path, monke
         _link_google_account(client, user_id=owner.id, provider_uid="taken-google")
 
         user = _create_raw_user(client, username="otheruser", email="other@example.com")
-        set_user_password(client, user.id, "secret-pass")
         _set_browser_session(client, user)
 
         _install_fake_google_provider(
@@ -256,6 +360,62 @@ def test_google_oauth_linking_fails_if_identity_linked_elsewhere(tmp_path, monke
         assert response.status_code == 303
         assert "oauth_tone=error" in response.headers["location"]
         assert "already+linked+to+a+different+user" in response.headers["location"]
+
+
+def test_google_oauth_callback_rejects_missing_nonce(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="missing-nonce-google", email="missingnonce@example.com")),
+        )
+        started = client.get("/auth/google/start", follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        jti = _oauth_jti_from_state(client, state)
+        client.portal.call(client.app.state.imghost.repository.consume_oauth_state_nonce, jti)
+        response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/login?")
+        assert "oauth_error=Google+sign-in+could+not+be+verified." in response.headers["location"]
+
+
+def test_google_oauth_callback_rejects_expired_nonce(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="expired-nonce-google", email="expirednonce@example.com")),
+        )
+        started = client.get("/auth/google/start", follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        jti = _oauth_jti_from_state(client, state)
+        nonce = client.portal.call(client.app.state.imghost.repository.get_oauth_state_nonce, jti)
+        assert nonce is not None
+        pool = client.app.state.imghost.database.require_pool()
+
+        async def expire_nonce() -> None:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE oauth_state_nonces SET expires_at = $2 WHERE jti = $1",
+                    jti,
+                    utcnow() - timedelta(seconds=1),
+                )
+
+        client.portal.call(expire_nonce)
+        response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/login?")
+        assert "oauth_error=Google+sign-in+could+not+be+verified." in response.headers["location"]
 
 
 def test_google_oauth_creates_new_user_when_allowed(tmp_path, monkeypatch) -> None:
@@ -442,8 +602,12 @@ def test_google_oauth_disconnect_succeeds_when_local_password_exists(tmp_path, m
     monkeypatch.setenv("SECRET_KEY", "oauth-disconnect-secret")
 
     with TestClient(app, base_url="https://testserver") as client:
-        user = _create_raw_user(client, username="hybriduser", email="hybrid@example.com")
-        set_user_password(client, user.id, "secret-pass")
+        user = _create_raw_user(
+            client,
+            username="hybriduser",
+            email="hybrid@example.com",
+            password_hash=bcrypt.hashpw(b"secret-pass", bcrypt.gensalt()).decode("utf-8"),
+        )
         _link_google_account(client, user_id=user.id, provider_uid="hybrid-google")
         _set_browser_session(client, user)
         response = client.post(
@@ -513,3 +677,139 @@ def test_google_oauth_login_audits_success_and_denial_cases(tmp_path, monkeypatc
         )
         assert denial.status_code == 200
         assert denial.json()
+
+
+def test_google_oauth_login_works_without_redis_configured(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.setenv("REDIS_MODE", "disabled")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="noredis-google", email="noredis@example.com")),
+        )
+        started = client.get("/auth/google/start", follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert response.status_code == 303
+        token = response.cookies.get(client.app.state.imghost.settings.session_cookie_name)
+        assert token is not None
+        payload = _decode_signed_token(client.app.state.imghost.settings, token)
+        assert payload is not None
+        assert payload.store == "cookie"
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 200
+
+
+def test_google_oauth_login_uses_redis_session_when_redis_is_available(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="redis-google", email="redis@example.com")),
+        )
+        started = client.get("/auth/google/start", follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert response.status_code == 303
+        token = response.cookies.get(client.app.state.imghost.settings.session_cookie_name)
+        assert token is not None
+        payload = _decode_signed_token(client.app.state.imghost.settings, token)
+        assert payload is not None
+        assert payload.store == "redis"
+        assert any(":session:" in key for key in fake.values)
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 200
+
+
+def test_google_oauth_login_falls_back_to_cookie_when_redis_is_down_and_sessions_fail_open(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    fake.fail = True
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="fallback-google", email="fallbackoauth@example.com")),
+        )
+        started = client.get("/auth/google/start", follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert response.status_code == 303
+        token = response.cookies.get(client.app.state.imghost.settings.session_cookie_name)
+        assert token is not None
+        payload = _decode_signed_token(client.app.state.imghost.settings, token)
+        assert payload is not None
+        assert payload.store == "cookie"
+        me = client.get("/api/v1/user/me")
+        assert me.status_code == 200
+        assert me.json()["email"] == "fallbackoauth@example.com"
+
+
+def test_google_oauth_login_redirects_back_to_login_when_redis_sessions_fail_closed(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    fake.fail = True
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="strict-google", email="strictoauth@example.com")),
+        )
+        started = client.get("/auth/google/start", follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/login?")
+        assert "oauth_error=Google+sign-in+is+temporarily+unavailable." in response.headers["location"]
+
+
+def test_google_oauth_link_start_requires_fresh_session_when_redis_sessions_fail_closed(tmp_path, monkeypatch) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        user = _create_raw_user(client, username="strictlink", email="strictlink@example.com")
+        token, _ = client.portal.call(lambda: client.app.state.imghost.session_backend.create_session(user, remember_me=True))
+        client.cookies.set(client.app.state.imghost.settings.session_cookie_name, token)
+        fake.fail = True
+        response = client.get("/auth/google/start", params={"mode": "link"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login?next=%2Fsettings"

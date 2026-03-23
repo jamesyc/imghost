@@ -29,6 +29,14 @@ CREATE TABLE IF NOT EXISTS user_sso_links (
   UNIQUE (provider, provider_uid)
 );
 
+CREATE TABLE IF NOT EXISTS oauth_state_nonces (
+  jti TEXT PRIMARY KEY,
+  mode TEXT NOT NULL,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS api_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -129,6 +137,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_log (request_id);
 CREATE INDEX IF NOT EXISTS idx_audit_route_created ON audit_log (route, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys (user_id);
 CREATE INDEX IF NOT EXISTS idx_sso_links_user_id ON user_sso_links (user_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_state_nonces_expires_at ON oauth_state_nonces (expires_at);
 
 DROP TRIGGER IF EXISTS users_set_updated_at ON users;
 CREATE TRIGGER users_set_updated_at

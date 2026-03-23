@@ -88,6 +88,29 @@ class UserSsoLink:
 
 
 @dataclass
+class OAuthStateNonce:
+    jti: str
+    mode: str
+    user_id: str | None
+    created_at: datetime
+    expires_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["created_at"] = self.created_at.isoformat()
+        data["expires_at"] = self.expires_at.isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "OAuthStateNonce":
+        values = data.copy()
+        values["created_at"] = datetime.fromisoformat(values["created_at"])
+        values["expires_at"] = datetime.fromisoformat(values["expires_at"])
+        values.setdefault("user_id", None)
+        return cls(**values)
+
+
+@dataclass
 class Album:
     id: str
     title: str | None

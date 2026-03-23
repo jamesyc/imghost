@@ -11,6 +11,7 @@ if (settingsBootstrapNode) {
   const googleConnect = document.getElementById("settings-google-connect");
   const googleDisconnect = document.getElementById("settings-google-disconnect");
   const passwordHint = document.getElementById("settings-password-hint");
+  const oauthHint = document.getElementById("settings-oauth-hint");
   const defaultApiWarningText = apiWarning?.textContent || "";
 
   const state = {
@@ -97,23 +98,41 @@ if (settingsBootstrapNode) {
     document.getElementById("settings-storage-used").textContent = formatBytes(user.storage_used_bytes);
     document.getElementById("settings-storage-quota").textContent = formatBytes(user.quota_bytes);
     const linkedProviders = Array.isArray(user.sso_providers) ? user.sso_providers : [];
+    const hasPassword = !!user.has_password;
+    const googleLinked = linkedProviders.some((provider) => provider.provider === "google");
+    const onlyGoogleLinked = googleLinked && linkedProviders.length === 1;
+    const disconnectBlocked = onlyGoogleLinked && !hasPassword;
     if (ssoSummary) {
       if (linkedProviders.length === 0) {
-        ssoSummary.innerHTML = '<p class="hint">No external sign-in providers are connected.</p>';
+        ssoSummary.innerHTML = '<p class="hint">No external sign-in providers are connected. You can keep using your local password only, or add Google as an extra sign-in method.</p>';
       } else {
         ssoSummary.innerHTML = linkedProviders
-          .map((provider) => `<p class="hint"><strong>${provider.provider}</strong> connected.</p>`)
+          .map((provider) => `<p class="hint"><strong>${provider.provider}</strong> connected and ready for sign-in.</p>`)
           .join("");
       }
     }
     if (passwordHint) {
-      passwordHint.textContent = user.has_password
-        ? "Your account has a local password configured."
-        : "Set a local password to keep a direct sign-in recovery path.";
+      passwordHint.textContent = hasPassword
+        ? "Your account has a local password configured. You can still use it if Google sign-in is unavailable."
+        : "Set a local password before disconnecting Google, so you do not lose your only sign-in method.";
     }
-    const googleLinked = linkedProviders.some((provider) => provider.provider === "google");
+    if (oauthHint) {
+      if (!googleLinked) {
+        oauthHint.textContent = "Connect Google only after signing in locally if you are attaching it to an existing account. If the email already belongs to a local account, imghost will not merge it automatically.";
+      } else if (disconnectBlocked) {
+        oauthHint.textContent = "Google is currently your only sign-in method. Set a local password first, then disconnect Google if you still want to remove it.";
+      } else {
+        oauthHint.textContent = "Google is connected. You can disconnect it because your account still has another way to sign in.";
+      }
+    }
     googleConnect?.classList.toggle("hidden", googleLinked);
     googleDisconnect?.classList.toggle("hidden", !googleLinked);
+    if (googleDisconnect) {
+      googleDisconnect.disabled = disconnectBlocked;
+      googleDisconnect.title = disconnectBlocked
+        ? "Set a local password before disconnecting Google."
+        : "";
+    }
   };
 
   const refreshUser = async () => {

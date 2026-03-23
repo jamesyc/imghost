@@ -23,6 +23,7 @@ def _b64decode(data: str) -> bytes:
 class OAuthStatePayload:
     mode: str
     next_path: str
+    jti: str
     user_id: str | None = None
     created_at: str | None = None
 
@@ -65,6 +66,7 @@ class OAuthStateManager:
         return OAuthStatePayload(
             mode=str(data.get("mode") or "").strip(),
             next_path=str(data.get("next_path") or "").strip(),
+            jti=str(data.get("jti") or "").strip(),
             user_id=(str(data.get("user_id")).strip() if data.get("user_id") else None),
             created_at=created_at,
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .db import Database
-from .models import Album, ApiKey, Media, User, UserSsoLink
+from .models import Album, ApiKey, Media, OAuthStateNonce, User, UserSsoLink
 from .repository_mapping import USER_SELECT, row_to_api_key, row_to_album, row_to_media, row_to_user, row_to_user_sso_link
 
 
@@ -208,6 +208,63 @@ class UserRepository:
                 provider,
             )
         return row_to_user_sso_link(row) if row else None
+
+    async def create_oauth_state_nonce(self, nonce: OAuthStateNonce) -> OAuthStateNonce:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO oauth_state_nonces (jti, mode, user_id, created_at, expires_at)
+                VALUES ($1, $2, $3::uuid, $4, $5)
+                RETURNING jti, mode, user_id, created_at, expires_at
+                """,
+                nonce.jti,
+                nonce.mode,
+                nonce.user_id,
+                nonce.created_at,
+                nonce.expires_at,
+            )
+        return self._row_to_oauth_state_nonce(row)
+
+    async def consume_oauth_state_nonce(self, jti: str) -> OAuthStateNonce | None:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM oauth_state_nonces
+                WHERE jti = $1 AND expires_at > now()
+                RETURNING jti, mode, user_id, created_at, expires_at
+                """,
+                jti,
+            )
+        return self._row_to_oauth_state_nonce(row) if row else None
+
+    async def delete_expired_oauth_state_nonces(self) -> None:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM oauth_state_nonces WHERE expires_at <= now()")
+
+    async def get_oauth_state_nonce(self, jti: str) -> OAuthStateNonce | None:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT jti, mode, user_id, created_at, expires_at
+                FROM oauth_state_nonces
+                WHERE jti = $1
+                """,
+                jti,
+            )
+        return self._row_to_oauth_state_nonce(row) if row else None
+
+    def _row_to_oauth_state_nonce(self, row) -> OAuthStateNonce:
+        return OAuthStateNonce(
+            jti=row["jti"],
+            mode=row["mode"],
+            user_id=str(row["user_id"]) if row["user_id"] is not None else None,
+            created_at=row["created_at"],
+            expires_at=row["expires_at"],
+        )
 
     async def list_user_media(self, user_id: str) -> list[Media]:
         pool = self.database.require_pool()

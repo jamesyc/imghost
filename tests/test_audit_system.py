@@ -18,6 +18,19 @@ from imghost.main import app
 from .helpers import browser_session_headers, create_admin_and_api_key, create_user_and_api_key, set_user_password
 
 
+class _RecordingSink:
+    def __init__(self) -> None:
+        self.records = []
+
+    async def write(self, record) -> None:
+        self.records.append(record)
+
+
+class _FailingSink:
+    async def write(self, record) -> None:
+        raise RuntimeError("sink failed")
+
+
 def test_cli_create_user_and_issue_api_key_are_audited(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -176,6 +189,27 @@ def test_json_log_sink_redacts_secret_fields(caplog) -> None:
     assert "[REDACTED]" in combined
     assert "super-secret" not in combined
     assert "raw-key" not in combined
+
+
+def test_audit_service_continues_when_one_sink_fails(caplog) -> None:
+    recording_sink = _RecordingSink()
+    service = AuditService([_FailingSink(), recording_sink])
+
+    with caplog.at_level(logging.ERROR):
+        asyncio.run(
+            service.emit_action(
+                event_type="sink_test",
+                action="sink.test",
+                result="success",
+                actor=anonymous_actor(),
+                object=AuditObject(type="test", id="sink"),
+                metadata={"source": "system"},
+            )
+        )
+
+    assert len(recording_sink.records) == 1
+    assert recording_sink.records[0].event_type == "sink_test"
+    assert any(record.message == "audit_sink_write_failed" for record in caplog.records)
 
 
 def test_audit_query_reads_legacy_metadata_only_rows(tmp_path, monkeypatch, capsys) -> None:

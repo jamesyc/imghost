@@ -68,6 +68,7 @@ async def _truncate_database() -> None:
               config,
               media,
               albums,
+              oauth_state_nonces,
               api_keys,
               user_rate_limits,
               user_sso_links,

@@ -1,10 +1,12 @@
 from io import BytesIO
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 
 from imghost.main import app
+from imghost.models import utcnow
 
-from .helpers import PNG_1X1, browser_session_headers, create_admin_and_api_key, create_user_and_api_key
+from .helpers import PNG_1X1, browser_session_headers, create_admin_and_api_key, create_user_and_api_key, update_album_record
 
 
 def test_album_patch_reorder_and_media_delete_require_token(tmp_path, monkeypatch) -> None:
@@ -138,6 +140,38 @@ def test_authenticated_owner_and_admin_can_manage_album_without_delete_token(tmp
         assert album_response.status_code == 404
 
 
+def test_suspended_owner_cannot_mutate_owned_album_with_api_key(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    owner_id, owner_key = create_user_and_api_key(capsys, username="suspendedowner", email="suspendedowner@example.com")
+    _, admin_key = create_admin_and_api_key(capsys, username="suspendadmin", email="suspendadmin@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[("file", ("owned.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {owner_key}"},
+        )
+        assert created.status_code == 200
+        album_id = created.json()["album_id"]
+
+        suspended = client.patch(
+            f"/api/v1/admin/users/{owner_id}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"suspended": True},
+        )
+        assert suspended.status_code == 200
+
+        patch_response = client.patch(
+            f"/api/v1/album/{album_id}",
+            headers={"Authorization": f"Bearer {owner_key}"},
+            json={"title": "No longer allowed"},
+        )
+        assert patch_response.status_code == 403
+        assert patch_response.json()["detail"] == "User is not allowed to authenticate."
+
+
 def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -162,6 +196,58 @@ def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
         assert delete_response.json()["album_deleted"] is True
 
         assert client.get(f"/api/v1/album/{album_id}").status_code == 404
+
+
+def test_expired_anonymous_album_mutations_are_denied_even_with_valid_delete_token(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[("file", ("expired.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Expires Soon"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+        delete_token = payload["manage_url"].split("token=")[1]
+        media_id = payload["media_id"]
+
+        update_album_record(client, album_id, expires_at=utcnow() - timedelta(minutes=1))
+
+        patch_response = client.patch(
+            f"/api/v1/album/{album_id}",
+            params={"delete_token": delete_token},
+            json={"title": "Should Not Work"},
+        )
+        assert patch_response.status_code == 404
+
+        reorder_response = client.patch(
+            f"/api/v1/album/{album_id}/order",
+            params={"delete_token": delete_token},
+            json=[{"media_id": media_id, "position": 10}],
+        )
+        assert reorder_response.status_code == 404
+
+        append_response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("append.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"album_id": album_id, "delete_token": delete_token},
+        )
+        assert append_response.status_code == 404
+
+        media_delete_response = client.delete(
+            f"/api/v1/media/{media_id}",
+            params={"delete_token": delete_token},
+        )
+        assert media_delete_response.status_code == 404
+
+        delete_response = client.delete(
+            f"/api/v1/album/{album_id}",
+            params={"delete_token": delete_token},
+        )
+        assert delete_response.status_code == 404
 
 
 def test_anonymous_token_mutations_are_audited_with_delete_token_actor_kind(tmp_path, monkeypatch, capsys) -> None:

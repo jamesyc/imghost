@@ -14,6 +14,7 @@ from .helpers import (
     create_admin_and_api_key,
     create_user_and_api_key,
     set_user_password,
+    update_album_record,
     wait_for_thumbnail,
 )
 
@@ -302,6 +303,31 @@ def test_register_page_shows_disabled_state_when_registration_is_off(tmp_path, m
         assert "Registration is currently disabled." in response.text
         assert 'id="register-form"' not in response.text
         assert 'href="/login"' in response.text
+
+
+def test_registration_disabled_hides_google_button_on_register_but_keeps_it_on_login(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="regoauthadmin", email="regoauthadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        updated = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"allow_registration": False},
+        )
+        assert updated.status_code == 200
+
+        login = client.get("/login")
+        register = client.get("/register")
+        assert '/auth/google/start?mode=login' in login.text
+        assert "Continue with Google" in login.text
+        assert '/auth/google/start?mode=login' not in register.text
+        assert "Continue with Google" not in register.text
 
 
 def test_login_and_register_redirect_authenticated_users_to_dashboard(tmp_path, monkeypatch) -> None:
@@ -680,6 +706,26 @@ def test_anonymous_manage_page_requires_valid_token(tmp_path, monkeypatch) -> No
         assert invalid.status_code == 403
 
 
+def test_expired_anonymous_manage_page_returns_404_even_with_valid_token(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("anon.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Expired Manage Album"},
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+        token = payload["manage_url"].split("token=")[1]
+
+        update_album_record(client, payload["album_id"], expires_at=utcnow() - timedelta(minutes=1))
+
+        expired = client.get(f"/manage/{payload['album_id']}", params={"token": token})
+        assert expired.status_code == 404
+
+
 def test_public_user_album_list_page_uses_template_shell(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
@@ -802,6 +848,20 @@ def test_settings_page_renders_google_oauth_controls_when_enabled(tmp_path, monk
         assert 'id="settings-google-connect"' in page.text
         assert 'id="settings-google-disconnect"' in page.text
         assert 'id="settings-oauth-status"' in page.text
+        assert 'id="settings-oauth-hint"' in page.text
+        assert "If the email already belongs to a local account, imghost will not merge it automatically." in page.text
+        assert "Add a local password so you can sign in directly even if Google sign-in is unavailable later." in page.text
+
+
+def test_static_settings_js_includes_last_login_method_oauth_guidance(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get("/static/js/settings.js")
+        assert response.status_code == 200
+        assert "Google is currently your only sign-in method." in response.text
+        assert "Set a local password before disconnecting Google." in response.text
 
 
 def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import timedelta
+from uuid import uuid4
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Request
@@ -16,6 +18,8 @@ from ..audit.context import (
 from ..audit.models import AuditObject
 from ..oauth import OAuthStatePayload
 from ..public_origin import public_base_url
+from ..sessions import SessionBackendUnavailable
+from ..models import OAuthStateNonce, utcnow
 from .auth_context import apply_session_cookie, authenticated_user
 from .page_context import login_redirect, normalize_next_path
 from .request_context import correlation_id, get_state
@@ -64,10 +68,21 @@ async def start_google_oauth(request: Request, next: str | None = None, mode: st
     user = await authenticated_user(request, required=False)
     if mode == "link" and user is None:
         return login_redirect("/settings")
+    await state.repository.delete_expired_oauth_state_nonces()
+    nonce = await state.repository.create_oauth_state_nonce(
+        OAuthStateNonce(
+            jti=str(uuid4()),
+            mode=mode,
+            user_id=user.id if mode == "link" and user is not None else None,
+            created_at=utcnow(),
+            expires_at=utcnow() + timedelta(minutes=10),
+        )
+    )
     signed_state = state.oauth_state.dumps(
         OAuthStatePayload(
             mode=mode,
             next_path=next_path,
+            jti=nonce.jti,
             user_id=user.id if mode == "link" and user is not None else None,
         )
     )
@@ -93,6 +108,13 @@ async def google_oauth_callback(
         oauth_state = app_state.oauth_state.loads(state or "")
     except ValueError:
         await _audit_oauth_denied(request, reason="invalid_state")
+        return _query_redirect("/login", oauth_error="Google sign-in could not be verified.")
+    if not oauth_state.jti:
+        await _audit_oauth_denied(request, reason="invalid_state")
+        return _query_redirect("/login", oauth_error="Google sign-in could not be verified.")
+    nonce = await app_state.repository.consume_oauth_state_nonce(oauth_state.jti)
+    if nonce is None:
+        await _audit_oauth_denied(request, reason="invalid_state_nonce")
         return _query_redirect("/login", oauth_error="Google sign-in could not be verified.")
 
     next_path = normalize_next_path(
@@ -184,7 +206,22 @@ async def google_oauth_callback(
     if oauth_state.mode == "link":
         return _query_redirect("/settings", oauth_status="Google account connected.", oauth_tone="success")
 
-    token, expires_at = await app_state.session_backend.create_session(user, remember_me=True)
+    try:
+        token, expires_at = await app_state.session_backend.create_session(user, remember_me=True)
+    except SessionBackendUnavailable:
+        await app_state.audit.emit_action(
+            event_type=actions.OAUTH_DENIED,
+            action="oauth.denied",
+            result="denied",
+            actor=user_actor(user),
+            object=AuditObject(type="oauth", id="google"),
+            metadata={"provider": "google", "source": "web", "correlation_id": correlation_id(request)},
+            request=request_context,
+            process=build_runtime_process_context("web"),
+            reason="session_unavailable",
+            actor_ip_hash=hash_client_ip(request_context.client_ip),
+        )
+        return _query_redirect("/login", oauth_error="Google sign-in is temporarily unavailable.")
     response = _query_redirect(next_path)
     apply_session_cookie(response, app_state.settings, token, expires_at=expires_at)
     return response
