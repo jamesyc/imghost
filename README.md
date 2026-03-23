@@ -111,6 +111,46 @@ TRUSTED_PROXY_CIDRS_ENABLED=false
 TRUSTED_PROXY_CIDRS=127.0.0.1/32,172.16.0.0/12
 ```
 
+## Public Origin Modes
+
+There are two supported deployment modes:
+
+- Direct-request mode:
+  - `PUBLIC_ORIGIN_ENABLED=false`
+  - imghost reflects the host and scheme the browser used
+  - best for localhost, direct LAN access, and simple home setups
+- Strict public-origin mode:
+  - `PUBLIC_ORIGIN_ENABLED=true`
+  - imghost only reflects origins from `TRUSTED_PUBLIC_ORIGINS`
+  - best when running behind nginx, Caddy, Traefik, Cloudflare, or another reverse proxy
+
+In strict mode, the allowlist affects:
+
+- generated public links
+- OAuth callback URLs
+- ShareX config URLs
+- browser-session CSRF/origin checks
+
+If request-derived origin data is missing, malformed, or untrusted, the app falls back to `BASE_URL`.
+
+### Reverse Proxy Hardening
+
+If you run imghost behind a real reverse proxy, use all of these together:
+
+```env
+PUBLIC_ORIGIN_ENABLED=true
+TRUSTED_PUBLIC_ORIGINS=https://your-public-host.example
+TRUSTED_PROXY_CIDRS_ENABLED=true
+TRUSTED_PROXY_CIDRS=127.0.0.1/32,172.16.0.0/12
+```
+
+Guidance:
+
+- `TRUSTED_PUBLIC_ORIGINS` should list the exact public hosts users visit
+- `TRUSTED_PROXY_CIDRS` should list the immediate proxy peers that connect to imghost, not end-user IPs
+- if `TRUSTED_PROXY_CIDRS_ENABLED=false`, forwarded headers stay permissive by design for local/self-hosted ease of use
+- if `TRUSTED_PROXY_CIDRS_ENABLED=true`, only peers inside `TRUSTED_PROXY_CIDRS` may influence forwarded host/proto handling
+
 ## One-Machine vs Multi-Machine Docker
 
 The same Compose file supports both:
@@ -176,6 +216,7 @@ Important behavior:
 
 - `BASE_URL` must match the same public origin users actually visit
 - the callback URL must match Google Console exactly, including scheme and hostname
+- in strict public-origin mode, the request or forwarded origin must also resolve to a trusted public origin or the callback URL falls back to `BASE_URL`
 - when `ALLOW_REGISTRATION=false`, existing linked Google users may still sign in, but Google cannot create new accounts
 - if a Google account email already belongs to an existing local account, imghost does not auto-merge it; the user must sign in locally first and then connect Google from `/settings`
 - Google is just an extra sign-in method; users can set a local password later from `/settings`
@@ -199,25 +240,18 @@ Important behavior:
 
 ## URL Generation
 
-Absolute URLs now prefer the request's public origin:
+Absolute URLs prefer the current request origin in this order:
 
-- `X-Forwarded-Proto`
-- `X-Forwarded-Host`
-- request host/scheme
+1. trusted forwarded proto/host
+2. direct request scheme/host
+3. `BASE_URL`
 
-That origin is only used if it matches the configured trusted allowlist:
+In strict public-origin mode, request-derived origins are only used if they match:
 
 - `TRUSTED_PUBLIC_ORIGINS`
 - normalized `BASE_URL` is also trusted as the default fallback origin
 
-If the forwarded or direct request origin is missing, malformed, or untrusted, the app falls back to `BASE_URL`.
-
-Forwarded-header trust can also be tightened further:
-
-- when `TRUSTED_PROXY_CIDRS_ENABLED=false`, forwarded headers remain permissive as they are today
-- when `TRUSTED_PROXY_CIDRS_ENABLED=true`, `X-Forwarded-*` headers are only trusted from peers inside `TRUSTED_PROXY_CIDRS`
-
-This means one deployment can serve multiple public domains correctly for normal request-driven responses.
+This lets one hardened deployment serve multiple public domains correctly while still falling back safely when the request origin is missing, malformed, or hostile.
 
 ## Development
 
@@ -237,7 +271,7 @@ The test harness will refuse to run against database names that do not look like
 
 Current full suite status at the time these docs were updated:
 
-- `91 passed`
+- `408 passed`
 
 The test suite uses PostgreSQL and truncates tables between tests. Run it only against a dedicated test database.
 

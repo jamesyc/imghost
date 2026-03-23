@@ -92,6 +92,7 @@ class OAuthStateNonce:
     jti: str
     mode: str
     user_id: str | None
+    code_verifier: str
     created_at: datetime
     expires_at: datetime
 

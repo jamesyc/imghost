@@ -214,13 +214,14 @@ class UserRepository:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO oauth_state_nonces (jti, mode, user_id, created_at, expires_at)
-                VALUES ($1, $2, $3::uuid, $4, $5)
-                RETURNING jti, mode, user_id, created_at, expires_at
+                INSERT INTO oauth_state_nonces (jti, mode, user_id, code_verifier, created_at, expires_at)
+                VALUES ($1, $2, $3::uuid, $4, $5, $6)
+                RETURNING jti, mode, user_id, code_verifier, created_at, expires_at
                 """,
                 nonce.jti,
                 nonce.mode,
                 nonce.user_id,
+                nonce.code_verifier,
                 nonce.created_at,
                 nonce.expires_at,
             )
@@ -233,7 +234,7 @@ class UserRepository:
                 """
                 DELETE FROM oauth_state_nonces
                 WHERE jti = $1 AND expires_at > now()
-                RETURNING jti, mode, user_id, created_at, expires_at
+                RETURNING jti, mode, user_id, code_verifier, created_at, expires_at
                 """,
                 jti,
             )
@@ -249,7 +250,7 @@ class UserRepository:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT jti, mode, user_id, created_at, expires_at
+                SELECT jti, mode, user_id, code_verifier, created_at, expires_at
                 FROM oauth_state_nonces
                 WHERE jti = $1
                 """,
@@ -262,6 +263,7 @@ class UserRepository:
             jti=row["jti"],
             mode=row["mode"],
             user_id=str(row["user_id"]) if row["user_id"] is not None else None,
+            code_verifier=row["code_verifier"],
             created_at=row["created_at"],
             expires_at=row["expires_at"],
         )

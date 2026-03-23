@@ -10,11 +10,10 @@ from ..audit.context import anonymous_actor, build_request_context, build_runtim
 from ..audit.models import AuditObject
 from ..config import Settings
 from ..public_origin import (
-    _forwarded_origin,
     _normalize_origin,
     _request_origin,
     _trusted_origin_set,
-    request_uses_trusted_proxy_headers,
+    trusted_forwarded_origin,
 )
 
 
@@ -40,7 +39,7 @@ def _has_trusted_csrf_source(request: Request, settings: Settings) -> bool:
         direct_request_origin = _request_origin(request)
         if direct_request_origin is not None:
             trusted.add(direct_request_origin)
-        forwarded_origin = _forwarded_origin(request) if request_uses_trusted_proxy_headers(request, settings) else None
+        forwarded_origin = trusted_forwarded_origin(request, settings)
         if forwarded_origin is not None:
             trusted.add(forwarded_origin)
     origin = _normalize_origin(request.headers.get("Origin", ""))

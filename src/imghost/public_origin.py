@@ -98,12 +98,25 @@ def _forwarded_origin(request: Request) -> str | None:
     return _normalize_origin(f"{proto}://{host}")
 
 
+def trusted_forwarded_origin(request: Request, settings: Settings) -> str | None:
+    if not request_uses_trusted_proxy_headers(request, settings):
+        return None
+    return _forwarded_origin(request)
+
+
+def trusted_forwarded_proto(request: Request, settings: Settings) -> str | None:
+    if not request_uses_trusted_proxy_headers(request, settings):
+        return None
+    proto = _header_first_value(request, "X-Forwarded-Proto").lower()
+    return proto or None
+
+
 def public_base_url(request: Request, settings: Settings) -> str:
     trusted = _trusted_origin_set(settings)
     fallback = _normalize_origin(settings.base_url) or settings.base_url
     observability: ObservabilityState | None = getattr(getattr(request.app.state, "imghost", None), "observability", None)
 
-    forwarded = _forwarded_origin(request) if request_uses_trusted_proxy_headers(request, settings) else None
+    forwarded = trusted_forwarded_origin(request, settings)
     if forwarded is None and _forwarded_origin(request) is not None and settings.trusted_proxy_cidrs_enabled:
         peer_host = _request_peer_host(request) or "unknown"
         if observability is None or observability.should_log_untrusted_origin("proxy_peer", peer_host):

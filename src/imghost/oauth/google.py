@@ -19,18 +19,27 @@ class GoogleOAuthProvider:
         self.client_id = client_id
         self.client_secret = client_secret
 
-    def authorization_url(self, *, redirect_uri: str, state: str) -> str:
+    def authorization_url(
+        self,
+        *,
+        redirect_uri: str,
+        state: str,
+        code_challenge: str,
+        code_challenge_method: str,
+    ) -> str:
         return f"{GOOGLE_AUTHORIZATION_URL}?{urlencode({
             'client_id': self.client_id,
             'redirect_uri': redirect_uri,
             'response_type': 'code',
             'scope': 'openid email profile',
             'state': state,
+            'code_challenge': code_challenge,
+            'code_challenge_method': code_challenge_method,
             'access_type': 'online',
             'prompt': 'select_account',
         })}"
 
-    async def exchange_code(self, *, code: str, redirect_uri: str) -> OAuthIdentity:
+    async def exchange_code(self, *, code: str, redirect_uri: str, code_verifier: str) -> OAuthIdentity:
         async with httpx.AsyncClient(timeout=10.0) as client:
             token_response = await client.post(
                 GOOGLE_TOKEN_URL,
@@ -39,6 +48,7 @@ class GoogleOAuthProvider:
                     "client_id": self.client_id,
                     "client_secret": self.client_secret,
                     "redirect_uri": redirect_uri,
+                    "code_verifier": code_verifier,
                     "grant_type": "authorization_code",
                 },
                 headers={"Accept": "application/json"},

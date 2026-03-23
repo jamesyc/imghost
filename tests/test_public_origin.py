@@ -395,6 +395,27 @@ def test_sharex_config_rejects_untrusted_forwarded_public_origin(tmp_path, monke
         assert payload["RequestURL"] == "https://fallback.example.com/api/v1/upload"
 
 
+def test_sharex_config_rejects_malformed_forwarded_public_origin_and_falls_back_to_base_url(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://imghost.a.example")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexmalformed", email="sharexmalformed@example.com")
+
+    with TestClient(app, base_url="http://backend") as client:
+        response = client.get(
+            "/api/v1/user/me/sharex-config",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "bad/path.example/evil",
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["RequestURL"] == "https://fallback.example.com/api/v1/upload"
+
+
 def test_browser_session_mutation_allows_secondary_trusted_origin_host(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://imghost.a.example")

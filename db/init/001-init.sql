@@ -33,9 +33,12 @@ CREATE TABLE IF NOT EXISTS oauth_state_nonces (
   jti TEXT PRIMARY KEY,
   mode TEXT NOT NULL,
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  code_verifier TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE oauth_state_nonces ADD COLUMN IF NOT EXISTS code_verifier TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

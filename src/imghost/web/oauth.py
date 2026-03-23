@@ -16,7 +16,7 @@ from ..audit.context import (
     user_actor,
 )
 from ..audit.models import AuditObject
-from ..oauth import OAuthStatePayload
+from ..oauth import OAuthStatePayload, build_code_challenge, generate_code_verifier
 from ..public_origin import public_base_url
 from ..sessions import SessionBackendUnavailable
 from ..models import OAuthStateNonce, utcnow
@@ -69,11 +69,13 @@ async def start_google_oauth(request: Request, next: str | None = None, mode: st
     if mode == "link" and user is None:
         return login_redirect("/settings")
     await state.repository.delete_expired_oauth_state_nonces()
+    code_verifier = generate_code_verifier()
     nonce = await state.repository.create_oauth_state_nonce(
         OAuthStateNonce(
             jti=str(uuid4()),
             mode=mode,
             user_id=user.id if mode == "link" and user is not None else None,
+            code_verifier=code_verifier,
             created_at=utcnow(),
             expires_at=utcnow() + timedelta(minutes=10),
         )
@@ -87,7 +89,12 @@ async def start_google_oauth(request: Request, next: str | None = None, mode: st
         )
     )
     return RedirectResponse(
-        url=provider.authorization_url(redirect_uri=_callback_url(request), state=signed_state),
+        url=provider.authorization_url(
+            redirect_uri=_callback_url(request),
+            state=signed_state,
+            code_challenge=build_code_challenge(code_verifier),
+            code_challenge_method="S256",
+        ),
         status_code=303,
     )
 
@@ -154,7 +161,11 @@ async def google_oauth_callback(
         )
 
     try:
-        identity = await provider.exchange_code(code=code, redirect_uri=_callback_url(request))
+        identity = await provider.exchange_code(
+            code=code,
+            redirect_uri=_callback_url(request),
+            code_verifier=nonce.code_verifier,
+        )
         user, outcome = await app_state.uploads.complete_oauth_login(
             identity,
             current_user=current_user,

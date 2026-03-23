@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from imghost.main import app
 from imghost.models import User, UserSsoLink, utcnow
+from imghost.oauth.pkce import build_code_challenge
 from imghost.sessions import _decode_signed_token
 
 from .helpers import browser_session_headers, create_admin_and_api_key, set_user_password
@@ -37,15 +38,28 @@ class FakeGoogleProvider:
         self.last_state: str | None = None
         self.last_redirect_uri: str | None = None
         self.last_code: str | None = None
+        self.last_code_challenge: str | None = None
+        self.last_code_challenge_method: str | None = None
+        self.last_code_verifier: str | None = None
 
-    def authorization_url(self, *, redirect_uri: str, state: str) -> str:
+    def authorization_url(
+        self,
+        *,
+        redirect_uri: str,
+        state: str,
+        code_challenge: str,
+        code_challenge_method: str,
+    ) -> str:
         self.last_state = state
         self.last_redirect_uri = redirect_uri
+        self.last_code_challenge = code_challenge
+        self.last_code_challenge_method = code_challenge_method
         return f"https://fake.google/auth?state={state}"
 
-    async def exchange_code(self, *, code: str, redirect_uri: str):
+    async def exchange_code(self, *, code: str, redirect_uri: str, code_verifier: str):
         self.last_code = code
         self.last_redirect_uri = redirect_uri
+        self.last_code_verifier = code_verifier
         if self.error is not None:
             raise self.error
         return self.identity
@@ -152,6 +166,14 @@ def test_google_oauth_start_redirects_to_provider_with_signed_state(tmp_path, mo
         assert response.headers["location"].startswith("https://fake.google/auth?")
         assert provider.last_redirect_uri == "https://testserver/auth/google/callback"
         assert provider.last_state
+        assert provider.last_code_challenge_method == "S256"
+        nonce = client.portal.call(
+            client.app.state.imghost.repository.get_oauth_state_nonce,
+            _oauth_jti_from_state(client, provider.last_state),
+        )
+        assert nonce is not None
+        assert nonce.code_verifier
+        assert provider.last_code_challenge == build_code_challenge(nonce.code_verifier)
 
 
 def test_google_oauth_start_uses_trusted_forwarded_public_origin_for_callback_url(tmp_path, monkeypatch) -> None:
@@ -188,6 +210,25 @@ def test_google_oauth_start_falls_back_to_base_url_for_untrusted_forwarded_publi
         response = client.get(
             "/auth/google/start",
             headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "evil.example"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert provider.last_redirect_uri == "https://fallback.example.com/auth/google/callback"
+
+
+def test_google_oauth_start_falls_back_to_base_url_for_malformed_forwarded_public_origin(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TRUSTED_PUBLIC_ORIGINS", "https://trusted.example")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="http://backend") as client:
+        provider = _install_fake_google_provider(client, FakeGoogleProvider())
+        response = client.get(
+            "/auth/google/start",
+            headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "bad/path.example/evil"},
             follow_redirects=False,
         )
         assert response.status_code == 303
@@ -254,12 +295,39 @@ def test_google_oauth_existing_link_logs_user_in(tmp_path, monkeypatch) -> None:
         )
         started = client.get("/auth/google/start", params={"next": "/albums"}, follow_redirects=False)
         state = _oauth_state_from_redirect(started)
+        nonce = client.portal.call(client.app.state.imghost.repository.get_oauth_state_nonce, _oauth_jti_from_state(client, state))
+        assert nonce is not None
         response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
         assert response.status_code == 303
         assert response.headers["location"] == "/albums"
         assert "imghost_session=" in response.headers["set-cookie"]
         assert provider.last_code == "abc"
+        assert provider.last_code_verifier == nonce.code_verifier
         assert client.portal.call(client.app.state.imghost.repository.get_oauth_state_nonce, _oauth_jti_from_state(client, state)) is None
+
+
+def test_google_oauth_link_start_uses_pkce_and_stores_code_verifier(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("SECRET_KEY", "oauth-link-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        user = _create_raw_user(client, username="pkcelink", email="pkcelink@example.com")
+        _set_browser_session(client, user)
+        provider = _install_fake_google_provider(client, FakeGoogleProvider())
+        started = client.get("/auth/google/start", params={"mode": "link", "next": "/settings"}, follow_redirects=False)
+        assert started.status_code == 303
+        assert provider.last_code_challenge_method == "S256"
+        nonce = client.portal.call(
+            client.app.state.imghost.repository.get_oauth_state_nonce,
+            _oauth_jti_from_state(client, provider.last_state),
+        )
+        assert nonce is not None
+        assert nonce.code_verifier
+        assert provider.last_code_challenge == build_code_challenge(nonce.code_verifier)
 
 
 def test_google_oauth_login_state_is_single_use(tmp_path, monkeypatch) -> None:

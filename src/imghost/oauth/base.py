@@ -17,6 +17,13 @@ class OAuthIdentity:
 class OAuthProvider(Protocol):
     name: str
 
-    def authorization_url(self, *, redirect_uri: str, state: str) -> str: ...
+    def authorization_url(
+        self,
+        *,
+        redirect_uri: str,
+        state: str,
+        code_challenge: str,
+        code_challenge_method: str,
+    ) -> str: ...
 
-    async def exchange_code(self, *, code: str, redirect_uri: str) -> OAuthIdentity: ...
+    async def exchange_code(self, *, code: str, redirect_uri: str, code_verifier: str) -> OAuthIdentity: ...

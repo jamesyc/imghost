@@ -119,14 +119,17 @@ window.renderAdminRuntimeCards = (payload) => {
       status: payload.public_origin_mode || "Unknown",
       tone: payload.public_origin_enabled ? "ok" : "neutral",
       hint: payload.public_origin_enabled
-        ? "Only configured public origins are reflected into links and browser-session CSRF checks."
-        : "The app reflects the host the browser used. This is convenient for localhost or LAN testing.",
+        ? "Strict mode. Generated links, OAuth callbacks, ShareX config, and browser-session CSRF checks only trust configured public origins."
+        : "Direct-request mode. The app reflects the host the browser used, which is convenient for localhost and LAN deployments.",
     },
     {
       label: "Proxy trust",
       status: window.adminFormatForwardedHeadersPolicy(payload.forwarded_headers_policy),
       tone: payload.trusted_proxy_cidrs_enabled ? "ok" : "warn",
-      hint: payload.proxy_trust_warning || `${(payload.trusted_proxy_cidrs || []).length} trusted CIDR(s)`,
+      hint: payload.proxy_trust_warning
+        || (payload.trusted_proxy_cidrs_enabled
+          ? `${(payload.trusted_proxy_cidrs || []).length} trusted CIDR(s). Only those peers may set forwarded host/proto.`
+          : "Forwarded headers are accepted from any client. Fine for local use, but tighten this behind a real reverse proxy."),
     },
   ];
 
@@ -152,19 +155,21 @@ window.renderAdminNetworkTrust = (payload) => `
     <article class="admin-list-row">
       <div>
         <strong>Public origin mode</strong>
-        <p class="hint">${window.escapeAdminHtml(payload.public_origin_enabled ? "Strict allowlist mode" : "Direct request mode")}</p>
+        <p class="hint">${window.escapeAdminHtml(payload.public_origin_enabled ? "Strict allowlist mode for real deployments" : "Direct request mode for localhost or LAN use")}</p>
       </div>
     </article>
     <article class="admin-list-row">
       <div>
         <strong>Trusted public origins</strong>
         <p class="hint">${window.escapeAdminHtml((payload.trusted_public_origins || []).join(", ") || "None configured")}</p>
+        <p class="hint">These are the only browser-visible origins reflected into links and browser-session checks when strict mode is enabled.</p>
       </div>
     </article>
     <article class="admin-list-row">
       <div>
         <strong>Trusted proxy CIDRs</strong>
         <p class="hint">${window.escapeAdminHtml((payload.trusted_proxy_cidrs || []).join(", ") || "None configured")}</p>
+        <p class="hint">Enable this when nginx, Caddy, Traefik, or Cloudflare sits in front of imghost so only that proxy can set forwarded host and protocol.</p>
       </div>
     </article>
     <article class="admin-list-row">
