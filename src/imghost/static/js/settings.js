@@ -5,7 +5,12 @@ if (settingsBootstrapNode) {
   const apiKeyOutput = document.getElementById("settings-api-key-output");
   const apiWarning = document.getElementById("settings-api-warning");
   const passwordStatus = document.getElementById("settings-password-status");
+  const oauthStatus = document.getElementById("settings-oauth-status");
   const deleteStatus = document.getElementById("settings-delete-status");
+  const ssoSummary = document.getElementById("settings-sso-summary");
+  const googleConnect = document.getElementById("settings-google-connect");
+  const googleDisconnect = document.getElementById("settings-google-disconnect");
+  const passwordHint = document.getElementById("settings-password-hint");
   const defaultApiWarningText = apiWarning?.textContent || "";
 
   const state = {
@@ -91,6 +96,24 @@ if (settingsBootstrapNode) {
     document.getElementById("settings-media-count").textContent = formatNumber(user.media_count);
     document.getElementById("settings-storage-used").textContent = formatBytes(user.storage_used_bytes);
     document.getElementById("settings-storage-quota").textContent = formatBytes(user.quota_bytes);
+    const linkedProviders = Array.isArray(user.sso_providers) ? user.sso_providers : [];
+    if (ssoSummary) {
+      if (linkedProviders.length === 0) {
+        ssoSummary.innerHTML = '<p class="hint">No external sign-in providers are connected.</p>';
+      } else {
+        ssoSummary.innerHTML = linkedProviders
+          .map((provider) => `<p class="hint"><strong>${provider.provider}</strong> connected.</p>`)
+          .join("");
+      }
+    }
+    if (passwordHint) {
+      passwordHint.textContent = user.has_password
+        ? "Your account has a local password configured."
+        : "Set a local password to keep a direct sign-in recovery path.";
+    }
+    const googleLinked = linkedProviders.some((provider) => provider.provider === "google");
+    googleConnect?.classList.toggle("hidden", googleLinked);
+    googleDisconnect?.classList.toggle("hidden", !googleLinked);
   };
 
   const refreshUser = async () => {
@@ -132,10 +155,16 @@ if (settingsBootstrapNode) {
     try {
       setInlineStatus(passwordStatus);
       const formData = new FormData(event.currentTarget);
+      const hadPassword = !!state.user?.has_password;
       const newPassword = String(formData.get("new_password") || "");
       const confirmPassword = String(formData.get("confirm_new_password") || "");
+      const currentPassword = String(formData.get("current_password") || "");
       if (newPassword.length < 8) {
         setInlineStatus(passwordStatus, "Please use at least 8 characters for the new password.", "error");
+        return;
+      }
+      if (state.user?.has_password && !currentPassword) {
+        setInlineStatus(passwordStatus, "Please enter your current password.", "error");
         return;
       }
       if (newPassword !== confirmPassword) {
@@ -146,14 +175,30 @@ if (settingsBootstrapNode) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          current_password: String(formData.get("current_password") || ""),
+          current_password: currentPassword,
           new_password: newPassword,
         }),
       });
+      if (state.user) {
+        state.user.has_password = true;
+      }
       event.currentTarget.reset();
-      setInlineStatus(passwordStatus, "Password changed.", "success");
+      renderUser();
+      setInlineStatus(passwordStatus, hadPassword ? "Password changed." : "Password set.", "success");
     } catch (error) {
       setInlineStatus(passwordStatus, error.message, "error");
+    }
+  });
+
+  googleDisconnect?.addEventListener("click", async () => {
+    try {
+      setInlineStatus(oauthStatus);
+      const payload = await requestJson("/api/v1/user/me/oauth/google/disconnect", { method: "POST" });
+      state.user = payload.user;
+      renderUser();
+      setInlineStatus(oauthStatus, "Google account disconnected.", "success");
+    } catch (error) {
+      setInlineStatus(oauthStatus, error.message, "error");
     }
   });
 

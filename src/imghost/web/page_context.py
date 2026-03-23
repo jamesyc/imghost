@@ -23,6 +23,7 @@ class PageRuntimeFlags:
     anon_upload_enabled: bool
     anon_expiry_hours: int
     max_upload_bytes: int
+    google_oauth_enabled: bool
 
 
 def nav_items(user: User | None, *, allow_registration: bool) -> list[dict[str, str]]:
@@ -51,6 +52,7 @@ async def runtime_flags(request: Request) -> PageRuntimeFlags:
         anon_upload_enabled=bool(await state.runtime_config.get_value("anon_upload_enabled")),
         anon_expiry_hours=int(await state.runtime_config.get_value("anon_expiry_hours")),
         max_upload_bytes=state.settings.max_upload_bytes,
+        google_oauth_enabled=bool(state.oauth_providers.get("google")),
     )
 
 

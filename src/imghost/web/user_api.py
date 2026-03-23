@@ -4,6 +4,9 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from ..audit import actions
+from ..audit.context import build_request_context, build_runtime_process_context, hash_client_ip, user_actor
+from ..audit.models import AuditObject
 from ..service import PasswordChangeInput
 from ..public_origin import public_base_url
 from .auth_context import authenticated_principal, authenticated_user
@@ -121,3 +124,25 @@ async def delete_current_user(request: Request) -> JSONResponse:
         },
         headers={"X-Correlation-ID": cid},
     )
+
+
+@router.post("/api/v1/user/me/oauth/google/disconnect")
+async def disconnect_google_oauth(request: Request) -> JSONResponse:
+    state = get_state(request)
+    user = await authenticated_user(request, required=True)
+    cid = correlation_id(request)
+    await state.uploads.disconnect_oauth_provider(user, "google")
+    request_context = build_request_context(request, auth_method="session")
+    await state.audit.emit_action(
+        event_type=actions.OAUTH_DISCONNECTED,
+        action="oauth.disconnected",
+        result="success",
+        actor=user_actor(user),
+        object=AuditObject(type="user", id=user.id),
+        metadata={"provider": "google", "source": "api", "correlation_id": cid},
+        request=request_context,
+        process=build_runtime_process_context("api"),
+        actor_ip_hash=hash_client_ip(request_context.client_ip),
+    )
+    summary = await state.uploads.get_current_user_summary(user)
+    return JSONResponse({"disconnected": True, "provider": "google", "user": summary}, headers={"X-Correlation-ID": cid})

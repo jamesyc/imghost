@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import secrets
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -36,6 +37,7 @@ from .events import (
 )
 from .ids import generate_album_id, generate_media_id
 from .models import Album, ApiKey, Media, User, utcnow
+from .oauth import OAuthIdentity
 from .observability import ObservabilityState
 from .processors import ProcessorRegistry, VideoProcessingError
 from .rate_limits import RateLimiter
@@ -812,12 +814,14 @@ class UploadService:
         albums = await self.repository.list_user_albums(user.id)
         usage = self._storage_bytes_for_media(items)
         api_key = await self.repository.get_api_key_for_user(user.id)
+        sso_links = await self.repository.list_user_sso_links(user.id)
         effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
         return {
             "id": user.id,
             "username": user.username,
             "email": user.email,
             "is_admin": user.is_admin,
+            "has_password": user.password_hash is not None,
             "quota_bytes": effective_quota,
             "storage_used_bytes": usage,
             "album_count": len(albums),
@@ -825,6 +829,13 @@ class UploadService:
             "has_api_key": api_key is not None,
             "api_key_created_at": api_key.created_at.isoformat() if api_key else None,
             "api_key_last_used_at": api_key.last_used_at.isoformat() if api_key and api_key.last_used_at else None,
+            "sso_providers": [
+                {
+                    "provider": link.provider,
+                    "linked_at": link.linked_at.isoformat(),
+                }
+                for link in sso_links
+            ],
         }
 
     async def get_current_user_albums_page(
@@ -1135,9 +1146,7 @@ class UploadService:
         correlation_id: str | None = None,
         source: str = "api",
     ) -> User:
-        if user.password_hash is None:
-            raise HTTPException(status_code=400, detail="Password login is not configured for this user.")
-        if not self._verify_password(payload.current_password, user.password_hash):
+        if user.password_hash is not None and not self._verify_password(payload.current_password, user.password_hash):
             raise HTTPException(status_code=403, detail="Current password is incorrect.")
         user.password_hash = self._hash_password(self._require_password_value(payload.new_password, label="New password"))
         user.updated_at = utcnow()
@@ -1413,3 +1422,99 @@ class UploadService:
         from hashlib import sha256
 
         return sha256(raw_key.encode("utf-8")).hexdigest()
+
+    async def complete_oauth_login(
+        self,
+        identity: OAuthIdentity,
+        *,
+        current_user: User | None,
+        allow_registration: bool,
+        correlation_id: str | None = None,
+        source: str = "web",
+    ) -> tuple[User, str]:
+        if not identity.email_verified:
+            raise HTTPException(status_code=403, detail="Your Google account must have a verified email address.")
+
+        existing_link = await self.repository.get_user_sso_link(identity.provider, identity.provider_uid)
+        if existing_link is not None:
+            linked_user = await self.repository.get_user(existing_link.user_id)
+            if linked_user is None:
+                raise HTTPException(status_code=403, detail="Linked account is no longer available.")
+            if linked_user.suspended:
+                raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
+            if current_user is not None and current_user.id != linked_user.id:
+                raise HTTPException(status_code=409, detail="This Google account is already linked to a different user.")
+            return linked_user, "existing_link"
+
+        if current_user is not None:
+            await self.repository.create_user_sso_link(
+                self._build_user_sso_link(current_user.id, identity.provider, identity.provider_uid)
+            )
+            return current_user, "linked"
+
+        if not allow_registration:
+            raise HTTPException(status_code=403, detail="Registration is disabled.")
+
+        existing_email_user = await self.repository.get_user_by_email(identity.email)
+        if existing_email_user is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this email already exists. Sign in locally first, then connect Google from Settings.",
+            )
+
+        new_user = await self.create_user(
+            UserCreateInput(
+                username=await self._generate_unique_username(identity),
+                email=identity.email,
+                password=None,
+                is_admin=False,
+                quota_bytes=None,
+            ),
+            method="oauth",
+            correlation_id=correlation_id,
+            actor_id=None,
+            source=source,
+        )
+        await self.repository.create_user_sso_link(
+            self._build_user_sso_link(new_user.id, identity.provider, identity.provider_uid)
+        )
+        return new_user, "created"
+
+    async def disconnect_oauth_provider(self, user: User, provider: str) -> None:
+        links = await self.repository.list_user_sso_links(user.id)
+        remaining = [link for link in links if link.provider != provider]
+        if len(remaining) == len(links):
+            raise HTTPException(status_code=404, detail="OAuth provider is not linked.")
+        if user.password_hash is None and not remaining:
+            raise HTTPException(
+                status_code=400,
+                detail="You must keep at least one login method. Set a password before disconnecting Google.",
+            )
+        await self.repository.delete_user_sso_link(user.id, provider)
+
+    def _build_user_sso_link(self, user_id: str, provider: str, provider_uid: str):
+        from .models import UserSsoLink
+
+        return UserSsoLink(
+            id=str(uuid4()),
+            user_id=user_id,
+            provider=provider,
+            provider_uid=provider_uid,
+            linked_at=utcnow(),
+        )
+
+    async def _generate_unique_username(self, identity: OAuthIdentity) -> str:
+        seed = identity.email.split("@", 1)[0]
+        if identity.display_name:
+            display_candidate = re.sub(r"[^a-z0-9]+", "", identity.display_name.lower())
+            if display_candidate:
+                seed = display_candidate
+        normalized = re.sub(r"[^a-z0-9]+", "", seed.lower())[:20]
+        candidate = normalized or "user"
+        if await self.repository.get_user_by_username(candidate) is None:
+            return candidate
+        for index in range(2, 1000):
+            next_candidate = f"{candidate[:16]}{index}"
+            if await self.repository.get_user_by_username(next_candidate) is None:
+                return next_candidate
+        raise HTTPException(status_code=409, detail="Unable to generate a unique username for this OAuth account.")

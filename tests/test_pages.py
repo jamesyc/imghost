@@ -203,6 +203,20 @@ def test_login_page_renders_form_and_register_link(tmp_path, monkeypatch) -> Non
         assert '<script src="/static/js/auth.js" defer></script>' in response.text
 
 
+def test_login_and_register_pages_show_google_button_when_enabled(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        login = client.get("/login")
+        register = client.get("/register")
+        assert '/auth/google/start?mode=login' in login.text
+        assert '/auth/google/start?mode=login' in register.text
+
+
 def test_login_page_normalizes_next_to_internal_paths(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -699,6 +713,31 @@ def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path,
         assert 'name="confirm_new_password"' in page.text
         assert 'id="settings-delete-account-form"' in page.text
         assert 'id="settings-delete-status"' in page.text
+
+
+def test_settings_page_renders_google_oauth_controls_when_enabled(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="oauthsettingsuser", email="oauthsettings@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "oauthsettings@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        page = client.get("/settings")
+        assert page.status_code == 200
+        assert 'id="settings-google-connect"' in page.text
+        assert 'id="settings-google-disconnect"' in page.text
+        assert 'id="settings-oauth-status"' in page.text
 
 
 def test_admin_page_includes_admin_tools_ui(tmp_path, monkeypatch, capsys) -> None:

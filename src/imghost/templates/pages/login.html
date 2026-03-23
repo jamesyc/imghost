@@ -10,9 +10,14 @@
       <input type="text" name="login" placeholder="Username or email" required>
       <input type="password" name="password" placeholder="Password" required>
       <label class="check"><input type="checkbox" name="remember_me" checked> Remember me</label>
-      <p class="form-error hidden" aria-live="polite"></p>
+      <p class="form-error{% if not oauth_error %} hidden{% endif %}" aria-live="polite">{{ oauth_error or "" }}</p>
       <button type="submit">Sign In</button>
     </form>
+    {% if runtime_flags.google_oauth_enabled %}
+    <div class="auth-footer">
+      <a class="button secondary" href="/auth/google/start?mode=login&amp;next={{ next_path|urlencode }}">Continue With Google</a>
+    </div>
+    {% endif %}
     <div class="auth-footer">
     {% if runtime_flags.allow_registration %}
     <p class="hint">Need an account? <a class="inline-link" href="/register">Create one</a>.</p>

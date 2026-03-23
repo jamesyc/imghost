@@ -67,7 +67,10 @@ async def login_page(request: Request) -> HTMLResponse:
         request,
         "pages/login.html",
         "Login",
-        extra_context={"next_path": next_path},
+        extra_context={
+            "next_path": next_path,
+            "oauth_error": (request.query_params.get("oauth_error") or "").strip() or None,
+        },
         script_paths=["js/auth.js"],
     )
 
@@ -82,7 +85,10 @@ async def register_page(request: Request) -> HTMLResponse:
         request,
         "pages/register.html",
         "Register",
-        extra_context={"next_path": next_path},
+        extra_context={
+            "next_path": next_path,
+            "oauth_error": (request.query_params.get("oauth_error") or "").strip() or None,
+        },
         script_paths=["js/auth.js"],
     )
 
@@ -193,7 +199,11 @@ async def settings_page(request: Request) -> HTMLResponse:
         "pages/settings.html",
         "Settings",
         user=user,
-        extra_context={"session_user": session_user},
+        extra_context={
+            "session_user": session_user,
+            "oauth_status": (request.query_params.get("oauth_status") or "").strip() or None,
+            "oauth_tone": (request.query_params.get("oauth_tone") or "").strip() or None,
+        },
         script_paths=["js/settings.js"],
     )
 

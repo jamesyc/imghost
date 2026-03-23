@@ -216,8 +216,6 @@ The test suite uses PostgreSQL and truncates tables between tests. Run it only a
 ## Related Docs
 
 - [STATUS.md](/home/james/imghost/STATUS.md)
-- [IMPLEMENTED_DIFFERENCES.md](/home/james/imghost/IMPLEMENTED_DIFFERENCES.md)
 - [DB.md](/home/james/imghost/DB.md)
 - [COULDIMPROVE.md](/home/james/imghost/COULDIMPROVE.md)
-- [DESIGN.md](/home/james/imghost/DESIGN.md)
-- [DESIGN2.md](/home/james/imghost/DESIGN2.md)
+- [DESIGN.md](/home/james/imghost/plan/DESIGN.md)

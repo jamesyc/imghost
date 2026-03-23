@@ -11,6 +11,7 @@ from .db import Database
 from .events import EventBus, MediaUploaded
 from .models import utcnow
 from .observability import ObservabilityState
+from .oauth import GoogleOAuthProvider, OAuthProvider, OAuthStateManager
 from .processors import build_processor_registry
 from .rate_limits import build_rate_limiter
 from .redis_support import RedisHandle
@@ -40,6 +41,13 @@ class AppState:
         self.session_backend: SessionBackend = build_session_backend(settings, self.redis, self.observability)
         self.rate_limiter = build_rate_limiter(self.runtime_config, self.redis, self.observability)
         self.storage = build_storage_backend(settings)
+        self.oauth_state = OAuthStateManager(settings.secret_key)
+        self.oauth_providers: dict[str, OAuthProvider] = {}
+        if settings.google_oauth_enabled and settings.google_client_id and settings.google_client_secret:
+            self.oauth_providers["google"] = GoogleOAuthProvider(
+                client_id=settings.google_client_id,
+                client_secret=settings.google_client_secret,
+            )
         self.processors = build_processor_registry(
             settings.max_pixel_megapixels * 1_000_000,
             settings.video_thumb_frames,

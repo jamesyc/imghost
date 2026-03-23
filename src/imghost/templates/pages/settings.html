@@ -60,8 +60,9 @@
     <section class="card settings-card">
       <p class="eyebrow">Security</p>
       <h2>Change password</h2>
+      <p class="hint" id="settings-password-hint">Use a local password to sign in directly and to keep a recovery path if you disconnect external providers later.</p>
       <form id="settings-password-form" class="stack settings-form">
-        <input type="password" name="current_password" placeholder="Current password" required>
+        <input type="password" name="current_password" placeholder="Current password">
         <input type="password" name="new_password" placeholder="New password" required minlength="8">
         <input type="password" name="confirm_new_password" placeholder="Confirm new password" required minlength="8">
         <div class="row row-actions">
@@ -69,6 +70,21 @@
         </div>
       </form>
       <p id="settings-password-status" class="inline-status hidden" aria-live="polite"></p>
+    </section>
+
+    <section class="card settings-card">
+      <p class="eyebrow">Connected Accounts</p>
+      <h2>External sign-in</h2>
+      <div id="settings-sso-summary" class="stack settings-form"></div>
+      <div class="row row-actions settings-action-row">
+        {% if runtime_flags.google_oauth_enabled %}
+        <a id="settings-google-connect" class="button secondary" href="/auth/google/start?mode=link&amp;next=%2Fsettings">Connect Google</a>
+        <button id="settings-google-disconnect" type="button" class="secondary hidden">Disconnect Google</button>
+        {% else %}
+        <p class="hint">No external sign-in providers are configured.</p>
+        {% endif %}
+      </div>
+      <p id="settings-oauth-status" class="inline-status{% if not oauth_status %} hidden{% endif %}" {% if oauth_tone %}data-tone="{{ oauth_tone }}"{% endif %} aria-live="polite">{{ oauth_status or "" }}</p>
     </section>
 
     <section class="card settings-card">

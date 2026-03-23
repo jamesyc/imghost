@@ -41,6 +41,9 @@ class Settings:
     task_worker_enabled: bool
     thumbnail_worker_count: int
     promote_username_to_admin: str | None = None
+    google_oauth_enabled: bool = False
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
 
 
 def _env_bool(name: str) -> bool | None:
@@ -99,6 +102,11 @@ def load_settings() -> Settings:
         raise ValueError("TRUSTED_PROXY_CIDRS_ENABLED=true requires TRUSTED_PROXY_CIDRS to be set.")
     for cidr in trusted_proxy_cidrs:
         ip_network(cidr, strict=False)
+    google_oauth_enabled = _env_bool("GOOGLE_OAUTH_ENABLED")
+    if google_oauth_enabled is None:
+        google_oauth_enabled = False
+    google_client_id = (os.getenv("GOOGLE_CLIENT_ID") or "").strip() or None
+    google_client_secret = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip() or None
     return Settings(
         base_url=base_url,
         public_origin_enabled=public_origin_enabled,
@@ -132,4 +140,7 @@ def load_settings() -> Settings:
         task_queue_mode=os.getenv("TASK_QUEUE_MODE", "async").strip().lower(),
         task_worker_enabled=_env_bool("TASK_WORKER_ENABLED") if _env_bool("TASK_WORKER_ENABLED") is not None else True,
         thumbnail_worker_count=max(1, int(os.getenv("THUMBNAIL_WORKER_COUNT", "1"))),
+        google_oauth_enabled=google_oauth_enabled,
+        google_client_id=google_client_id,
+        google_client_secret=google_client_secret,
     )

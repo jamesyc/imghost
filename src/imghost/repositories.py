@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from .db import Database
-from .models import Album, ApiKey, Media, User
+from .models import Album, ApiKey, Media, User, UserSsoLink
 
 
 def _row_to_user(row) -> User:
@@ -30,6 +30,16 @@ def _row_to_api_key(row) -> ApiKey:
         key_hash=row["key_hash"],
         created_at=row["created_at"],
         last_used_at=row["last_used_at"],
+    )
+
+
+def _row_to_user_sso_link(row) -> UserSsoLink:
+    return UserSsoLink(
+        id=str(row["id"]),
+        user_id=str(row["user_id"]),
+        provider=row["provider"],
+        provider_uid=row["provider_uid"],
+        linked_at=row["linked_at"],
     )
 
 
@@ -237,6 +247,65 @@ class PostgresRepository:
                 api_key.last_used_at,
             )
         return _row_to_api_key(row)
+
+    async def create_user_sso_link(self, link: UserSsoLink) -> UserSsoLink:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO user_sso_links (id, user_id, provider, provider_uid, linked_at)
+                VALUES ($1::uuid, $2::uuid, $3, $4, $5)
+                RETURNING id, user_id, provider, provider_uid, linked_at
+                """,
+                link.id,
+                link.user_id,
+                link.provider,
+                link.provider_uid,
+                link.linked_at,
+            )
+        return _row_to_user_sso_link(row)
+
+    async def get_user_sso_link(self, provider: str, provider_uid: str) -> UserSsoLink | None:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, user_id, provider, provider_uid, linked_at
+                FROM user_sso_links
+                WHERE provider = $1 AND provider_uid = $2
+                """,
+                provider,
+                provider_uid,
+            )
+        return _row_to_user_sso_link(row) if row else None
+
+    async def list_user_sso_links(self, user_id: str) -> list[UserSsoLink]:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, user_id, provider, provider_uid, linked_at
+                FROM user_sso_links
+                WHERE user_id = $1::uuid
+                ORDER BY provider, linked_at
+                """,
+                user_id,
+            )
+        return [_row_to_user_sso_link(row) for row in rows]
+
+    async def delete_user_sso_link(self, user_id: str, provider: str) -> UserSsoLink | None:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM user_sso_links
+                WHERE user_id = $1::uuid AND provider = $2
+                RETURNING id, user_id, provider, provider_uid, linked_at
+                """,
+                user_id,
+                provider,
+            )
+        return _row_to_user_sso_link(row) if row else None
 
     async def list_user_media(self, user_id: str) -> list[Media]:
         pool = self.database.require_pool()

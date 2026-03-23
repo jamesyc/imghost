@@ -68,6 +68,26 @@ class ApiKey:
 
 
 @dataclass
+class UserSsoLink:
+    id: str
+    user_id: str
+    provider: str
+    provider_uid: str
+    linked_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["linked_at"] = self.linked_at.isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "UserSsoLink":
+        values = data.copy()
+        values["linked_at"] = datetime.fromisoformat(values["linked_at"])
+        return cls(**values)
+
+
+@dataclass
 class Album:
     id: str
     title: str | None
