@@ -13,6 +13,18 @@ from .db import Database
 ConfigType = Literal["bool", "int"]
 
 
+def _env_bool_default(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean-like value.")
+
+
 @dataclass(frozen=True)
 class RuntimeConfigSpec:
     key: str
@@ -25,7 +37,12 @@ class RuntimeConfigSpec:
 
 
 RUNTIME_CONFIG_SPECS: dict[str, RuntimeConfigSpec] = {
-    "allow_registration": RuntimeConfigSpec("allow_registration", "bool", lambda: True, "LOCK_ALLOW_REGISTRATION"),
+    "allow_registration": RuntimeConfigSpec(
+        "allow_registration",
+        "bool",
+        lambda: _env_bool_default("ALLOW_REGISTRATION", True),
+        "LOCK_ALLOW_REGISTRATION",
+    ),
     "anon_upload_enabled": RuntimeConfigSpec("anon_upload_enabled", "bool", lambda: True, "LOCK_ANON_UPLOAD"),
     "anon_expiry_hours": RuntimeConfigSpec(
         "anon_expiry_hours",

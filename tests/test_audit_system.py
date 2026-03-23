@@ -6,6 +6,7 @@ import os
 
 import asyncpg
 from fastapi.testclient import TestClient
+import pytest
 
 from imghost.app_state import AppState
 from imghost.audit.context import anonymous_actor
@@ -29,6 +30,16 @@ class _RecordingSink:
 class _FailingSink:
     async def write(self, record) -> None:
         raise RuntimeError("sink failed")
+
+
+class _QueryBackend:
+    def __init__(self, rows) -> None:
+        self.rows = rows
+        self.calls = []
+
+    async def query_audit_log(self, **kwargs):
+        self.calls.append(kwargs)
+        return list(self.rows)
 
 
 def test_cli_create_user_and_issue_api_key_are_audited(tmp_path, monkeypatch, capsys) -> None:
@@ -210,6 +221,69 @@ def test_audit_service_continues_when_one_sink_fails(caplog) -> None:
     assert len(recording_sink.records) == 1
     assert recording_sink.records[0].event_type == "sink_test"
     assert any(record.message == "audit_sink_write_failed" for record in caplog.records)
+
+
+def test_audit_service_query_requires_query_backend() -> None:
+    service = AuditService([])
+
+    async def run() -> None:
+        await service.query_audit_log()
+
+    with pytest.raises(RuntimeError, match="Audit query backend is not configured."):
+        asyncio.run(run())
+
+
+def test_audit_service_still_returns_query_results_when_non_query_sink_fails(caplog) -> None:
+    backend = _QueryBackend(rows=["ok-row"])
+    service = AuditService([_FailingSink(), _RecordingSink()], query_backend=backend)
+
+    with caplog.at_level(logging.ERROR):
+        asyncio.run(
+            service.emit_action(
+                event_type="queryable_sink_test",
+                action="sink.queryable",
+                result="success",
+                actor=anonymous_actor(),
+                object=AuditObject(type="test", id="queryable"),
+            )
+        )
+        rows = asyncio.run(service.query_audit_log(limit=5))
+
+    assert rows == ["ok-row"]
+    assert backend.calls == [
+        {
+            "event_type": None,
+            "action": None,
+            "result": None,
+            "source": None,
+            "actor_id": None,
+            "user_id": None,
+            "correlation_id": None,
+            "request_id": None,
+            "after": None,
+            "before": None,
+            "limit": 5,
+            "offset": 0,
+        }
+    ]
+    assert any(record.message == "audit_sink_write_failed" for record in caplog.records)
+
+
+def test_audit_service_swallows_all_sink_failures(caplog) -> None:
+    service = AuditService([_FailingSink(), _FailingSink()])
+
+    with caplog.at_level(logging.ERROR):
+        asyncio.run(
+            service.emit_action(
+                event_type="all_sinks_fail",
+                action="sink.all_fail",
+                result="error",
+                actor=anonymous_actor(),
+                object=AuditObject(type="test", id="all-fail"),
+            )
+        )
+
+    assert len([record for record in caplog.records if record.message == "audit_sink_write_failed"]) == 2
 
 
 def test_audit_query_reads_legacy_metadata_only_rows(tmp_path, monkeypatch, capsys) -> None:

@@ -250,6 +250,33 @@ def test_expired_anonymous_album_mutations_are_denied_even_with_valid_delete_tok
         assert delete_response.status_code == 404
 
 
+def test_admin_can_delete_expired_anonymous_album_for_cleanup(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="expiredcleanupadmin", email="expiredcleanupadmin@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[("file", ("expired.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Expired Cleanup"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+
+        update_album_record(client, album_id, expires_at=utcnow() - timedelta(minutes=1))
+
+        deleted = client.delete(
+            f"/api/v1/album/{album_id}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["album_id"] == album_id
+        assert client.get(f"/api/v1/album/{album_id}").status_code == 404
+
+
 def test_anonymous_token_mutations_are_audited_with_delete_token_actor_kind(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

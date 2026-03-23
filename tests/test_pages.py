@@ -305,6 +305,19 @@ def test_register_page_shows_disabled_state_when_registration_is_off(tmp_path, m
         assert 'href="/login"' in response.text
 
 
+def test_register_page_shows_disabled_state_when_allow_registration_env_is_false(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("ALLOW_REGISTRATION", "false")
+
+    with TestClient(app) as client:
+        response = client.get("/register")
+        assert response.status_code == 200
+        assert "Registration is currently disabled." in response.text
+        assert 'id="register-form"' not in response.text
+        assert 'href="/register"' not in response.text
+
+
 def test_registration_disabled_hides_google_button_on_register_but_keeps_it_on_login(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
@@ -328,6 +341,36 @@ def test_registration_disabled_hides_google_button_on_register_but_keeps_it_on_l
         assert "Continue with Google" in login.text
         assert '/auth/google/start?mode=login' not in register.text
         assert "Continue with Google" not in register.text
+
+
+def test_runtime_registration_override_can_reenable_register_page_after_env_default_false(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("ALLOW_REGISTRATION", "false")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="envruntimeadmin", email="envruntimeadmin@example.com")
+
+    with TestClient(app) as client:
+        before = client.get("/register")
+        assert before.status_code == 200
+        assert "Registration is currently disabled." in before.text
+        assert 'id="register-form"' not in before.text
+
+        updated = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"allow_registration": True},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["allow_registration"]["value"] is True
+        assert updated.json()["allow_registration"]["default"] is False
+        assert updated.json()["allow_registration"]["source"] == "runtime"
+
+        after = client.get("/register")
+        assert after.status_code == 200
+        assert 'id="register-form"' in after.text
+        assert "Registration is currently disabled." not in after.text
+        assert 'href="/register"' in after.text
 
 
 def test_login_and_register_redirect_authenticated_users_to_dashboard(tmp_path, monkeypatch) -> None:

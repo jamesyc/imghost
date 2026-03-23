@@ -239,6 +239,42 @@ def test_admin_browser_session_can_patch_runtime_config_used_by_admin_ui(tmp_pat
         assert fetched_payload["anon_expiry_hours"]["value"] == 72
 
 
+def test_admin_config_reports_allow_registration_locked_to_env_default(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("ALLOW_REGISTRATION", "false")
+    monkeypatch.setenv("LOCK_ALLOW_REGISTRATION", "true")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="lockedregadmin", email="lockedregadmin@example.com")
+
+    with TestClient(app) as client:
+        read = client.get("/api/v1/admin/config", headers={"Authorization": f"Bearer {admin_key}"})
+        assert read.status_code == 200
+        payload = read.json()
+        assert payload["allow_registration"]["value"] is False
+        assert payload["allow_registration"]["default"] is False
+        assert payload["allow_registration"]["locked"] is True
+        assert payload["allow_registration"]["source"] == "locked"
+
+
+def test_admin_config_rejects_allow_registration_update_when_locked_by_env(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("ALLOW_REGISTRATION", "false")
+    monkeypatch.setenv("LOCK_ALLOW_REGISTRATION", "true")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="lockedpatchadmin", email="lockedpatchadmin@example.com")
+
+    with TestClient(app) as client:
+        update = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"allow_registration": True},
+        )
+        assert update.status_code == 403
+        assert update.json()["detail"] == "allow_registration is locked by environment configuration."
+
+
 def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

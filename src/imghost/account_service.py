@@ -523,6 +523,8 @@ class AccountService:
         correlation_id: str | None = None,
         source: str = "web",
     ) -> tuple[User, str]:
+        if not identity.provider_uid.strip() or not identity.email.strip():
+            raise HTTPException(status_code=403, detail="Google sign-in could not be verified.")
         if not identity.email_verified:
             raise HTTPException(status_code=403, detail="Your Google account must have a verified email address.")
 

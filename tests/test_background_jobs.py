@@ -56,6 +56,43 @@ def test_async_thumbnail_worker_recovers_pending_items_on_startup(tmp_path, monk
         assert album["items"][0]["thumb_status"] == "done"
 
 
+def test_async_thumbnail_worker_marks_processing_item_failed_when_source_missing_on_startup(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        media_id = payload["media_id"]
+        wait_for_thumbnail(client, media_id)
+        update_media_record(
+            client,
+            media_id,
+            thumb_status="processing",
+            thumb_key=None,
+            thumb_size=None,
+            thumb_is_orig=False,
+        )
+
+    original_path = next((tmp_path / "originals" / "anon").glob(f"{media_id}.*"))
+    original_path.unlink()
+    for existing in (tmp_path / "thumbnails").glob(f"{media_id}.*"):
+        existing.unlink()
+
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+    with TestClient(app) as client:
+        wait_for_failed_thumbnail(client, media_id)
+        media = client.portal.call(client.app.state.imghost.repository.get_media, media_id)
+        assert media is not None
+        assert media.thumb_status == "failed"
+        assert client.get(f"/t/{media_id}.jpg").status_code == 404
+
+
 def test_failed_thumbnail_can_be_reenqueued_for_recovery(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

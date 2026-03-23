@@ -512,6 +512,44 @@ def test_google_oauth_unverified_email_is_rejected(tmp_path, monkeypatch) -> Non
         assert "verified+email+address" in response.headers["location"]
 
 
+def test_google_oauth_empty_provider_uid_is_rejected(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="", email="emptyuid@example.com")),
+        )
+        started = client.get("/auth/google/start", follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert "oauth_error=Google+sign-in+could+not+be+verified." in response.headers["location"]
+
+
+def test_google_oauth_empty_email_is_rejected(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="empty-email", email="")),
+        )
+        started = client.get("/auth/google/start", follow_redirects=False)
+        state = _oauth_state_from_redirect(started)
+        response = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert "oauth_error=Google+sign-in+could+not+be+verified." in response.headers["location"]
+
+
 def test_google_oauth_existing_link_still_signs_in_when_registration_disabled(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

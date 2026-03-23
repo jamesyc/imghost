@@ -61,3 +61,13 @@ def test_load_settings_parses_session_redis_fail_closed(monkeypatch, tmp_path) -
 
     settings = load_settings()
     assert settings.session_redis_fail_closed is True
+
+
+def test_runtime_config_allow_registration_defaults_from_env(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("ALLOW_REGISTRATION", "false")
+
+    with TestClient(app) as client:
+        value = client.portal.call(client.app.state.imghost.runtime_config.get_value, "allow_registration")
+        assert value is False

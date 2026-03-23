@@ -806,3 +806,21 @@ def test_registration_respects_allow_registration_runtime_config(tmp_path, monke
         )
         assert response.status_code == 403
         assert response.json()["detail"] == "Registration is disabled."
+
+
+def test_registration_respects_allow_registration_env_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("ALLOW_REGISTRATION", "false")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "blockedenv",
+                "email": "blockedenv@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Registration is disabled."
