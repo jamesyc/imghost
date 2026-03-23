@@ -23,6 +23,7 @@ from imghost.processors import (
     VIDEO_PROBE_TIMEOUT_SECS,
     VIDEO_REMUX_TIMEOUT_SECS,
     VIDEO_SINGLE_FRAME_TIMEOUT_SECS,
+    build_processor_registry,
     MediaMetadata,
     ThumbnailResult,
     VideoProcessingError,
@@ -319,6 +320,21 @@ def test_gif_processor_sampling_keeps_first_and_last_frame() -> None:
     assert indexes[0] == 0
     assert indexes[-1] == ANIMATED_THUMB_MAX_SOURCE_FRAMES + 24
     assert len(indexes) == ANIMATED_THUMB_MAX_SOURCE_FRAMES
+
+
+def test_build_processor_registry_keeps_expected_format_mapping() -> None:
+    registry = build_processor_registry(50_000_000, video_thumb_frames=6)
+
+    assert registry.get_processor("jpg").__class__.__name__ == "JpegProcessor"
+    assert registry.get_processor("jpeg").__class__.__name__ == "JpegProcessor"
+    assert registry.get_processor("png").__class__.__name__ == "PngProcessor"
+    assert registry.get_processor("gif").__class__.__name__ == "GifProcessor"
+    assert registry.get_processor("webp").__class__.__name__ == "WebpProcessor"
+    assert registry.get_processor("bmp").__class__.__name__ == "BmpProcessor"
+    assert registry.get_processor("svg").__class__.__name__ == "SvgProcessor"
+    assert registry.get_processor("mp4").__class__.__name__ == "Mp4Processor"
+    assert registry.get_processor("mov").__class__.__name__ == "MovProcessor"
+    assert registry.get_processor("webm").__class__.__name__ == "WebmProcessor"
 
 
 def test_mp4_processor_maps_ffprobe_metadata(monkeypatch) -> None:

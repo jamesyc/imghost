@@ -1,0 +1,89 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 14% 18%, var(--canvas-a), transparent 34%),
+    radial-gradient(circle at 82% 12%, var(--canvas-b), transparent 28%),
+    radial-gradient(circle at 72% 76%, var(--canvas-c), transparent 36%),
+    radial-gradient(circle at 26% 86%, var(--canvas-d), transparent 30%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-alt) 100%);
+  background-attachment: fixed;
+}
+
+body {
+  position: relative;
+  min-height: 100vh;
+  margin: 0;
+  font-family: "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--fg);
+  background: transparent;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: auto;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(18px);
+}
+
+body::before {
+  top: 5vh;
+  left: -8vw;
+  width: 34vw;
+  height: 34vw;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.16), transparent 66%);
+}
+
+body::after {
+  right: -12vw;
+  bottom: -10vh;
+  width: 42vw;
+  height: 42vw;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.08), transparent 72%);
+}
+
+.page-shell {
+  position: relative;
+  z-index: 1;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--page-padding-y) var(--page-padding-x) 72px;
+}
+
+.stack {
+  display: grid;
+  gap: 20px;
+}
+
+.grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.row > * {
+  flex: 1 1 180px;
+}
+
+.row-actions > * {
+  flex: 0 0 auto;
+}
+
+.hidden {
+  display: none !important;
+}

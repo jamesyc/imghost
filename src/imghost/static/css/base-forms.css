@@ -1,0 +1,78 @@
+h1 {
+  margin: 0 0 14px;
+  font-size: clamp(2.4rem, 4vw, 4.6rem);
+  line-height: 0.96;
+  letter-spacing: -0.05em;
+}
+
+h2,
+h3 {
+  margin: 0 0 12px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: clamp(1.4rem, 2vw, 2.2rem);
+}
+
+h3 {
+  font-size: 1.2rem;
+}
+
+p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="datetime-local"],
+input[type="number"],
+input[type="file"],
+textarea,
+select {
+  width: 100%;
+  padding: 14px 16px;
+  color: var(--fg);
+  background: var(--card-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-input);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.95rem;
+  color: var(--text-hint);
+}
+
+.check input {
+  width: auto;
+}

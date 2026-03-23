@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from imghost.config import Settings
 from imghost.events import ApiKeyIssued, UserAdminStatusChanged, UserLimitsChanged, UserPasswordChanged
-from imghost.models import Album, ApiKey, Media, User, utcnow
+from imghost.models import Album, ApiKey, Media, User, UserSsoLink, utcnow
 from imghost.observability import ObservabilityState
 from imghost.processors import MediaMetadata, ThumbnailResult
 from imghost.storage import StorageStream
@@ -26,6 +26,9 @@ class DummyRepository:
         self.api_key: ApiKey | None = None
         self.album: Album | None = None
         self.album_media: list[object] = []
+        self.user_media: list[Media] = []
+        self.user_albums: list[Album] = []
+        self.user_sso_links: list[UserSsoLink] = []
         self.media: Media | None = None
         self.update_media_calls = 0
         self.fail_update_media_on_call: int | None = None
@@ -69,6 +72,21 @@ class DummyRepository:
         if self.api_key and self.api_key.user_id == user_id:
             return self.api_key
         return None
+
+    async def list_user_media(self, user_id: str) -> list[Media]:
+        if self.user and self.user.id == user_id:
+            return list(self.user_media)
+        return []
+
+    async def list_user_albums(self, user_id: str) -> list[Album]:
+        if self.user and self.user.id == user_id:
+            return list(self.user_albums)
+        return []
+
+    async def list_user_sso_links(self, user_id: str) -> list[UserSsoLink]:
+        if self.user and self.user.id == user_id:
+            return list(self.user_sso_links)
+        return []
 
     async def upsert_api_key(self, api_key: ApiKey) -> ApiKey:
         self.api_key = api_key
@@ -416,6 +434,58 @@ def test_issue_api_key_emits_event_with_replaced_existing_flag() -> None:
     assert api_event.user_id == user.id
     assert api_event.actor_id == user.id
     assert api_event.replaced_existing is True
+
+
+def test_get_current_user_summary_includes_password_api_key_and_sso_metadata() -> None:
+    user = make_user(password_hash=bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8"))
+    service, repository, _, _ = make_service(user)
+    repository.user_media = [
+        make_media(media_type="image", format="png", storage_key="originals/user-1/image.png"),
+    ]
+    repository.user_media[0].thumb_key = "thumbnails/media-1.jpg"
+    repository.user_media[0].thumb_size = 7
+    repository.user_albums = [
+        Album(
+            id="album-1",
+            title="Album",
+            user_id=user.id,
+            cover_media_id=None,
+            delete_token=None,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+            expires_at=None,
+        )
+    ]
+    repository.api_key = ApiKey(
+        id=str(uuid4()),
+        user_id=user.id,
+        key_hash="existing-key-hash",
+        created_at=utcnow(),
+        last_used_at=None,
+    )
+    repository.user_sso_links = [
+        UserSsoLink(
+            id=str(uuid4()),
+            user_id=user.id,
+            provider="google",
+            provider_uid="google-123",
+            linked_at=utcnow(),
+        )
+    ]
+
+    summary = asyncio.run(service.get_current_user_summary(user))
+
+    assert summary["has_password"] is True
+    assert summary["has_api_key"] is True
+    assert summary["album_count"] == 1
+    assert summary["media_count"] == 1
+    assert summary["storage_used_bytes"] == 130
+    assert summary["sso_providers"] == [
+        {
+            "provider": "google",
+            "linked_at": repository.user_sso_links[0].linked_at.isoformat(),
+        }
+    ]
 
 
 def test_update_user_emits_admin_status_and_limits_events() -> None:

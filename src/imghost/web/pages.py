@@ -151,7 +151,7 @@ async def album_detail_page(request: Request, album_id: str) -> HTMLResponse:
                 delete_token=None,
             )
         },
-        script_paths=["js/upload-box.js", "js/album-detail.js"],
+        script_paths=["js/upload-box.js", "js/album-detail-core.js", "js/album-detail-render.js", "js/album-detail-actions.js", "js/album-detail.js"],
     )
 
 
@@ -182,7 +182,7 @@ async def manage_album_page(request: Request, album_id: str, token: str | None =
                 delete_token=active_token,
             )
         },
-        script_paths=["js/upload-box.js", "js/album-detail.js"],
+        script_paths=["js/upload-box.js", "js/album-detail-core.js", "js/album-detail-render.js", "js/album-detail-actions.js", "js/album-detail.js"],
     )
 
 

@@ -54,9 +54,9 @@ def test_static_base_css_is_served(tmp_path, monkeypatch) -> None:
         response = client.get("/static/css/base.css")
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/css")
-        assert ":root {" in response.text
-        assert ".site-nav {" in response.text
-        assert ".auth-layout {" in response.text
+        assert '@import url("/static/css/base-tokens.css");' in response.text
+        assert '@import url("/static/css/base-components.css");' in response.text
+        assert '@import url("/static/css/base-responsive.css");' in response.text
 
 
 def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> None:
@@ -497,6 +497,9 @@ def test_private_album_page_renders_owner_workspace_shell(tmp_path, monkeypatch,
         assert 'id="album-detail-add-images-button"' in page.text
         assert 'id="album-upload-form"' in page.text
         assert '<script src="/static/js/upload-box.js" defer></script>' in page.text
+        assert '<script src="/static/js/album-detail-core.js" defer></script>' in page.text
+        assert '<script src="/static/js/album-detail-render.js" defer></script>' in page.text
+        assert '<script src="/static/js/album-detail-actions.js" defer></script>' in page.text
         assert '<script src="/static/js/album-detail.js" defer></script>' in page.text
 
 
@@ -605,6 +608,9 @@ def test_anonymous_manage_page_reuses_album_workspace_shell(tmp_path, monkeypatc
         assert 'id="album-detail-add-images-button"' in page.text
         assert 'id="album-upload-form"' in page.text
         assert '<script src="/static/js/upload-box.js" defer></script>' in page.text
+        assert '<script src="/static/js/album-detail-core.js" defer></script>' in page.text
+        assert '<script src="/static/js/album-detail-render.js" defer></script>' in page.text
+        assert '<script src="/static/js/album-detail-actions.js" defer></script>' in page.text
         assert '<script src="/static/js/album-detail.js" defer></script>' in page.text
 
 
@@ -713,7 +719,6 @@ def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path,
         assert 'name="confirm_new_password"' in page.text
         assert 'id="settings-delete-account-form"' in page.text
         assert 'id="settings-delete-status"' in page.text
-
 
 def test_settings_page_renders_google_oauth_controls_when_enabled(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))

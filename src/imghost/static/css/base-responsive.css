@@ -1,0 +1,110 @@
+@media (max-width: 900px) {
+  .page-shell {
+    padding-inline: 18px;
+  }
+
+  .site-nav {
+    padding: 12px;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 13vw, 3.2rem);
+  }
+
+  .upload-card,
+  .card,
+  .auth-card {
+    padding: 22px;
+  }
+
+  .admin-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-overview-full {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .nav-links,
+  .nav-actions,
+  .row {
+    width: 100%;
+  }
+
+  .nav-actions {
+    justify-content: flex-end;
+  }
+
+  .upload-card-header {
+    display: grid;
+  }
+
+  .admin-list-row-meta {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .upload-stage {
+    min-height: 250px;
+    padding: 18px 0 20px;
+  }
+
+  .upload-stage-frame {
+    padding: 24px 18px;
+    border-width: 4px;
+  }
+
+  .upload-actions-panel {
+    padding-top: 24px;
+  }
+
+  .upload-picker {
+    width: 100%;
+    justify-content: center;
+    font-size: 1.08rem;
+  }
+
+  .upload-or::before,
+  .upload-or::after {
+    width: 46px;
+  }
+
+  .upload-file-summary {
+    min-width: 100%;
+  }
+
+  .album-workspace-header,
+  .albums-section-header {
+    align-items: stretch;
+  }
+
+  .dashboard-recent-album-card {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-recent-album-thumb {
+    min-height: 180px;
+  }
+
+  .hero-notes {
+    grid-template-columns: 1fr;
+  }
+
+  .split-link-control {
+    min-width: 0;
+    width: 100%;
+    display: flex;
+  }
+
+  .split-link-action {
+    width: 100%;
+    border-right: 0;
+    border-radius: var(--radius-pill);
+  }
+
+  input.split-link-value {
+    display: none;
+  }
+}
