@@ -163,6 +163,11 @@
   background: rgba(255, 255, 255, 0.16);
 }
 
+.admin-runtime-card h3 {
+  min-height: 2.2em;
+  margin: 0;
+}
+
 .albums-empty-state {
   gap: 8px;
   padding: 24px;
@@ -201,6 +206,7 @@
   background: rgba(255, 255, 255, 0.24);
   font-size: 0.85rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .admin-status-pill[data-tone="ok"] {
