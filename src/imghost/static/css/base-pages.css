@@ -29,6 +29,10 @@
   margin-top: 18px;
 }
 
+.dashboard-recent-footer {
+  margin-top: 18px;
+}
+
 .admin-hero,
 .dashboard-hero,
 .albums-hero,
@@ -68,6 +72,7 @@
 .admin-page-grid,
 .settings-grid {
   gap: 24px;
+  align-items: start;
 }
 
 .admin-page-stack {
@@ -227,10 +232,10 @@
 }
 
 .settings-action-row {
-  align-items: stretch;
+  align-items: center;
 }
 
-.settings-action-row > * {
+.settings-action-row-fill > * {
   flex: 1 1 0;
 }
 

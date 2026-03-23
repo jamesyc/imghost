@@ -217,9 +217,4 @@ if (settingsBootstrapNode) {
   });
 
   renderUser();
-  if (state.user && !state.user.has_api_key) {
-    rotateAndRevealApiKey("No API key existed, so one was issued automatically.").catch((error) => {
-      setApiWarning(error.message, "error");
-    });
-  }
 }

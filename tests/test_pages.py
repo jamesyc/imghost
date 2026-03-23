@@ -720,6 +720,45 @@ def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path,
         assert 'id="settings-delete-account-form"' in page.text
         assert 'id="settings-delete-status"' in page.text
 
+
+def test_settings_page_does_not_issue_api_key_just_by_loading(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        user = create_raw_user(
+            client,
+            username="nokeysettingsuser",
+            email="nokeysettings@example.com",
+        )
+        set_user_password(client, user.id, "open-sesame")
+        assert client.portal.call(client.app.state.imghost.repository.get_api_key_for_user, user.id) is None
+
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "nokeysettings@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        page = client.get("/settings")
+        assert page.status_code == 200
+        assert "Settings" in page.text
+        assert client.portal.call(client.app.state.imghost.repository.get_api_key_for_user, user.id) is None
+
+
+def test_static_settings_js_does_not_auto_issue_api_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get("/static/js/settings.js")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(("text/javascript", "application/javascript"))
+        assert "No API key existed, so one was issued automatically." not in response.text
+        assert "if (state.user && !state.user.has_api_key)" not in response.text
+
+
 def test_settings_page_renders_google_oauth_controls_when_enabled(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
