@@ -203,6 +203,20 @@ def test_login_page_renders_form_and_register_link(tmp_path, monkeypatch) -> Non
         assert '<script src="/static/js/auth.js" defer></script>' in response.text
 
 
+def test_admin_page_uses_full_width_storage_stats_panel(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="layoutadmin", email="layoutadmin@example.com")
+
+    with TestClient(app) as client:
+        response = client.get("/admin", headers={"Authorization": f"Bearer {admin_key}"})
+        assert response.status_code == 200
+        assert '<p class="eyebrow">Storage stats</p>' in response.text
+        assert '<section class="card admin-card admin-overview-full">' in response.text
+        assert 'Global usage' in response.text
+
+
 def test_login_and_register_pages_show_google_button_when_enabled(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
