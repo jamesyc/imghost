@@ -142,6 +142,7 @@ def test_app_state_scheduler_role_skips_worker_lifecycle_and_recovery(tmp_path, 
     assert state.task_worker_queues == ()
     assert state._should_run_thumbnail_startup_recovery() is False
     assert state._should_emit_worker_lifecycle_events() is False
+    assert state._should_run_scheduler_loop() is True
 
 
 def test_app_state_runtime_status_reports_service_shape_for_worker_role(tmp_path, monkeypatch) -> None:
@@ -163,3 +164,28 @@ def test_app_state_runtime_status_reports_service_shape_for_worker_role(tmp_path
     assert payload["services"]["worker"]["enabled_in_this_process"] is True
     assert payload["services"]["worker"]["queues"] == ["thumbnails", "cleanup"]
     assert payload["services"]["scheduler"]["enabled_in_this_process"] is False
+
+
+def test_app_state_runtime_status_reports_scheduler_service_shape(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("SCHEDULER_POLL_SECONDS", "15")
+    monkeypatch.setenv("CLEANUP_INTERVAL_SECONDS", "600")
+
+    async def scenario() -> dict[str, object]:
+        state = AppState(load_settings(), process_role="scheduler")
+        await state.database.connect()
+        try:
+            return await state.runtime_status()
+        finally:
+            await state.database.close()
+
+    payload = asyncio.run(scenario())
+
+    assert payload["process_role"] == "scheduler"
+    assert payload["services"]["scheduler"]["enabled_in_this_process"] is True
+    assert payload["services"]["scheduler"]["configured"] is True
+    assert payload["services"]["scheduler"]["poll_seconds"] == 15
+    assert payload["services"]["scheduler"]["jobs"]["prune_expired_albums"]["interval_seconds"] == 600
+    assert payload["services"]["scheduler"]["jobs"]["prune_expired_albums"]["queue"] == "cleanup"

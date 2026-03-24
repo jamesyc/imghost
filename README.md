@@ -230,9 +230,11 @@ Important behavior:
   - `python -m imghost run-worker-thumbnails`
   - `python -m imghost run-worker-cleanup`
   - `python -m imghost run-worker-default`
+- The scheduler command is `python -m imghost run-scheduler`.
 - `python -m imghost run-worker` remains available as a generic worker command and uses `TASK_WORKER_QUEUES`.
 - The web app process runs as the `app` role and does not perform startup thumbnail recovery.
 - Startup thumbnail recovery belongs to the thumbnail worker role.
+- Scheduled cleanup enqueueing belongs to the scheduler role.
 - If Redis is unavailable at runtime:
   - sessions degrade to signed-cookie validation
   - upload rate limiting falls back to in-process memory
@@ -243,7 +245,7 @@ Important behavior:
 - `/health/live` returns a simple liveness response for process-level checks.
 - `/health/ready` returns a low-noise readiness snapshot covering database, storage, Redis reachability, subsystem modes, worker state, and task queue status.
 - `/metrics` returns Prometheus text-format telemetry metrics.
-- `/api/v1/admin/runtime-status` returns a richer admin-only operational snapshot including process role, service state, trusted public origins, queue status, and Redis subsystem degradation status.
+- `/api/v1/admin/runtime-status` returns a richer admin-only operational snapshot including process role, worker and scheduler state, trusted public origins, queue status, and Redis subsystem degradation status.
 - Redis observability is transition-oriented rather than per-operation noisy, so degraded and recovered states are logged while repeated fallback behavior is suppressed.
 
 ### Metrics

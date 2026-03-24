@@ -17,6 +17,7 @@ WORKER_COMMAND_QUEUES: dict[str, tuple[str, ...] | None] = {
     "run-worker-cleanup": ("cleanup",),
     "run-worker-default": ("default",),
 }
+SCHEDULER_COMMANDS = {"run-scheduler"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("run-worker-thumbnails")
     subparsers.add_parser("run-worker-cleanup")
     subparsers.add_parser("run-worker-default")
+    subparsers.add_parser("run-scheduler")
 
     create_user = subparsers.add_parser("create-user")
     create_user.add_argument("--username", required=True)
@@ -73,6 +75,7 @@ def _requires_cli_confirmation(command: str, *, dry_run: bool = False) -> bool:
         "init-storage",
         "retry-thumbnails",
         *WORKER_COMMAND_QUEUES.keys(),
+        *SCHEDULER_COMMANDS,
     }
 
 
@@ -88,6 +91,8 @@ def _runs_worker_for_command(command: str) -> bool:
 
 
 def _process_role_for_command(command: str) -> str:
+    if command in SCHEDULER_COMMANDS:
+        return "scheduler"
     if _runs_worker_for_command(command):
         return "worker"
     return "app"
@@ -142,7 +147,11 @@ async def run_cli(argv: list[str] | None = None) -> int:
         run_task_worker=_runs_worker_for_command(args.command),
         task_worker_queues=_worker_queues_for_command(args.command, configured_queues=settings.task_worker_queues),
     )
-    await state.database.connect()
+    service_command = (args.command in WORKER_COMMAND_QUEUES and args.command != "retry-thumbnails") or (
+        args.command in SCHEDULER_COMMANDS
+    )
+    if not service_command:
+        await state.database.connect()
 
     try:
         if args.command == "prune":
@@ -210,13 +219,32 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 },
                 argv=command_argv,
             )
-            await state.redis.ensure_startup_ready()
-            await state.tasks.start()
+            await state.start()
             try:
                 while True:
                     await asyncio.sleep(3600)
             finally:
-                await state.tasks.stop()
+                await state.stop()
+
+        if args.command in SCHEDULER_COMMANDS:
+            await state.telemetry.record_cli_command(
+                action="cli.run_scheduler.start",
+                object_type="cli_command",
+                object_id=args.command,
+                metadata={
+                    "command": args.command,
+                    "scheduler_poll_seconds": state.settings.scheduler_poll_seconds,
+                    "cleanup_interval_seconds": state.settings.cleanup_interval_seconds,
+                    "correlation_id": command_correlation_id,
+                },
+                argv=command_argv,
+            )
+            await state.start()
+            try:
+                while True:
+                    await asyncio.sleep(3600)
+            finally:
+                await state.stop()
 
         if args.command == "create-user":
             user = User(

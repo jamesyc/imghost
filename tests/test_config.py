@@ -81,6 +81,32 @@ def test_load_settings_parses_task_worker_queues(monkeypatch, tmp_path) -> None:
     assert settings.task_worker_queues == ("thumbnails", "cleanup", "default")
 
 
+def test_load_settings_defaults_scheduler_settings(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.delenv("SCHEDULER_ENABLED", raising=False)
+    monkeypatch.delenv("SCHEDULER_POLL_SECONDS", raising=False)
+    monkeypatch.delenv("CLEANUP_INTERVAL_SECONDS", raising=False)
+
+    settings = load_settings()
+    assert settings.scheduler_enabled is False
+    assert settings.scheduler_poll_seconds == 30
+    assert settings.cleanup_interval_seconds == 900
+
+
+def test_load_settings_parses_scheduler_settings(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("SCHEDULER_POLL_SECONDS", "15")
+    monkeypatch.setenv("CLEANUP_INTERVAL_SECONDS", "600")
+
+    settings = load_settings()
+    assert settings.scheduler_enabled is True
+    assert settings.scheduler_poll_seconds == 15
+    assert settings.cleanup_interval_seconds == 600
+
+
 def test_runtime_config_allow_registration_defaults_from_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://fallback.example.com")

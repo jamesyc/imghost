@@ -41,6 +41,7 @@ def test_worker_parser_accepts_split_worker_commands() -> None:
     assert parser.parse_args(["run-worker-thumbnails"]).command == "run-worker-thumbnails"
     assert parser.parse_args(["run-worker-cleanup"]).command == "run-worker-cleanup"
     assert parser.parse_args(["run-worker-default"]).command == "run-worker-default"
+    assert parser.parse_args(["run-scheduler"]).command == "run-scheduler"
 
 
 def test_worker_command_queue_selection_uses_split_commands_and_default_config() -> None:
@@ -63,12 +64,14 @@ def test_worker_command_detection_and_confirmation_cover_split_commands() -> Non
     assert _requires_cli_confirmation("run-worker-thumbnails") is True
     assert _requires_cli_confirmation("run-worker-cleanup") is True
     assert _requires_cli_confirmation("run-worker-default") is True
+    assert _requires_cli_confirmation("run-scheduler") is True
 
 
 def test_process_role_selection_matches_command_type() -> None:
     assert _process_role_for_command("run-worker") == "worker"
     assert _process_role_for_command("run-worker-thumbnails") == "worker"
     assert _process_role_for_command("retry-thumbnails") == "worker"
+    assert _process_role_for_command("run-scheduler") == "scheduler"
     assert _process_role_for_command("prune") == "app"
 
 

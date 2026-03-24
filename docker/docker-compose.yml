@@ -107,6 +107,32 @@ services:
       garage-init:
         condition: service_completed_successfully
 
+  scheduler:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "imghost", "run-scheduler"]
+    env_file:
+      - ./.env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-imghost}:${POSTGRES_PASSWORD:-imghost}@${POSTGRES_HOST:-postgres}:${POSTGRES_CONNECT_PORT:-5432}/${POSTGRES_DB:-imghost}
+      IMGHOST_DATA_DIR: ${IMGHOST_DATA_DIR:-/app/data}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://garage:3900}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${S3_REGION:-garage}
+      SCHEDULER_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped

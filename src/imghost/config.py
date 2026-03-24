@@ -41,6 +41,9 @@ class Settings:
     task_worker_enabled: bool
     thumbnail_worker_count: int
     task_worker_queues: tuple[str, ...] = ("default", "thumbnails")
+    scheduler_enabled: bool = False
+    scheduler_poll_seconds: int = 30
+    cleanup_interval_seconds: int = 900
     promote_username_to_admin: str | None = None
     google_oauth_enabled: bool = False
     google_client_id: str | None = None
@@ -154,6 +157,9 @@ def load_settings() -> Settings:
         task_worker_enabled=_env_bool("TASK_WORKER_ENABLED") if _env_bool("TASK_WORKER_ENABLED") is not None else True,
         task_worker_queues=_dedupe_strings(_env_csv("TASK_WORKER_QUEUES")) or ("default", "thumbnails"),
         thumbnail_worker_count=max(1, int(os.getenv("THUMBNAIL_WORKER_COUNT", "1"))),
+        scheduler_enabled=_env_bool("SCHEDULER_ENABLED") or False,
+        scheduler_poll_seconds=max(1, int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))),
+        cleanup_interval_seconds=max(1, int(os.getenv("CLEANUP_INTERVAL_SECONDS", "900"))),
         google_oauth_enabled=google_oauth_enabled,
         google_client_id=google_client_id,
         google_client_secret=google_client_secret,

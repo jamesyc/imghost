@@ -14,6 +14,7 @@ from .rate_limits import build_rate_limiter
 from .redis_support import RedisHandle
 from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
+from .scheduler import SchedulerService
 from .service import UploadService
 from .sessions import SessionBackend, build_session_backend
 from .storage import build_storage_backend
@@ -74,6 +75,11 @@ class AppState:
             self.tasks,
             uploads=self.uploads,
             recover_thumbnails=self.recover_thumbnails,
+        )
+        self.scheduler = SchedulerService(
+            self.tasks,
+            poll_seconds=self.settings.scheduler_poll_seconds,
+            cleanup_interval_seconds=self.settings.cleanup_interval_seconds,
         )
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
         self.bootstrap_admin_status: dict[str, Any] = {
@@ -164,11 +170,15 @@ class AppState:
             await self.tasks.start()
 
     async def _start_role(self) -> int:
+        if self._should_run_scheduler_loop():
+            await self.scheduler.start()
         if self._should_run_thumbnail_startup_recovery():
             return await self.recover_thumbnails(include_failed=False)
         return 0
 
     async def _stop_role(self) -> None:
+        if self._should_run_scheduler_loop():
+            await self.scheduler.stop()
         if self._should_start_task_runtime():
             await self.tasks.stop()
 
@@ -184,6 +194,9 @@ class AppState:
 
     def _should_emit_worker_lifecycle_events(self) -> bool:
         return self.process_role == "worker"
+
+    def _should_run_scheduler_loop(self) -> bool:
+        return self.process_role == "scheduler"
 
     async def _enqueue_thumbnail(self, event: MediaUploaded) -> None:
         await self.tasks.enqueue(
@@ -278,6 +291,8 @@ class AppState:
                 },
                 "scheduler": {
                     "enabled_in_this_process": self.process_role == "scheduler",
+                    "configured": self.settings.scheduler_enabled,
+                    **self.scheduler.runtime_status(),
                 },
             },
             "tasks": {

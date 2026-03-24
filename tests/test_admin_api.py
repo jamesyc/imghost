@@ -48,6 +48,8 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert payload["services"]["worker"]["enabled_in_this_process"] is False
         assert payload["services"]["worker"]["queues"] == []
         assert payload["services"]["scheduler"]["enabled_in_this_process"] is False
+        assert payload["services"]["scheduler"]["poll_seconds"] == 30
+        assert payload["services"]["scheduler"]["jobs"]["prune_expired_albums"]["queue"] == "cleanup"
         assert payload["public_origin_enabled"] is True
         assert payload["public_origin_mode"] == "strict"
         assert "trusted_public_origins" in payload

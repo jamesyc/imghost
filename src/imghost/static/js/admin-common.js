@@ -79,6 +79,9 @@ window.renderAdminRuntimeCards = (payload) => {
     .join(" · ");
   const workerQueueList = (workerService.queues || []).join(", ");
   const activeRoleLabel = payload.process_role || "unknown";
+  const schedulerJobs = Object.entries(schedulerService.jobs || {})
+    .map(([name, job]) => `${name}: ${window.adminFormatNumber(job?.interval_seconds || 0)}s`)
+    .join(" · ");
 
   const entries = [
     {
@@ -124,6 +127,16 @@ window.renderAdminRuntimeCards = (payload) => {
       hint: workerService.last_task_failure
         ? `Queues ${window.escapeAdminHtml(workerQueueList || "none")} · Last failure: ${window.escapeAdminHtml(JSON.stringify(workerService.last_task_failure))}`
         : `Queues ${window.escapeAdminHtml(workerQueueList || "none")} · Last started ${window.adminFormatDateTime(workerService.last_started_at)}`,
+    },
+    {
+      label: "Scheduler",
+      status: schedulerService.enabled_in_this_process ? "Scheduler role active" : "Disabled",
+      tone: schedulerService.enabled_in_this_process
+        ? (schedulerService.last_enqueue_error ? "warn" : "ok")
+        : "neutral",
+      hint: schedulerService.enabled_in_this_process
+        ? `Poll ${window.adminFormatNumber(schedulerService.poll_seconds || 0)}s${schedulerJobs ? ` · ${window.escapeAdminHtml(schedulerJobs)}` : ""}`
+        : "No scheduler loop active in this process.",
     },
     {
       label: "Public origin mode",
@@ -271,6 +284,21 @@ window.renderAdminRuntimeDetails = (payload) => {
           <p class="hint">
             last task failure at=${window.escapeAdminHtml(window.adminFormatDateTime(workerService.last_task_failure_at))} ·
             last task failure=${window.escapeAdminHtml(workerService.last_task_failure ? JSON.stringify(workerService.last_task_failure) : "Not recorded")}
+          </p>
+        </div>
+      </article>
+      <article class="admin-list-row">
+        <div>
+          <strong>Scheduler</strong>
+          <p class="hint">
+            enabled in this process=${window.escapeAdminHtml(String(Boolean(schedulerService.enabled_in_this_process)))} ·
+            configured=${window.escapeAdminHtml(String(Boolean(schedulerService.configured)))} ·
+            poll seconds=${window.escapeAdminHtml(window.adminFormatNumber(schedulerService.poll_seconds || 0))}
+          </p>
+          <p class="hint">
+            last tick=${window.escapeAdminHtml(window.adminFormatDateTime(schedulerService.last_tick_at))} ·
+            last enqueue=${window.escapeAdminHtml(window.adminFormatDateTime(schedulerService.last_enqueue_at))} ·
+            last enqueue error=${window.escapeAdminHtml(schedulerService.last_enqueue_error || "Not recorded")}
           </p>
         </div>
       </article>
