@@ -21,6 +21,10 @@
     grid-template-columns: 1fr;
   }
 
+  .admin-runtime-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .admin-overview-full {
     grid-column: auto;
   }
@@ -31,6 +35,10 @@
   .nav-actions,
   .row {
     width: 100%;
+  }
+
+  .admin-runtime-grid {
+    grid-template-columns: 1fr;
   }
 
   .nav-actions {

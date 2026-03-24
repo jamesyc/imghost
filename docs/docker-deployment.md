@@ -1,36 +1,52 @@
 # Docker Deployment
 
-The Docker stack is defined in [`docker/docker-compose.yml`](/home/james/imghost/docker/docker-compose.yml).
+There are two Docker stacks:
+
+- beginner: [`docker/docker-compose-beginner.yml`](/home/james/imghost/docker/docker-compose-beginner.yml)
+- advanced: [`docker/docker-compose.yml`](/home/james/imghost/docker/docker-compose.yml)
 
 ## Services
 
+Beginner stack:
+
 - `app`
   Runs the FastAPI web application through [`docker/scripts/start-app.sh`](/home/james/imghost/docker/scripts/start-app.sh).
-- `worker`
-  Runs `python -m imghost run-worker` for Redis-backed background job consumption.
 - `postgres`
   PostgreSQL state store.
-- `redis`
-  Redis for optional sessions, rate limits, and task queue operations.
 - `garage`
   S3-compatible object storage.
 - `garage-init`
   One-shot bootstrap container that configures the Garage layout, key import, and bucket permissions.
 
+Advanced stack adds:
+
+- `worker-thumbnails`
+  Runs `python -m imghost run-worker-thumbnails`.
+- `worker-cleanup`
+  Runs `python -m imghost run-worker-cleanup`.
+- `worker-default`
+  Runs `python -m imghost run-worker-default`.
+- `scheduler`
+  Runs `python -m imghost run-scheduler`.
+- `redis`
+  Redis for optional sessions, rate limits, task queues, and scheduler leases.
+
 ## Startup flow
 
-The app and worker both depend on:
+In the advanced stack, the app, workers, and scheduler depend on:
 
 - healthy Postgres
 - healthy Redis
 - completed `garage-init`
+
+In the beginner stack, the app depends on healthy Postgres and completed `garage-init`.
 
 The app process also runs the normal FastAPI lifespan startup, which:
 
 - connects to Postgres
 - checks Redis startup readiness when Redis is enabled
 - starts the task queue backend
-- re-enqueues pending thumbnails
+- does not run thumbnail recovery unless the process is the thumbnail worker role
 
 Before uvicorn starts, the app container entrypoint script also runs:
 
@@ -59,16 +75,21 @@ This matches the application’s current fallback model rather than treating eve
 
 - `../postgres-data`
   Persistent Postgres data directory
-- `redis-data`
-  Persistent Redis AOF data
 - `garage-meta`
   Garage metadata
 - `garage-data`
   Garage object data
 
+Advanced stack only:
+
+- `redis-data`
+  Persistent Redis AOF data
+
 ## Compose env behavior
 
-`app` and `worker` load `docker/.env`, then Compose injects additional derived values like `DATABASE_URL`.
+The advanced stack uses [`docker/.env.example`](/home/james/imghost/docker/.env.example). The beginner stack uses [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner).
+
+The advanced stack injects additional derived values like `DATABASE_URL` into app, worker, and scheduler services.
 
 Notably:
 
@@ -76,7 +97,13 @@ Notably:
 - `DATABASE_URL` is built from `POSTGRES_*` values
 - Redis auth is handled by `REDIS_PASSWORD` plus `REDIS_URL`
 
-## Current Redis behavior in Docker
+The beginner stack forces:
+
+- `REDIS_MODE=disabled`
+- `TASK_QUEUE_MODE=async`
+- no separate worker or scheduler container
+
+## Advanced Redis behavior in Docker
 
 The Redis service starts with:
 

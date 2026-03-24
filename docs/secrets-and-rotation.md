@@ -94,7 +94,7 @@ Settings:
 Change behavior:
 
 - update env
-- restart the app and worker if they both use the same settings set
+- restart the app and any worker or scheduler services that use the same settings set
 
 Effect:
 
@@ -113,7 +113,7 @@ Settings:
 
 Used for:
 
-- authenticating app and worker connections to Redis
+- authenticating app, worker, and scheduler connections to Redis
 - authenticating `redis-cli` and Compose healthchecks when password mode is enabled
 
 Current implementation:
@@ -127,7 +127,7 @@ Current implementation:
 This is easy:
 
 1. set `REDIS_PASSWORD`
-2. start Redis, app, and worker
+2. start Redis, app, workers, and scheduler
 
 ### Existing deployment
 
@@ -135,10 +135,10 @@ This is still relatively easy, but it is not just “change `.env` and only rest
 
 Recommended sequence:
 
-1. stop or coordinate app and worker processes that depend on Redis
+1. stop or coordinate app, worker, and scheduler processes that depend on Redis
 2. update `REDIS_PASSWORD` in env
 3. restart Redis with the new password
-4. restart the app and worker so they reconnect with the new password
+4. restart the app, workers, and scheduler so they reconnect with the new password
 
 If you are using the local Docker stack and do not care about preserving Redis cache/queue/session contents, deleting the Redis volume is the simplest path.
 
@@ -242,7 +242,7 @@ These sit on the boundary between “app config” and “backing service state�
 Then the app-side part is easy:
 
 1. update env
-2. restart app and worker
+2. restart app and any worker or scheduler services
 
 ### If the backend does not yet accept the new credentials
 

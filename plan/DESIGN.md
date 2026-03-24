@@ -1303,7 +1303,7 @@ Every task message includes the `correlation_id` from the originating HTTP reque
 ```yaml
 worker-thumbnails:
   build: .
-  command: python -m imghost worker --queue thumbnails
+  command: python -m imghost run-worker-thumbnails
   environment: *app-env
   depends_on:
     pgbouncer:
@@ -1316,7 +1316,33 @@ worker-thumbnails:
 
 worker-cleanup:
   build: .
-  command: python -m imghost worker --queue cleanup
+  command: python -m imghost run-worker-cleanup
+  environment: *app-env
+  depends_on:
+    pgbouncer:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    garage:
+      condition: service_healthy
+  restart: unless-stopped
+
+worker-default:
+  build: .
+  command: python -m imghost run-worker-default
+  environment: *app-env
+  depends_on:
+    pgbouncer:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    garage:
+      condition: service_healthy
+  restart: unless-stopped
+
+scheduler:
+  build: .
+  command: python -m imghost run-scheduler
   environment: *app-env
   depends_on:
     pgbouncer:
@@ -1925,7 +1951,7 @@ services:
 
   worker-thumbnails:
     build: .
-    command: python -m imghost worker --queue thumbnails
+    command: python -m imghost run-worker-thumbnails
     environment: *app-env
     depends_on:
       pgbouncer:
@@ -1938,7 +1964,33 @@ services:
 
   worker-cleanup:
     build: .
-    command: python -m imghost worker --queue cleanup
+    command: python -m imghost run-worker-cleanup
+    environment: *app-env
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-default:
+    build: .
+    command: python -m imghost run-worker-default
+    environment: *app-env
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: python -m imghost run-scheduler
     environment: *app-env
     depends_on:
       pgbouncer:
@@ -2013,31 +2065,15 @@ volumes:
   garage_data:
 ```
 
-### Lightweight Compose (Raspberry Pi / No Redis)
+### Lightweight Compose (Beginner / No Redis)
 
-```yaml
-# docker-compose.pi.yml — override for resource-constrained deployments
-services:
-  app:
-    environment:
-      REDIS_URL: ""    # empty = Redis-free mode
-    depends_on:
-      db:
-        condition: service_healthy
-      garage:
-        condition: service_healthy
-    # No worker services needed — tasks run synchronously in-process
+Use a separate beginner compose file rather than an override. In that shape:
 
-  # Remove worker and redis services
-  worker-thumbnails:
-    profiles: ["disabled"]
-  worker-cleanup:
-    profiles: ["disabled"]
-  redis:
-    profiles: ["disabled"]
-```
-
-Usage: `docker compose -f docker-compose.yml -f docker-compose.pi.yml up`
+- `REDIS_MODE=disabled`
+- `TASK_QUEUE_MODE=async`
+- there is no Redis service
+- there are no separate worker or scheduler services
+- background work runs in-process inside the app container
 
 ### Health Check Endpoints
 
@@ -2156,7 +2192,7 @@ An override compose file adding a bundled nginx + Certbot container for users wh
 - System packages: `ffmpeg`, `libvips42`, `libavif-dev`, `curl` (for healthcheck)
 - Runs as non-root user (`imghost:imghost`)
 - Entrypoint: `alembic upgrade head && uvicorn ...` (migrations run at startup automatically)
-- Same image used for `app`, `worker-thumbnails`, and `worker-cleanup` services; service role set by `command`
+- Same image used for `app`, `worker-thumbnails`, `worker-cleanup`, `worker-default`, and `scheduler` services; service role set by `command`
 
 ### CLI Commands
 
@@ -2166,7 +2202,11 @@ python -m imghost issue-api-key    # Issue or rotate a user's API key
 python -m imghost init-storage     # Create Garage bucket and access key (run once)
 python -m imghost prune            # Manual prune run
 python -m imghost prune --dry-run  # Preview what would be pruned without deleting
-python -m imghost run-worker       # Start the background worker process
+python -m imghost run-worker-thumbnails      # Start the thumbnail worker
+python -m imghost run-worker-cleanup         # Start the cleanup worker
+python -m imghost run-worker-default         # Start the optional default worker
+python -m imghost run-scheduler              # Start the scheduler
+python -m imghost run-worker                 # Start the generic compatibility worker
 python -m imghost retry-thumbnails            # Re-enqueue all failed thumbnails
 ```
 
@@ -2285,14 +2325,14 @@ This section documents the expected behavior when each dependency is unavailable
 
 ### Redis-Free Mode (Raspberry Pi / Lightweight Deployments)
 
-When `REDIS_URL` is empty or unset, the application starts in Redis-free mode. This is a **first-class supported configuration**, not a degraded fallback. It's designed for single-user Raspberry Pi deployments or development environments where running Redis is unnecessary overhead.
+When Redis is disabled, the application starts in Redis-free mode. This is a **first-class supported configuration**, not a degraded fallback. It's designed for single-user Raspberry Pi deployments, beginner Docker installs, or development environments where running Redis is unnecessary overhead.
 
 | Subsystem | Normal (Redis available) | Redis-Free Mode |
 |---|---|---|
 | **Sessions** | Signed token stored in Redis; server-side revocation on logout | Signed cookie via `itsdangerous`; no server-side revocation. Logout clears the cookie but a stolen token remains valid until expiry. |
 | **Rate limiting** | Redis counters per IP+UA / per user | Disabled entirely. No rate limiting on any endpoint. |
-| **Task queue** | arq dispatches to separate worker processes via Redis | Synchronous in-process execution. `enqueue()` calls the task function directly. Upload requests block until thumbnail generation completes. |
-| **Worker services** | `worker-thumbnails` and `worker-cleanup` run as separate containers | Not needed. All tasks run in the app process. Use `docker-compose.pi.yml` to disable workers. |
+| **Task queue** | Redis-backed dispatch to separate worker processes with scheduler lease coordination | In-process execution inside the app process |
+| **Worker services** | `worker-thumbnails`, `worker-cleanup`, `worker-default`, and `scheduler` run as separate containers | Not needed. All background work runs in the app process |
 | **Readiness probe** | Redis checked as dependency | Redis check skipped; reports `"skipped"` in health response. |
 
 ### Degradation Matrix

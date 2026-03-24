@@ -4,6 +4,8 @@ This is the practical deployment guide for running `imghost` on one machine with
 
 It is intentionally opinionated and focuses on the current implementation, not every theoretical deployment shape.
 
+For a simpler local or LAN setup, use the beginner stack described in [docker-deployment.md](/home/james/imghost/docs/docker-deployment.md) with [`docker/docker-compose-beginner.yml`](/home/james/imghost/docker/docker-compose-beginner.yml).
+
 ## What this guide assumes
 
 - one Linux host
@@ -157,7 +159,10 @@ docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d
 This starts:
 
 - app
-- worker
+- worker-thumbnails
+- worker-cleanup
+- worker-default
+- scheduler
 - postgres
 - redis
 - garage
@@ -172,8 +177,10 @@ On first successful startup:
 - Garage starts
 - `garage-init` assigns layout, imports the S3 key, creates the bucket, and grants access
 - the app container runs `python -m imghost init-storage` before starting uvicorn when `STORAGE_BACKEND=garage`
-- the app starts and re-enqueues recoverable thumbnails
-- the worker starts and consumes Redis-backed thumbnail jobs
+- the app starts as the `app` role
+- the thumbnail worker re-enqueues recoverable thumbnails
+- the worker services consume Redis-backed jobs
+- the scheduler enqueues recurring cleanup onto the `cleanup` queue
 
 ## 6. Verify the stack
 
@@ -206,6 +213,7 @@ to verify:
 - Redis reachability
 - queue mode
 - worker state
+- scheduler state
 - trusted public origins
 - forwarded-header policy
 
@@ -283,7 +291,7 @@ Usually means one of:
 
 - `REDIS_PASSWORD` in the app does not match the Redis container
 - `REDIS_URL` points to the wrong host/db
-- Redis was restarted with a new password but app/worker were not restarted
+- Redis was restarted with a new password but app/workers/scheduler were not restarted
 
 ### Postgres password change did not work
 
@@ -314,6 +322,7 @@ After the stack is up:
 5. verify ZIP download
 6. verify `/health/ready`
 7. verify Redis-backed worker processing by watching a thumbnail go from pending to ready
+8. verify scheduler state in `/api/v1/admin/runtime-status`
 
 For broader manual verification, use:
 

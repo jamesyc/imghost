@@ -83,8 +83,25 @@ Practical modes:
 - `TASK_QUEUE_MODE`
   `sync`, `async`, or `redis`
 - `TASK_WORKER_ENABLED`
-  Whether this process should run queue consumers when the queue backend supports workers
+  Process-level safety switch for queue consumers when the queue backend supports workers
+- `TASK_WORKER_QUEUES`
+  Queue list used by the generic `run-worker` compatibility command
 - `THUMBNAIL_WORKER_COUNT`
+- `SCHEDULER_ENABLED`
+- `SCHEDULER_POLL_SECONDS`
+- `SCHEDULER_LEASE_SECONDS`
+- `CLEANUP_INTERVAL_SECONDS`
+
+Practical deployment shapes:
+
+- beginner Docker stack:
+  - `REDIS_MODE=disabled`
+  - `TASK_QUEUE_MODE=async`
+  - no separate worker or scheduler service
+- advanced Docker stack:
+  - `REDIS_MODE=auto`
+  - `TASK_QUEUE_MODE=redis`
+  - split worker services and scheduler
 
 ## Docker/Compose settings
 

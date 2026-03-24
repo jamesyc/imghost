@@ -149,6 +149,10 @@
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
+.admin-runtime-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .admin-metric-card,
 .admin-runtime-card,
 .admin-list-row,
@@ -156,6 +160,8 @@
 .albums-empty-state,
 .album-item {
   display: grid;
+  align-content: start;
+  align-items: start;
   gap: 8px;
   padding: 16px;
   border: 1px solid var(--line);
@@ -196,8 +202,10 @@
 
 .admin-status-pill {
   display: inline-flex;
+  align-self: start;
   align-items: center;
   justify-content: center;
+  justify-self: start;
   width: fit-content;
   min-height: 32px;
   padding: 0 12px;

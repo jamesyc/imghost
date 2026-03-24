@@ -50,9 +50,49 @@ python -m imghost init-storage
 
 For the current S3-compatible backend this ensures the configured bucket exists.
 
+### `run-worker-thumbnails`
+
+Starts the thumbnail worker process.
+
+Example:
+
+```bash
+python -m imghost run-worker-thumbnails
+```
+
+### `run-worker-cleanup`
+
+Starts the cleanup worker process.
+
+Example:
+
+```bash
+python -m imghost run-worker-cleanup
+```
+
+### `run-worker-default`
+
+Starts the optional default worker process.
+
+Example:
+
+```bash
+python -m imghost run-worker-default
+```
+
+### `run-scheduler`
+
+Starts the scheduler process. The scheduler enqueues recurring jobs such as cleanup onto the appropriate queue.
+
+Example:
+
+```bash
+python -m imghost run-scheduler
+```
+
 ### `run-worker`
 
-Starts the background worker process used for Redis-backed task consumption.
+Starts the generic multi-queue worker process.
 
 Example:
 
@@ -60,7 +100,7 @@ Example:
 python -m imghost run-worker
 ```
 
-This is the command used by the Docker `worker` service.
+This is a compatibility and power-user command. The advanced Docker stack uses the explicit split worker commands instead.
 
 ### `create-user`
 

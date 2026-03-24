@@ -13,7 +13,7 @@ This directory documents the current shipped structure of the app.
 ## High-Level Layout
 
 - [`src/imghost/main.py`](/home/james/imghost/src/imghost/main.py): app startup, middleware, static mount, router registration
-- [`src/imghost/app_state.py`](/home/james/imghost/src/imghost/app_state.py): process-level wiring for settings, repository, storage, service layer, runtime config, audit, and worker-facing dependencies
+- [`src/imghost/app_state.py`](/home/james/imghost/src/imghost/app_state.py): process-level wiring for settings, repository, storage, service layer, runtime config, audit, and app/worker/scheduler process roles
 - [`src/imghost/config.py`](/home/james/imghost/src/imghost/config.py): environment-driven settings and deployment configuration
 - [`src/imghost/service.py`](/home/james/imghost/src/imghost/service.py): core application workflows for uploads, albums, users, auth, admin actions, and destructive operations
 - [`src/imghost/repositories.py`](/home/james/imghost/src/imghost/repositories.py): persistence access for albums, media, users, API keys, sessions, and runtime state

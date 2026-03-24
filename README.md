@@ -73,24 +73,51 @@ The Docker setup lives under [`docker/`](/home/james/imghost/docker).
 
 Main files:
 
+- [`docker/docker-compose-beginner.yml`](/home/james/imghost/docker/docker-compose-beginner.yml)
 - [`docker/docker-compose.yml`](/home/james/imghost/docker/docker-compose.yml)
+- [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner)
 - [`docker/.env.example`](/home/james/imghost/docker/.env.example)
 - [`docker/.env`](/home/james/imghost/docker/.env)
 
-The Compose project name is `imghost`, so containers come up as:
+For beginners or simple LAN installs, use the beginner stack:
+
+```bash
+cp docker/.env.example.beginner docker/.env
+docker compose -f docker/docker-compose-beginner.yml --env-file docker/.env up --build -d
+```
+
+That stack is intentionally simple:
+
+- no Redis
+- no separate worker container
+- no separate scheduler container
+- background jobs run in-process inside the app container
+
+The beginner Compose project name is `imghost-beginner`, so containers come up as:
+
+- `imghost-beginner-app-1`
+- `imghost-beginner-postgres-1`
+- `imghost-beginner-garage-1`
+- `imghost-beginner-garage-init-1`
+
+For the full split-worker deployment, use the main stack:
+
+```bash
+cp docker/.env.example docker/.env
+docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d
+```
+
+The main Compose project name is `imghost`, so containers come up as:
 
 - `imghost-app-1`
-- `imghost-worker-1`
+- `imghost-worker-thumbnails-1`
+- `imghost-worker-cleanup-1`
+- `imghost-worker-default-1`
+- `imghost-scheduler-1`
 - `imghost-postgres-1`
 - `imghost-redis-1`
 - `imghost-garage-1`
 - `imghost-garage-init-1`
-
-Start the stack with:
-
-```bash
-docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d
-```
 
 Current default public base URL in the Docker env file:
 
@@ -176,6 +203,7 @@ Application/runtime defaults:
 
 Docker/infra defaults:
 
+- [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner)
 - [`docker/.env.example`](/home/james/imghost/docker/.env.example)
 
 `docker/.env` is ignored by git and is the file Compose should use locally.
@@ -223,6 +251,8 @@ Important behavior:
 
 ## Queue And Rate-Limit Notes
 
+- The beginner Docker stack uses `docker/docker-compose-beginner.yml` with `TASK_QUEUE_MODE=async` and `REDIS_MODE=disabled`, so background jobs run in-process inside the app container.
+- The beginner no-Redis stack does not run a separate worker or scheduler service.
 - `TASK_QUEUE_MODE=redis` enables Redis-backed task dispatch.
 - `TASK_WORKER_ENABLED=false` is intended for the web app container.
 - `TASK_WORKER_ENABLED=true` is intended for dedicated worker containers.

@@ -17,7 +17,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   Operational command reference for the current `python -m imghost` subcommands and how they are used.
 
 - [docker-deployment.md](/home/james/imghost/docs/docker-deployment.md)
-  Description of the Docker Compose stack, service roles, startup flow, volumes, and Redis/Garage bootstrap behavior.
+  Description of the beginner and advanced Docker Compose stacks, service roles, startup flow, volumes, and Redis/Garage bootstrap behavior.
 
 - [secrets-and-rotation.md](/home/james/imghost/docs/secrets-and-rotation.md)
   Practical notes on which secrets are easy to rotate in place and which behave more like bootstrap-time values.
@@ -32,7 +32,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   Filesystem and S3-compatible storage backends, media serving behavior, and ZIP streaming.
 
 - [background-jobs.md](/home/james/imghost/docs/background-jobs.md)
-  Task queue modes, worker behavior, Redis fallback semantics, and thumbnail recovery.
+  Task queue modes, split worker and scheduler behavior, Redis fallback semantics, and thumbnail recovery.
 
 - [operations.md](/home/james/imghost/docs/operations.md)
   Health endpoint contract, runtime status, probe semantics, low-noise logging model, degraded-mode behavior, and browser-session mutation troubleshooting.

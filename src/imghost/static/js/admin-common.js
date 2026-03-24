@@ -73,7 +73,11 @@ window.renderAdminRuntimeCards = (payload) => {
   const workerService = payload.services?.worker || {};
   const appService = payload.services?.app || {};
   const schedulerService = payload.services?.scheduler || {};
+  const sessionSubsystem = payload.redis?.subsystems?.sessions || {};
+  const rateLimitSubsystem = payload.redis?.subsystems?.rate_limits || {};
+  const bootstrapAdmin = payload.bootstrap_admin || {};
   const hasSeparateWorkerService = payload.redis?.configured && payload.tasks?.mode === "redis";
+  const usesInProcessAsyncTasks = !workerService.enabled_in_this_process && !hasSeparateWorkerService && payload.tasks?.mode === "async";
   const queueDetails = Object.entries(payload.tasks?.queues || {})
     .map(([name, depth]) => `${name}: ${window.adminFormatNumber(depth)}`)
     .join(" · ");
@@ -109,6 +113,42 @@ window.renderAdminRuntimeCards = (payload) => {
       hint: `Sessions ${payload.redis?.subsystems?.sessions?.mode || "unknown"}${payload.redis?.session_fail_closed ? " (fail closed)" : " (graceful fallback)"} · Rate limits ${payload.redis?.subsystems?.rate_limits?.mode || "unknown"}`,
     },
     {
+      label: "Sessions",
+      status: sessionSubsystem.mode === "redis"
+        ? "Redis-backed"
+        : payload.redis?.session_fail_closed
+          ? "Fail-closed"
+          : "Signed-cookie fallback",
+      tone: sessionSubsystem.mode === "redis"
+        ? "ok"
+        : payload.redis?.session_fail_closed
+          ? "warn"
+          : "neutral",
+      hint: payload.redis?.session_fail_closed
+        ? "Browser sessions require Redis when enabled in fail-closed mode."
+        : "Browser sessions continue with signed-cookie validation if Redis is unavailable or disabled.",
+    },
+    {
+      label: "Rate limits",
+      status: rateLimitSubsystem.mode === "redis"
+        ? "Redis-backed"
+        : rateLimitSubsystem.mode === "memory"
+          ? "In-memory fallback"
+          : rateLimitSubsystem.mode === "disabled"
+            ? "Disabled"
+            : (rateLimitSubsystem.mode || "Unknown"),
+      tone: rateLimitSubsystem.mode === "redis"
+        ? "ok"
+        : rateLimitSubsystem.mode === "memory"
+          ? "warn"
+          : "neutral",
+      hint: rateLimitSubsystem.mode === "redis"
+        ? "Shared counters survive across processes."
+        : rateLimitSubsystem.mode === "memory"
+          ? "Counters are process-local and reset on restart."
+          : "Rate limiting is not backed by Redis in this process.",
+    },
+    {
       label: "Task queue",
       status: payload.tasks?.mode || "Unknown",
       tone: payload.tasks?.queue_depth > 0 ? "warn" : "ok",
@@ -120,13 +160,19 @@ window.renderAdminRuntimeCards = (payload) => {
         ? "Worker role active"
         : hasSeparateWorkerService
           ? "Separate worker service"
-          : "Disabled",
-      tone: workerService.enabled_in_this_process || hasSeparateWorkerService
-        ? (workerService.last_task_failure ? "warn" : "ok")
-        : "neutral",
+          : usesInProcessAsyncTasks
+            ? "In-process tasks"
+            : "Disabled",
+      tone: usesInProcessAsyncTasks
+        ? "warn"
+        : workerService.enabled_in_this_process || hasSeparateWorkerService
+          ? (workerService.last_task_failure ? "warn" : "ok")
+          : "neutral",
       hint: workerService.last_task_failure
         ? `Queues ${window.escapeAdminHtml(workerQueueList || "none")} · Last failure: ${window.escapeAdminHtml(JSON.stringify(workerService.last_task_failure))}`
-        : `Queues ${window.escapeAdminHtml(workerQueueList || "none")} · Last started ${window.adminFormatDateTime(workerService.last_started_at)}`,
+        : usesInProcessAsyncTasks
+          ? "No separate worker service; tasks run in-process in async mode."
+          : `Queues ${window.escapeAdminHtml(workerQueueList || "none")} · Last started ${window.adminFormatDateTime(workerService.last_started_at)}`,
     },
     {
       label: "Scheduler",
@@ -137,6 +183,26 @@ window.renderAdminRuntimeCards = (payload) => {
       hint: schedulerService.enabled_in_this_process
         ? `Poll ${window.adminFormatNumber(schedulerService.poll_seconds || 0)}s · Lease ${schedulerService.lease_enabled ? `${window.adminFormatNumber(schedulerService.lease_seconds || 0)}s (Redis)` : "disabled"}${schedulerJobs ? ` · ${window.escapeAdminHtml(schedulerJobs)}` : ""}`
         : "No scheduler loop active in this process.",
+    },
+    {
+      label: "Bootstrap admin",
+      status: bootstrapAdmin.enabled
+        ? (bootstrapAdmin.promoted
+          ? "Promoted"
+          : bootstrapAdmin.already_admin
+            ? "Already admin"
+            : bootstrapAdmin.matched
+              ? "Matched user"
+              : "Configured")
+        : "Disabled",
+      tone: bootstrapAdmin.warning
+        ? "warn"
+        : bootstrapAdmin.enabled
+          ? "ok"
+          : "neutral",
+      hint: bootstrapAdmin.enabled
+        ? (bootstrapAdmin.warning || `Configured username ${window.escapeAdminHtml(bootstrapAdmin.configured_username || "unknown")}`)
+        : "No bootstrap admin promotion configured.",
     },
     {
       label: "Public origin mode",

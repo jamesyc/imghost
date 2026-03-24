@@ -50,7 +50,8 @@ The web layer is intentionally split by responsibility:
 The project supports:
 
 - App-only local development with a direct `DATABASE_URL`
-- Docker Compose with app, worker, Postgres, Redis, Garage, and Garage bootstrap
+- Beginner Docker Compose with app, Postgres, Garage, and Garage bootstrap
+- Advanced Docker Compose with app, split workers, scheduler, Postgres, Redis, Garage, and Garage bootstrap
 - Mixed deployments where Postgres, Redis, or S3-compatible storage live on other hosts
 
 See:

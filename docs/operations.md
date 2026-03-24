@@ -40,7 +40,7 @@ Stable fields to rely on:
 - `redis.reachable`
 - `tasks.mode`
 
-The payload also includes worker state, Redis subsystem snapshots, trusted-origin/proxy settings, and task queue details for debugging.
+The payload also includes worker state, scheduler state, Redis subsystem snapshots, trusted-origin/proxy settings, and task queue details for debugging.
 
 ## Current tested health scenarios
 
@@ -66,6 +66,7 @@ Requires admin auth and returns:
 - Redis configured/reachable status
 - Redis subsystem snapshots for sessions, rate limits, and tasks
 - worker state
+- scheduler state
 - task queue status and queue depth
 - trusted public origins
 - forwarded-header policy
