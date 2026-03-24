@@ -47,8 +47,16 @@
         <img src="{{ item.media_url }}" alt="{{ item.filename or item.id }}">
       </button>
       {% else %}
-      <div class="public-album-preview is-video">
-        <video controls preload="metadata" src="{{ item.media_url }}" aria-label="{{ item.filename or item.id }}"></video>
+      <div
+        class="public-album-preview is-video"
+        data-media-url="{{ item.media_url }}"
+        data-media-type="{{ item.media_type }}"
+        data-filename="{{ item.filename or item.id }}"
+        role="button"
+        tabindex="0"
+        aria-label="Open {{ item.filename or item.id }}"
+      >
+        <video autoplay muted loop playsinline controls preload="metadata" src="{{ item.media_url }}" aria-hidden="true"></video>
       </div>
       {% endif %}
       {% if item.compat_warning %}

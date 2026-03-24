@@ -63,6 +63,7 @@
         lightboxButton.dataset.lightboxUrl,
         lightboxButton.dataset.lightboxFilename,
         lightboxButton.dataset.mediaType,
+        lightboxButton,
       );
       return;
     }
@@ -102,6 +103,23 @@
     } catch (error) {
       window.alert(error.message);
     }
+  });
+
+  ns.dom.itemsRoot?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    const lightboxButton = event.target.closest('.album-detail-thumb[role="button"]');
+    if (!lightboxButton) {
+      return;
+    }
+    event.preventDefault();
+    ns.openLightbox(
+      lightboxButton.dataset.lightboxUrl,
+      lightboxButton.dataset.lightboxFilename,
+      lightboxButton.dataset.mediaType,
+      lightboxButton,
+    );
   });
 
   ns.dom.itemsRoot?.addEventListener("dragstart", (event) => {

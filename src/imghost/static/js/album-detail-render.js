@@ -4,6 +4,11 @@
     return;
   }
 
+  const activeInlineVideoState = {
+    video: null,
+    shouldResume: false,
+  };
+
   ns.renderActions = (album) => {
     if (ns.dom.actionsNode) {
       const links = [ns.splitLinkControl("Public Page", ns.publicAlbumUrl(album.id), "Public page URL")];
@@ -61,9 +66,14 @@
       video.load();
       video.classList.add("hidden");
     }
+    if (activeInlineVideoState.video && activeInlineVideoState.shouldResume) {
+      activeInlineVideoState.video.play().catch(() => {});
+    }
+    activeInlineVideoState.video = null;
+    activeInlineVideoState.shouldResume = false;
   };
 
-  ns.openLightbox = (mediaUrl, filename, mediaType = "image") => {
+  ns.openLightbox = (mediaUrl, filename, mediaType = "image", previewElement = null) => {
     const lightbox = ns.ensureLightbox();
     const image = lightbox.querySelector(".album-detail-lightbox-image");
     const video = lightbox.querySelector(".album-detail-lightbox-video");
@@ -71,7 +81,15 @@
       return;
     }
     ns.state.lightboxMediaUrl = mediaUrl;
+    activeInlineVideoState.video = null;
+    activeInlineVideoState.shouldResume = false;
     if (mediaType === "video") {
+      const inlineVideo = previewElement?.querySelector("video");
+      if (inlineVideo) {
+        activeInlineVideoState.video = inlineVideo;
+        activeInlineVideoState.shouldResume = !inlineVideo.paused && !inlineVideo.ended;
+        inlineVideo.pause();
+      }
       image.classList.add("hidden");
       video.src = mediaUrl;
       video.classList.remove("hidden");
@@ -91,42 +109,7 @@
     if (item.media_type !== "video") {
       return `<img src="${ns.escapeHtml(item.media_url)}" alt="${previewLabel}">`;
     }
-    if (item.thumb_status === "done") {
-      return `<img src="${ns.escapeHtml(item.thumb_url)}" alt="${previewLabel}">`;
-    }
-    if (item.thumb_status === "pending" || item.thumb_status === "processing") {
-      return `<span class="public-album-preview-placeholder" data-thumb-status="${ns.escapeHtml(item.thumb_status)}">Thumbnail pending</span>`;
-    }
-    return `<span class="public-album-preview-placeholder">Thumbnail failed</span>`;
-  };
-
-  ns.pollVideoThumb = (button) => {
-    const thumbSrc = button.dataset.thumbSrc;
-    const placeholder = button.querySelector("[data-thumb-status]");
-    if (!thumbSrc || !placeholder) {
-      return;
-    }
-    const poll = async () => {
-      try {
-        const response = await fetch(thumbSrc, { method: "GET", cache: "no-store" });
-        if (response.status === 200) {
-          const image = document.createElement("img");
-          image.src = thumbSrc;
-          image.alt = button.dataset.lightboxFilename || "Album media";
-          placeholder.replaceWith(image);
-          return;
-        }
-        if (response.status === 202) {
-          window.setTimeout(poll, 1000);
-          return;
-        }
-        placeholder.textContent = "Thumbnail failed";
-        placeholder.removeAttribute("data-thumb-status");
-      } catch {
-        window.setTimeout(poll, 1500);
-      }
-    };
-    poll();
+    return `<video autoplay muted loop playsinline controls preload="metadata" src="${ns.escapeHtml(item.media_url)}" aria-hidden="true"></video>`;
   };
 
   ns.albumDisplayTitle = (album) => album?.title || "Untitled album";
@@ -178,17 +161,30 @@
             <h3>${ns.escapeHtml(item.filename || item.id)}</h3>
             <p class="hint">${ns.formatBytes(item.file_size)}</p>
           </div>
-          <button
-            type="button"
-            class="album-detail-thumb${item.media_type === "video" ? " is-video" : ""}"
+          ${
+            item.media_type === "video"
+              ? `<div
+            class="album-detail-thumb public-album-preview is-video"
             data-lightbox-url="${ns.escapeHtml(item.media_url)}"
             data-lightbox-filename="${ns.escapeHtml(item.filename || item.id)}"
             data-media-type="${ns.escapeHtml(item.media_type)}"
-            ${item.media_type === "video" && (item.thumb_status === "done" || item.thumb_status === "pending" || item.thumb_status === "processing") ? `data-thumb-src="${ns.escapeHtml(item.thumb_url)}"` : ""}
+            role="button"
+            tabindex="0"
             aria-label="Preview ${ns.escapeHtml(item.filename || item.id)}"
           >
             ${ns.itemPreviewMarkup(item)}
-          </button>
+          </div>`
+              : `<button
+            type="button"
+            class="album-detail-thumb public-album-preview"
+            data-lightbox-url="${ns.escapeHtml(item.media_url)}"
+            data-lightbox-filename="${ns.escapeHtml(item.filename || item.id)}"
+            data-media-type="${ns.escapeHtml(item.media_type)}"
+            aria-label="Preview ${ns.escapeHtml(item.filename || item.id)}"
+          >
+            ${ns.itemPreviewMarkup(item)}
+          </button>`
+          }
           ${ns.splitLinkControl("Media Link", item.media_url, "Media URL")}
           <div class="row row-actions album-detail-item-actions">
             <button type="button" class="secondary album-detail-move-button" data-direction="-1" data-media-id="${item.id}">Move Up</button>
@@ -199,8 +195,5 @@
         </div>
       </section>
     `).join("");
-    ns.dom.itemsRoot.querySelectorAll(".album-detail-thumb.is-video[data-thumb-src]").forEach((button) => {
-      ns.pollVideoThumb(button);
-    });
   };
 })();

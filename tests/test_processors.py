@@ -15,12 +15,15 @@ from starlette.datastructures import Headers, UploadFile
 from imghost.app_state import AppState
 from imghost.config import load_settings
 from imghost.main import app
+from imghost.media_processors.image import TiffProcessor
 from imghost.processors import (
     ANIMATED_THUMB_MAX_SOURCE_FRAMES,
     VIDEO_ANIMATED_THUMB_TIMEOUT_SECS,
     VIDEO_COMMAND_STDERR_LIMIT_BYTES,
     VIDEO_THUMB_MAX_INTERVAL_SECS,
     VIDEO_THUMB_MIN_INTERVAL_SECS,
+    VIDEO_THUMB_WEBP_COMPRESSION_LEVEL,
+    VIDEO_THUMB_WEBP_QUALITY,
     VIDEO_PROBE_TIMEOUT_SECS,
     VIDEO_REMUX_TIMEOUT_SECS,
     VIDEO_SINGLE_FRAME_TIMEOUT_SECS,
@@ -203,6 +206,80 @@ def test_registry_registers_heif_and_avif_processors() -> None:
     assert registry.get_processor("avif") is not None
 
 
+def test_tiff_uploads_are_browser_normalized_to_jpeg(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    output = BytesIO()
+    Image.new("RGB", (12, 9), "red").save(output, format="TIFF")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("scan.tiff", BytesIO(output.getvalue()), "image/tiff"))],
+        )
+
+        assert response.status_code == 200
+        media_id = response.json()["media_id"]
+
+        original = client.get(f"/i/{media_id}.jpeg")
+        assert original.status_code == 200
+        assert original.headers["content-type"] == "image/jpeg"
+        assert original.content.startswith(b"\xff\xd8")
+
+        wait_for_thumbnail(client, media_id)
+        thumb = client.get(f"/t/{media_id}.jpg")
+        assert thumb.status_code == 200
+        assert thumb.headers["content-type"] == "image/jpeg"
+
+
+def test_tiff_processor_uses_embedded_icc_profile_for_jpeg_normalization(monkeypatch) -> None:
+    output = BytesIO()
+    Image.new("CMYK", (8, 8), (0, 255, 255, 0)).save(output, format="TIFF")
+    payload = output.getvalue()
+    processor = TiffProcessor(max_pixels=50_000_000)
+    metadata = MediaMetadata(
+        width=8,
+        height=8,
+        duration_secs=None,
+        codec_hint=None,
+        is_animated=False,
+        mime_type="image/tiff",
+        format="tiff",
+    )
+    called: dict[str, object] = {}
+
+    def fake_image_cms_profile(profile_bytes):
+        called["icc_profile"] = profile_bytes.read()
+        return "src-profile"
+
+    def fake_create_profile(name):
+        called["target_profile"] = name
+        return "srgb-profile"
+
+    def fake_profile_to_profile(image, source_profile, target_profile, outputMode):
+        called["output_mode"] = outputMode
+        called["source_profile"] = source_profile
+        called["target_profile_obj"] = target_profile
+        return image.convert(outputMode)
+
+    monkeypatch.setattr("imghost.media_processors.image.ImageCms.ImageCmsProfile", fake_image_cms_profile)
+    monkeypatch.setattr("imghost.media_processors.image.ImageCms.createProfile", fake_create_profile)
+    monkeypatch.setattr("imghost.media_processors.image.ImageCms.profileToProfile", fake_profile_to_profile)
+
+    with Image.open(BytesIO(payload)) as source:
+        source.info["icc_profile"] = b"fake-icc-profile"
+        monkeypatch.setattr(processor, "_open_image", lambda data: source.copy())
+
+        sanitized = asyncio.run(processor.sanitize(payload, metadata))
+
+    assert sanitized.format == "jpeg"
+    assert sanitized.mime_type == "image/jpeg"
+    assert called["icc_profile"] == b"fake-icc-profile"
+    assert called["target_profile"] == "sRGB"
+    assert called["output_mode"] == "RGB"
+
+
 def test_svg_upload_strips_foreign_object_style_and_non_fragment_references(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -355,8 +432,11 @@ def test_build_processor_registry_keeps_expected_format_mapping() -> None:
     assert registry.get_processor("gif").__class__.__name__ == "GifProcessor"
     assert registry.get_processor("webp").__class__.__name__ == "WebpProcessor"
     assert registry.get_processor("bmp").__class__.__name__ == "BmpProcessor"
+    assert registry.get_processor("tif").__class__.__name__ == "TiffProcessor"
+    assert registry.get_processor("tiff").__class__.__name__ == "TiffProcessor"
     assert registry.get_processor("svg").__class__.__name__ == "SvgProcessor"
     assert registry.get_processor("mp4").__class__.__name__ == "Mp4Processor"
+    assert registry.get_processor("m4v").__class__.__name__ == "Mp4Processor"
     assert registry.get_processor("mov").__class__.__name__ == "MovProcessor"
     assert registry.get_processor("webm").__class__.__name__ == "WebmProcessor"
 
@@ -400,6 +480,73 @@ def test_mp4_processor_maps_ffprobe_metadata(monkeypatch) -> None:
     assert metadata.duration_secs == 2.5
     assert metadata.codec_hint is None
     assert metadata.format == "mp4"
+    assert metadata.rotation_degrees == 0
+
+
+def test_mp4_processor_maps_rotation_from_ffprobe_tags(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        assert args[0] == "ffprobe"
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "streams": [
+                        {
+                            "codec_type": "video",
+                            "codec_name": "h264",
+                            "width": 1080,
+                            "height": 1920,
+                            "duration": "2.5",
+                            "tags": {"rotate": "90"},
+                        }
+                    ],
+                    "format": {"duration": "2.5"},
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    metadata = asyncio.run(processor.extract_metadata(b"fake-mp4", "mp4"))
+
+    assert metadata.rotation_degrees == 90
+
+
+def test_mp4_processor_maps_rotation_from_ffprobe_side_data_and_normalizes_negative_values(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        assert args[0] == "ffprobe"
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "streams": [
+                        {
+                            "codec_type": "video",
+                            "codec_name": "h264",
+                            "width": 1920,
+                            "height": 1080,
+                            "duration": "2.5",
+                            "side_data_list": [{"rotation": -90}],
+                        }
+                    ],
+                    "format": {"duration": "2.5"},
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    metadata = asyncio.run(processor.extract_metadata(b"fake-mp4", "mp4"))
+
+    assert metadata.rotation_degrees == 270
 
 
 def test_mov_processor_sets_hevc_codec_hint(monkeypatch) -> None:
@@ -532,6 +679,52 @@ def test_video_processor_uses_expected_command_timeouts(monkeypatch) -> None:
     assert ("ffprobe", VIDEO_PROBE_TIMEOUT_SECS) in timeouts
     assert ("ffmpeg", VIDEO_REMUX_TIMEOUT_SECS) in timeouts
     assert ("ffmpeg", VIDEO_ANIMATED_THUMB_TIMEOUT_SECS) in timeouts
+
+
+def test_video_processor_reencodes_rotated_video_to_bake_in_orientation(monkeypatch) -> None:
+    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+    ffmpeg_commands: list[list[str]] = []
+
+    def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        if args[0] == "ffprobe":
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "streams": [
+                            {
+                                "codec_type": "video",
+                                "codec_name": "h264",
+                                "width": 1080,
+                                "height": 1920,
+                                "duration": "2.5",
+                                "tags": {"rotate": "90"},
+                            }
+                        ],
+                        "format": {"duration": "2.5"},
+                    }
+                ),
+                stderr="",
+            )
+        ffmpeg_commands.append(args)
+        Path(args[-1]).write_bytes(b"remuxed")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
+
+    metadata = asyncio.run(processor.extract_metadata(b"fake-mp4", "mp4"))
+    sanitized = asyncio.run(processor.sanitize(b"fake-mp4", metadata))
+
+    assert sanitized.data == b"remuxed"
+    assert ffmpeg_commands
+    assert "-c:v" in ffmpeg_commands[0]
+    assert "libx264" in ffmpeg_commands[0]
+    assert "-c:a" in ffmpeg_commands[0]
+    assert "copy" in ffmpeg_commands[0]
+    assert "-metadata:s:v:0" in ffmpeg_commands[0]
+    assert "rotate=0" in ffmpeg_commands[0]
+    assert ffmpeg_commands[0].count("copy") == 1
 
 
 def test_video_processor_converts_timeout_errors_into_runtime_failures(monkeypatch) -> None:
@@ -679,8 +872,10 @@ def test_video_processor_missing_duration_falls_back_to_single_frame(monkeypatch
 def test_video_processor_very_long_duration_clamps_interval(monkeypatch) -> None:
     processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
     seen_filters: list[str] = []
+    seen_args: list[list[str]] = []
 
     def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
+        seen_args.append(args)
         seen_filters.append(args[args.index("-vf") + 1])
         output_path = args[-1]
         Path(output_path).write_bytes(b"webp-thumb")
@@ -691,7 +886,12 @@ def test_video_processor_very_long_duration_clamps_interval(monkeypatch) -> None
     animated = processor._animated_thumbnail(b"fake-mp4", "mp4", VIDEO_THUMB_MAX_INTERVAL_SECS * 1000)
 
     assert animated == b"webp-thumb"
-    assert seen_filters == [f"fps=1/{VIDEO_THUMB_MAX_INTERVAL_SECS:.6f},scale=375:-1"]
+    assert seen_filters == [f"fps=1/{VIDEO_THUMB_MAX_INTERVAL_SECS:.6f},scale=560:-1"]
+    args = seen_args[0]
+    assert args[args.index("-c:v") + 1] == "libwebp"
+    assert args[args.index("-quality") + 1] == str(VIDEO_THUMB_WEBP_QUALITY)
+    assert args[args.index("-compression_level") + 1] == str(VIDEO_THUMB_WEBP_COMPRESSION_LEVEL)
+    assert args[args.index("-lossless") + 1] == "0"
 
 
 def test_video_processor_tiny_positive_duration_clamps_interval(monkeypatch) -> None:
@@ -709,7 +909,7 @@ def test_video_processor_tiny_positive_duration_clamps_interval(monkeypatch) -> 
     animated = processor._animated_thumbnail(b"fake-mp4", "mp4", VIDEO_THUMB_MIN_INTERVAL_SECS / 1000)
 
     assert animated == b"webp-thumb"
-    assert seen_filters == [f"fps=1/{VIDEO_THUMB_MIN_INTERVAL_SECS:.6f},scale=375:-1"]
+    assert seen_filters == [f"fps=1/{VIDEO_THUMB_MIN_INTERVAL_SECS:.6f},scale=560:-1"]
 
 
 def test_video_processor_normal_duration_behavior_is_unchanged(monkeypatch) -> None:
@@ -826,9 +1026,10 @@ def test_video_processor_sanitize_offloads_remux_to_thread(monkeypatch) -> None:
     metadata = sample_video_metadata()
     calls: list[tuple[object, tuple[object, ...]]] = []
 
-    def fake_remux(payload: bytes, extension: str) -> bytes:
+    def fake_remux(payload: bytes, extension: str, rotation_degrees: int) -> bytes:
         assert payload == b"fake-mp4"
         assert extension == "mp4"
+        assert rotation_degrees == 0
         return b"remuxed-video"
 
     async def fake_to_thread(func, *args, **kwargs):
@@ -842,7 +1043,7 @@ def test_video_processor_sanitize_offloads_remux_to_thread(monkeypatch) -> None:
 
     assert sanitized.data == b"remuxed-video"
     assert sanitized.format == "mp4"
-    assert calls == [(fake_remux, (b"fake-mp4", "mp4"))]
+    assert calls == [(fake_remux, (b"fake-mp4", "mp4", 0))]
 
 
 def test_video_processor_generate_thumbnail_offloads_single_frame_to_thread_for_short_videos(monkeypatch) -> None:
@@ -919,7 +1120,7 @@ def test_video_processor_threaded_exceptions_propagate_or_reject(monkeypatch) ->
     assert validation.ok is False
     assert validation.rejection_reason == "Unsupported or invalid video file."
 
-    def exploding_remux(payload: bytes, extension: str) -> bytes:
+    def exploding_remux(payload: bytes, extension: str, rotation_degrees: int) -> bytes:
         raise RuntimeError("remux failed")
 
     monkeypatch.setattr(processor, "_remux", exploding_remux)
@@ -957,7 +1158,7 @@ def test_video_processor_extract_metadata_does_not_block_event_loop(monkeypatch)
 def test_video_processor_sanitize_does_not_block_event_loop(monkeypatch) -> None:
     processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
 
-    def slow_remux(payload: bytes, extension: str) -> bytes:
+    def slow_remux(payload: bytes, extension: str, rotation_degrees: int) -> bytes:
         sleep(0.1)
         return b"remuxed-video"
 
@@ -995,7 +1196,7 @@ def test_video_upload_path_can_progress_alongside_fast_status_check(tmp_path, mo
         release.wait(timeout=1.0)
         return sample_video_metadata()
 
-    def fake_remux(self, payload: bytes, extension: str) -> bytes:
+    def fake_remux(self, payload: bytes, extension: str, rotation_degrees: int) -> bytes:
         return b"clean-video"
 
     async def fast_thumb(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
@@ -1056,7 +1257,7 @@ def test_multiple_video_uploads_do_not_serialize_on_event_loop(tmp_path, monkeyp
         release.wait(timeout=0.25)
         return sample_video_metadata()
 
-    def fake_remux(self, payload: bytes, extension: str) -> bytes:
+    def fake_remux(self, payload: bytes, extension: str, rotation_degrees: int) -> bytes:
         return b"clean-video"
 
     async def fast_thumb(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:

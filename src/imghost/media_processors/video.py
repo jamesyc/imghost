@@ -37,7 +37,7 @@ class VideoProcessor(MediaProcessor):
 
     async def sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
         return SanitizedFile(
-            data=await asyncio.to_thread(self._remux, payload, metadata.format),
+            data=await asyncio.to_thread(self._remux, payload, metadata.format, metadata.rotation_degrees),
             mime_type=self.mime_type,
             format=metadata.format,
         )
@@ -100,25 +100,14 @@ class VideoProcessor(MediaProcessor):
             is_animated=True,
             mime_type=self.mime_type,
             format=self.supported_formats()[0],
+            rotation_degrees=self._rotation_degrees(video_stream),
         )
 
-    def _remux(self, payload: bytes, extension: str) -> bytes:
+    def _remux(self, payload: bytes, extension: str, rotation_degrees: int = 0) -> bytes:
         with self._temp_file(payload, extension) as input_path, self._temp_output_file(extension) as output_path:
+            args = self._sanitize_command(input_path, output_path, rotation_degrees=rotation_degrees)
             self._run_ffmpeg_command(
-                [
-                    "ffmpeg",
-                    "-hide_banner",
-                    "-v",
-                    "error",
-                    "-y",
-                    "-i",
-                    str(input_path),
-                    "-map_metadata",
-                    "-1",
-                    "-c",
-                    "copy",
-                    str(output_path),
-                ],
+                args,
                 timeout=processor_module.VIDEO_REMUX_TIMEOUT_SECS,
             )
             return output_path.read_bytes()
@@ -161,6 +150,14 @@ class VideoProcessor(MediaProcessor):
                     str(input_path),
                     "-vf",
                     f"fps=1/{interval:.6f},scale={processor_module.THUMB_WIDTH}:-1",
+                    "-c:v",
+                    "libwebp",
+                    "-quality",
+                    str(processor_module.VIDEO_THUMB_WEBP_QUALITY),
+                    "-compression_level",
+                    str(processor_module.VIDEO_THUMB_WEBP_COMPRESSION_LEVEL),
+                    "-lossless",
+                    "0",
                     "-frames:v",
                     str(self.thumb_frames),
                     "-loop",
@@ -254,6 +251,65 @@ class VideoProcessor(MediaProcessor):
         except (TypeError, ValueError):
             return None
 
+    def _rotation_degrees(self, video_stream: dict[str, object]) -> int:
+        tags = video_stream.get("tags")
+        if isinstance(tags, dict):
+            normalized = self._normalized_rotation(tags.get("rotate"))
+            if normalized:
+                return normalized
+        side_data_list = video_stream.get("side_data_list")
+        if isinstance(side_data_list, list):
+            for side_data in side_data_list:
+                if not isinstance(side_data, dict):
+                    continue
+                normalized = self._normalized_rotation(side_data.get("rotation"))
+                if normalized:
+                    return normalized
+        return 0
+
+    def _normalized_rotation(self, value: object) -> int:
+        if value is None:
+            return 0
+        try:
+            rotation = int(round(float(value))) % 360
+        except (TypeError, ValueError):
+            return 0
+        return rotation if rotation in {90, 180, 270} else 0
+
+    def _sanitize_command(self, input_path: Path, output_path: Path, *, rotation_degrees: int) -> list[str]:
+        args = [
+            "ffmpeg",
+            "-hide_banner",
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            str(input_path),
+            "-map_metadata",
+            "-1",
+        ]
+        if rotation_degrees:
+            args.extend(
+                [
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "copy",
+                    "-metadata:s:v:0",
+                    "rotate=0",
+                ]
+            )
+        else:
+            args.extend(["-c", "copy"])
+        args.append(str(output_path))
+        return args
+
     def _has_valid_dimensions(self, metadata: MediaMetadata) -> bool:
         if metadata.width is None or metadata.height is None:
             return False
@@ -278,7 +334,7 @@ class Mp4Processor(VideoProcessor):
 
     @staticmethod
     def supported_formats() -> list[str]:
-        return ["mp4"]
+        return ["mp4", "m4v"]
 
 
 class MovProcessor(VideoProcessor):

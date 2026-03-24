@@ -154,7 +154,7 @@ def load_settings() -> Settings:
         max_pixel_megapixels=int(os.getenv("MAX_PIXEL_MEGAPIXELS", "50")),
         default_user_quota_bytes=int(os.getenv("DEFAULT_USER_QUOTA_BYTES", str(2 * 1024 * 1024 * 1024))),
         server_quota_bytes=int(os.getenv("SERVER_QUOTA_BYTES", "0")),
-        video_thumb_frames=max(1, int(os.getenv("VIDEO_THUMB_FRAMES", "10"))),
+        video_thumb_frames=max(1, int(os.getenv("VIDEO_THUMB_FRAMES", "15"))),
         task_queue_mode=os.getenv("TASK_QUEUE_MODE", "async").strip().lower(),
         task_worker_enabled=_env_bool("TASK_WORKER_ENABLED") if _env_bool("TASK_WORKER_ENABLED") is not None else True,
         task_worker_queues=_dedupe_strings(_env_csv("TASK_WORKER_QUEUES")) or ("default", "thumbnails"),

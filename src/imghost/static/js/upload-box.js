@@ -11,9 +11,60 @@ window.resolveUploadDestination = ({ albumId, albumUrl, isAuthenticated }) => {
   return "";
 };
 
+const SUPPORTED_UPLOAD_EXTENSIONS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "heic",
+  "heif",
+  "bmp",
+  "avif",
+  "tif",
+  "tiff",
+  "svg",
+  "mp4",
+  "m4v",
+  "mov",
+  "webm",
+]);
+
+const SUPPORTED_UPLOAD_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "image/bmp",
+  "image/avif",
+  "image/tiff",
+  "image/svg+xml",
+  "video/mp4",
+  "video/x-m4v",
+  "video/quicktime",
+  "video/webm",
+]);
+
+window.isSupportedUploadFile = (file) => {
+  if (!file) {
+    return false;
+  }
+  const fileType = String(file.type || "").trim().toLowerCase();
+  if (SUPPORTED_UPLOAD_MIME_TYPES.has(fileType)) {
+    return true;
+  }
+  const fileName = String(file.name || "");
+  const extension = fileName.includes(".") ? fileName.split(".").pop().trim().toLowerCase() : "";
+  return SUPPORTED_UPLOAD_EXTENSIONS.has(extension);
+};
+
 window.createUploadStatusController = (uploadForm) => {
   const summaryNode = uploadForm?.querySelector(".upload-file-summary");
   const feedbackNode = uploadForm?.querySelector("[data-upload-feedback]");
+  const progressNode = uploadForm?.querySelector("[data-upload-progress]");
+  const progressBarNode = uploadForm?.querySelector("[data-upload-progress-bar]");
   const storageKey = uploadForm?.id ? `imghost-upload-status:${uploadForm.id}` : "";
 
   const setStatus = (message, tone = "") => {
@@ -47,6 +98,25 @@ window.createUploadStatusController = (uploadForm) => {
 
   const clearFeedback = () => {
     setFeedback("");
+  };
+
+  const setProgress = (percent) => {
+    if (!progressNode || !progressBarNode) {
+      return;
+    }
+    const normalized = Math.max(0, Math.min(100, Number(percent) || 0));
+    progressNode.classList.remove("hidden");
+    progressNode.setAttribute("aria-hidden", "false");
+    progressBarNode.style.width = `${normalized}%`;
+  };
+
+  const clearProgress = () => {
+    if (!progressNode || !progressBarNode) {
+      return;
+    }
+    progressBarNode.style.width = "0%";
+    progressNode.classList.add("hidden");
+    progressNode.setAttribute("aria-hidden", "true");
   };
 
   const readStoredStatus = () => {
@@ -114,6 +184,7 @@ window.createUploadStatusController = (uploadForm) => {
   return {
     clearStatus,
     clearFeedback,
+    clearProgress,
     persistSuccess(message) {
       storeStatus(message, "success");
       setStatus(message, "success");
@@ -130,6 +201,7 @@ window.createUploadStatusController = (uploadForm) => {
     setPending(message) {
       setFeedback(message, "pending");
     },
+    setProgress,
     syncSelection,
   };
 };
@@ -168,6 +240,44 @@ window.attachUploadBox = ({
     return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
   };
 
+  const uploadRequest = (formData, { onProgress } = {}) =>
+    new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open("POST", "/api/v1/upload");
+      request.responseType = "text";
+
+      request.upload.addEventListener("progress", (event) => {
+        if (!event.lengthComputable) {
+          return;
+        }
+        onProgress?.((event.loaded / event.total) * 100);
+      });
+
+      request.addEventListener("load", () => {
+        let data = {};
+        try {
+          data = request.responseText ? JSON.parse(request.responseText) : {};
+        } catch {
+          data = {};
+        }
+        if (request.status >= 200 && request.status < 300) {
+          resolve(data);
+          return;
+        }
+        reject(new Error(data.detail || "Upload failed."));
+      });
+
+      request.addEventListener("error", () => {
+        reject(new Error("Upload failed."));
+      });
+
+      request.addEventListener("abort", () => {
+        reject(new Error("Upload cancelled."));
+      });
+
+      request.send(formData);
+    });
+
   const validateFileSizes = (fileList) => {
     if (!Number.isFinite(maxUploadBytes) || maxUploadBytes <= 0) {
       return null;
@@ -177,6 +287,14 @@ window.attachUploadBox = ({
       return null;
     }
     return `${oversizedFile.name} exceeds the ${humanizeBytes(maxUploadBytes)} upload limit.`;
+  };
+
+  const validateFileTypes = (fileList) => {
+    const unsupportedFile = Array.from(fileList || []).find((file) => !window.isSupportedUploadFile?.(file));
+    if (!unsupportedFile) {
+      return null;
+    }
+    return `${unsupportedFile.name} is not a supported image or video format.`;
   };
 
   const setUploadingState = (isUploading) => {
@@ -214,6 +332,17 @@ window.attachUploadBox = ({
     updateFileSummary();
   };
 
+  const rejectInvalidFiles = (fileList) => {
+    const fileTypeError = validateFileTypes(fileList);
+    if (!fileTypeError) {
+      return false;
+    }
+    resetTransientInputs();
+    uploadStatus?.setError(fileTypeError);
+    onError?.(fileTypeError);
+    return true;
+  };
+
   const inferFileName = (url, contentType) => {
     try {
       const pathname = new URL(url).pathname;
@@ -232,9 +361,16 @@ window.attachUploadBox = ({
     if (!fileList?.length) {
       return;
     }
+    const fileTypeError = validateFileTypes(fileList);
+    if (fileTypeError) {
+      uploadStatus?.setError(fileTypeError);
+      onError?.(fileTypeError);
+      return;
+    }
     const sizeError = validateFileSizes(fileList);
     if (sizeError) {
       uploadStatus?.setError(sizeError);
+      onError?.(sizeError);
       return;
     }
     if (uploadInFlight) {
@@ -244,6 +380,7 @@ window.attachUploadBox = ({
 
     let shouldResetInputs = true;
     uploadStatus?.clearFeedback();
+    uploadStatus?.clearProgress();
     setUploadingState(true);
     updateFileSummary(statusMessage || `Uploading ${fileList.length} file${fileList.length === 1 ? "" : "s"}...`);
     uploadStatus?.setPending(statusMessage || `Uploading ${fileList.length} file${fileList.length === 1 ? "" : "s"}...`);
@@ -264,14 +401,14 @@ window.attachUploadBox = ({
         formData.append("file", file, file.name);
       });
 
-      const response = await fetch("/api/v1/upload", {
-        method: "POST",
-        body: formData,
+      const data = await uploadRequest(formData, {
+        onProgress: (percent) => {
+          uploadStatus?.setProgress(percent);
+          updateFileSummary(
+            `${statusMessage || `Uploading ${fileList.length} file${fileList.length === 1 ? "" : "s"}...`} ${Math.round(percent)}%`,
+          );
+        },
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.detail || "Upload failed.");
-      }
 
       if (!isAuthenticated && data.album_id) {
         const deleteToken = window.imghostAnonAlbums?.deleteTokenFromManageUrl?.(data.manage_url || "");
@@ -298,6 +435,7 @@ window.attachUploadBox = ({
 
       if (redirectTo) {
         shouldResetInputs = false;
+        uploadStatus?.setProgress(100);
         uploadStatus?.persistSuccess(successResult?.redirectMessage || "Upload succeeded. Redirecting...");
         window.setTimeout(() => {
           window.location.assign(redirectTo);
@@ -317,6 +455,7 @@ window.attachUploadBox = ({
       uploadStatus?.setError(message);
       onError?.(message);
     } finally {
+      uploadStatus?.clearProgress();
       if (shouldResetInputs) {
         resetTransientInputs();
       }
@@ -352,6 +491,9 @@ window.attachUploadBox = ({
         throw new Error("That URL did not return an image.");
       }
       const file = new File([blob], inferFileName(url, blob.type), { type: blob.type });
+      if (!window.isSupportedUploadFile?.(file)) {
+        throw new Error(`${file.name} is not a supported image format.`);
+      }
       await submitUpload([file], "Uploading pasted image URL...");
     } catch (error) {
       updateFileSummary();
@@ -384,6 +526,9 @@ window.attachUploadBox = ({
     if (!uploadInput || !event.dataTransfer?.files?.length) {
       return;
     }
+    if (rejectInvalidFiles(event.dataTransfer.files)) {
+      return;
+    }
     uploadInput.files = event.dataTransfer.files;
     updateFileSummary();
     submitUpload(event.dataTransfer.files);
@@ -391,6 +536,9 @@ window.attachUploadBox = ({
 
   uploadInput?.addEventListener("change", () => {
     if (uploadInput.files?.length) {
+      if (rejectInvalidFiles(uploadInput.files)) {
+        return;
+      }
       submitUpload(uploadInput.files);
     }
   });

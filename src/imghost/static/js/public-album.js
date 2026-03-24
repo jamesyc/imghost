@@ -3,6 +3,10 @@ const publicAlbumBootstrapNode = document.getElementById("public-album-bootstrap
 const publicAlbumHeroActions = document.getElementById("public-album-hero-actions");
 const publicAlbumBootstrap = publicAlbumBootstrapNode ? JSON.parse(publicAlbumBootstrapNode.textContent || "{}") : {};
 const publicAlbumId = publicAlbumBootstrap.id || null;
+const activeInlineVideoState = {
+  video: null,
+  shouldResume: false,
+};
 const CLIENT_COMPAT_WARNING_RULES = {
   hevc: {
     canPlayType: 'video/mp4; codecs="hev1"',
@@ -53,16 +57,29 @@ const closePublicAlbumLightbox = () => {
     video.load();
     video.classList.add("hidden");
   }
+  if (activeInlineVideoState.video && activeInlineVideoState.shouldResume) {
+    activeInlineVideoState.video.play().catch(() => {});
+  }
+  activeInlineVideoState.video = null;
+  activeInlineVideoState.shouldResume = false;
 };
 
-const openPublicAlbumLightbox = ({ mediaUrl, mediaType, filename }) => {
+const openPublicAlbumLightbox = ({ mediaUrl, mediaType, filename, previewElement = null }) => {
   const lightbox = ensurePublicAlbumLightbox();
   const image = lightbox.querySelector(".public-album-lightbox-image");
   const video = lightbox.querySelector(".public-album-lightbox-video");
   if (!image || !video) {
     return;
   }
+  activeInlineVideoState.video = null;
+  activeInlineVideoState.shouldResume = false;
   if (mediaType === "video") {
+    const inlineVideo = previewElement?.querySelector("video");
+    if (inlineVideo) {
+      activeInlineVideoState.video = inlineVideo;
+      activeInlineVideoState.shouldResume = !inlineVideo.paused && !inlineVideo.ended;
+      inlineVideo.pause();
+    }
     image.classList.add("hidden");
     video.src = mediaUrl;
     video.classList.remove("hidden");
@@ -119,6 +136,24 @@ publicAlbumRoot?.addEventListener("click", (event) => {
     mediaUrl: previewButton.dataset.mediaUrl,
     mediaType: previewButton.dataset.mediaType,
     filename: previewButton.dataset.filename,
+    previewElement: previewButton,
+  });
+});
+
+publicAlbumRoot?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+  const previewButton = event.target.closest(".public-album-preview");
+  if (!previewButton) {
+    return;
+  }
+  event.preventDefault();
+  openPublicAlbumLightbox({
+    mediaUrl: previewButton.dataset.mediaUrl,
+    mediaType: previewButton.dataset.mediaType,
+    filename: previewButton.dataset.filename,
+    previewElement: previewButton,
   });
 });
 

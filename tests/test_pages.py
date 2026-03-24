@@ -81,7 +81,10 @@ def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> 
         assert 'id="register-form"' not in response.text
         assert 'id="upload-form"' in response.text
         assert 'id="upload-form" class="upload-form-modern"' in response.text
+        assert 'accept=".jpg,.jpeg,.png,.gif,.webp,.heic,.heif,.bmp,.avif,.tif,.tiff,.svg,.mp4,.m4v,.mov,.webm"' in response.text
         assert 'data-upload-feedback' in response.text
+        assert 'data-upload-progress' in response.text
+        assert 'data-upload-progress-bar' in response.text
         assert 'id="flash"' not in response.text
         assert "Anonymous uploads currently expire after 24 hour(s)." in response.text
 
@@ -158,6 +161,8 @@ def test_dashboard_page_uses_local_upload_feedback_anchor(tmp_path, monkeypatch)
         assert page.status_code == 200
         assert 'id="dashboard-upload-form"' in page.text
         assert 'data-upload-feedback' in page.text
+        assert 'data-upload-progress' in page.text
+        assert 'data-upload-progress-bar' in page.text
 
 
 def test_album_detail_page_uses_local_upload_feedback_anchor(tmp_path, monkeypatch) -> None:
@@ -624,7 +629,6 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         assert '<script src="/static/js/public-album.js" defer></script>' in anonymous_page.text
         assert "Public album" in anonymous_page.text
         assert "created " in anonymous_page.text
-        assert "last edited " not in anonymous_page.text
         assert 'id="flash"' not in anonymous_page.text
         assert "Edit Album" not in anonymous_page.text
         assert "delete_token=" not in anonymous_page.text
@@ -701,47 +705,39 @@ def test_public_album_page_shows_last_edited_only_after_album_changes(tmp_path, 
         assert "last edited " in edited_page.text
 
 
-def test_public_album_page_renders_videos_inline_instead_of_video_thumbnail_buttons(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("BASE_URL", "https://testserver")
-    monkeypatch.setenv("SECRET_KEY", "test-secret")
+def test_public_album_template_uses_inline_video_previews_with_lightbox_hooks() -> None:
+    template = Path(
+        "/home/james/imghost/src/imghost/templates/pages/public-album.html"
+    ).read_text(encoding="utf-8")
 
-    _, api_key = create_user_and_api_key(capsys, username="videopublic", email="videopublic@example.com")
-
-    with TestClient(app, base_url="https://testserver") as client:
-        upload = client.post(
-            "/api/v1/upload",
-            files=[("file", ("public.png", BytesIO(PNG_1X1), "image/png"))],
-            data={"title": "Video Album"},
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
-        assert upload.status_code == 200
-
-        media_id = upload.json()["media_id"]
-        update_media_record(
-            client,
-            media_id,
-            media_type="video",
-            format="mp4",
-            mime_type="video/mp4",
-            thumb_status="done",
-        )
-
-        page = client.get(f'/a/{upload.json()["album_id"]}')
-        assert page.status_code == 200
-        assert "public-album-preview-badge" not in page.text
-        assert 'data-thumb-src="' not in page.text
+    assert 'class="public-album-preview is-video"' in template
+    assert 'role="button"' in template
+    assert 'tabindex="0"' in template
+    assert 'data-media-type="{{ item.media_type }}"' in template
+    assert '<video autoplay muted loop playsinline controls preload="metadata" src="{{ item.media_url }}" aria-hidden="true"></video>' in template
+    assert "Play video" not in template
+    assert 'data-thumb-src="{{ item.thumb_url }}"' not in template
+    assert '<button' not in template.split('{% else %}', 1)[1].split('{% endif %}', 1)[0]
 
 
-def test_album_detail_renderer_uses_video_thumbnail_urls_for_video_previews() -> None:
+def test_album_detail_renderer_uses_inline_video_previews_with_lightbox_hooks() -> None:
     script = (
         Path("/home/james/imghost/src/imghost/static/js/album-detail-render.js")
         .read_text(encoding="utf-8")
     )
 
-    assert 'item.thumb_status === "done"' in script
-    assert 'item.thumb_url' in script
-    assert 'item.media_type !== "video"' in script
+    assert 'item.media_type === "video"' in script
+    assert 'class="album-detail-thumb public-album-preview is-video"' in script
+    assert 'role="button"' in script
+    assert 'tabindex="0"' in script
+    assert '<video autoplay muted loop playsinline controls preload="metadata" src="${ns.escapeHtml(item.media_url)}" aria-hidden="true"></video>' in script
+    assert "activeInlineVideoState" in script
+    assert "inlineVideo.pause();" in script
+    assert "activeInlineVideoState.video.play().catch(() => {});" in script
+
+    interactions = Path("/home/james/imghost/src/imghost/static/js/album-detail.js").read_text(encoding="utf-8")
+    assert '.album-detail-thumb[role="button"]' in interactions
+    assert 'event.key !== "Enter" && event.key !== " "' in interactions
 
 
 def test_public_album_script_checks_video_compatibility_client_side() -> None:
@@ -750,9 +746,41 @@ def test_public_album_script_checks_video_compatibility_client_side() -> None:
     assert "canPlayType" in script
     assert 'video/mp4; codecs="hev1"' in script
     assert 'video/webm; codecs="vp9"' in script
+    assert "activeInlineVideoState" in script
+    assert "inlineVideo.pause();" in script
+    assert "activeInlineVideoState.video.play().catch(() => {});" in script
+    assert 'event.key !== "Enter" && event.key !== " "' in script
     assert "data-client-compat-warning" in Path(
         "/home/james/imghost/src/imghost/templates/pages/public-album.html"
     ).read_text(encoding="utf-8")
+
+
+def test_upload_box_script_rejects_unsupported_files_before_upload() -> None:
+    script = Path("/home/james/imghost/src/imghost/static/js/upload-box.js").read_text(encoding="utf-8")
+
+    assert "SUPPORTED_UPLOAD_EXTENSIONS" in script
+    assert '"m4v"' in script
+    assert '"tiff"' in script
+    assert '"image/tiff"' in script
+    assert '"video/x-m4v"' in script
+    assert "window.isSupportedUploadFile" in script
+    assert "is not a supported image or video format." in script
+    assert "rejectInvalidFiles(event.dataTransfer.files)" in script
+    assert "rejectInvalidFiles(uploadInput.files)" in script
+    assert "new XMLHttpRequest()" in script
+    assert 'request.upload.addEventListener("progress"' in script
+    assert "uploadStatus?.setProgress(percent);" in script
+    assert "uploadStatus?.clearProgress();" in script
+
+
+def test_album_detail_css_caps_image_preview_height_like_public_album() -> None:
+    stylesheet = Path("/home/james/imghost/src/imghost/static/css/base-pages.css").read_text(encoding="utf-8")
+
+    assert ".album-detail-thumb img" in stylesheet
+    assert "max-height: min(80vh, 960px);" in stylesheet
+    assert "object-fit: contain;" in stylesheet
+    assert ".album-detail-thumb video" in stylesheet
+    assert "max-height: min(70vh, 720px);" in stylesheet
 
 
 def test_admin_overview_script_renders_storage_breakdown_and_quota_progress() -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
 from .. import processors as processor_module
@@ -17,6 +17,18 @@ def _has_alpha(image: Image.Image) -> bool:
     if image.mode == "P":
         return "transparency" in image.info
     return "A" in image.getbands()
+
+
+def _convert_with_color_profile(image: Image.Image, *, target_mode: str) -> Image.Image:
+    icc_profile = image.info.get("icc_profile")
+    if not icc_profile:
+        return image.convert(target_mode)
+    try:
+        source_profile = ImageCms.ImageCmsProfile(BytesIO(icc_profile))
+        srgb_profile = ImageCms.createProfile("sRGB")
+        return ImageCms.profileToProfile(image, source_profile, srgb_profile, outputMode=target_mode)
+    except (OSError, ValueError, ImageCms.PyCMSError):
+        return image.convert(target_mode)
 
 
 class PillowProcessor(MediaProcessor):
@@ -117,7 +129,7 @@ class BrowserNormalizedPillowProcessor(PillowProcessor):
         with self._open_image(payload) as image:
             image = ImageOps.exif_transpose(image)
             save_format = "PNG" if _has_alpha(image) else "JPEG"
-            converted = image.convert("RGBA" if save_format == "PNG" else "RGB")
+            converted = _convert_with_color_profile(image, target_mode="RGBA" if save_format == "PNG" else "RGB")
             output = BytesIO()
             save_kwargs: dict[str, object] = {}
             if save_format == "JPEG":
@@ -130,7 +142,7 @@ class BrowserNormalizedPillowProcessor(PillowProcessor):
     async def generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
         with self._open_image(payload) as image:
             image = ImageOps.exif_transpose(image)
-            image = image.convert("RGB")
+            image = _convert_with_color_profile(image, target_mode="RGB")
             image.thumbnail(
                 (processor_module.THUMB_WIDTH, processor_module.THUMB_WIDTH * 100),
                 Image.Resampling.LANCZOS,
@@ -151,6 +163,12 @@ class AvifProcessor(BrowserNormalizedPillowProcessor):
     @staticmethod
     def supported_formats() -> list[str]:
         return ["avif"]
+
+
+class TiffProcessor(BrowserNormalizedPillowProcessor):
+    @staticmethod
+    def supported_formats() -> list[str]:
+        return ["tif", "tiff"]
 
 
 class AnimatedPillowProcessor(PillowProcessor):

@@ -90,6 +90,15 @@ def test_load_settings_defaults_task_worker_queues(monkeypatch, tmp_path) -> Non
     assert settings.task_worker_queues == ("default", "thumbnails")
 
 
+def test_load_settings_defaults_video_thumb_frames_to_fifteen(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.delenv("VIDEO_THUMB_FRAMES", raising=False)
+
+    settings = load_settings()
+    assert settings.video_thumb_frames == 15
+
+
 def test_load_settings_parses_task_worker_queues(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://fallback.example.com")

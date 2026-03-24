@@ -443,7 +443,22 @@
 }
 
 .album-detail-thumb,
-.public-album-preview,
+.public-album-preview {
+  display: grid;
+  place-items: center;
+  max-width: 100%;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  padding: 12px;
+  text-decoration: none;
+  color: inherit;
+  border: 0;
+  border-radius: var(--radius-panel);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+}
+
 .dashboard-recent-album-thumb,
 .public-user-album-card {
   display: block;
@@ -457,30 +472,34 @@
 }
 
 .album-detail-thumb img,
+.album-detail-thumb video,
 .dashboard-recent-album-thumb img,
 .public-album-preview img,
+.public-album-preview video,
 .public-album-preview-placeholder,
 .public-album-lightbox-image,
 .public-album-lightbox-video {
   display: block;
-  width: 100%;
   background: rgba(255, 255, 255, 0.08);
 }
 
 .album-detail-thumb img {
+  width: auto;
+  max-width: 100%;
   height: auto;
+  max-height: min(80vh, 960px);
+  min-height: 0;
+  object-fit: contain;
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   background: rgba(255, 255, 255, 0.14);
 }
 
-.album-detail-thumb.is-video img,
-.album-detail-thumb.is-video .public-album-preview-placeholder {
-  min-height: 240px;
-}
-
-.album-detail-thumb.is-video img {
-  object-fit: cover;
+.album-detail-thumb video {
+  display: block;
+  width: 100%;
+  max-height: min(70vh, 720px);
+  background: rgba(10, 14, 22, 0.92);
 }
 
 .album-detail-item {
@@ -722,17 +741,6 @@ body.upload-modal-open {
   color: var(--warning-banner-fg);
 }
 
-.public-album-preview {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  padding: 12px;
-  border-radius: var(--radius-panel);
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.12);
-}
-
 .public-album-preview img {
   width: auto;
   max-width: 100%;
@@ -743,19 +751,9 @@ body.upload-modal-open {
 }
 
 .public-album-preview video {
-  display: block;
   width: 100%;
   max-height: min(70vh, 720px);
   background: rgba(10, 14, 22, 0.92);
-}
-
-.public-album-preview.is-video img,
-.public-album-preview.is-video .public-album-preview-placeholder {
-  min-height: 240px;
-}
-
-.public-album-preview.is-video img {
-  object-fit: cover;
 }
 
 .public-album-preview-placeholder {

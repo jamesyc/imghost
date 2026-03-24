@@ -18,6 +18,29 @@
   gap: 16px;
 }
 
+.upload-progress {
+  position: relative;
+  width: min(100%, 560px);
+  height: 12px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.upload-progress.hidden {
+  display: none;
+}
+
+.upload-progress-bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f6ed8 0%, #65a6ff 100%);
+  transition: width 120ms ease;
+}
+
 .upload-form-modern .row-actions {
   justify-content: flex-end;
 }

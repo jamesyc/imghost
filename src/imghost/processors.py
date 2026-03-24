@@ -6,9 +6,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 
-THUMB_WIDTH = 375
+THUMB_WIDTH = 560
 ANIMATED_ORIGINAL_THRESHOLD_BYTES = 2 * 1024 * 1024
 ANIMATED_THUMB_MAX_SOURCE_FRAMES = 100
+VIDEO_THUMB_WEBP_QUALITY = 85
+VIDEO_THUMB_WEBP_COMPRESSION_LEVEL = 4
 VIDEO_PROBE_TIMEOUT_SECS = 20
 VIDEO_REMUX_TIMEOUT_SECS = 60
 VIDEO_SINGLE_FRAME_TIMEOUT_SECS = 30
@@ -36,6 +38,7 @@ class MediaMetadata:
     is_animated: bool
     mime_type: str
     format: str
+    rotation_degrees: int = 0
 
 
 @dataclass(slots=True)
@@ -117,6 +120,7 @@ from .media_processors.image import (
     PillowProcessor,
     PngProcessor,
     StaticPillowProcessor,
+    TiffProcessor,
     WebpProcessor,
 )
 from .media_processors.svg import SvgProcessor
@@ -132,6 +136,7 @@ def build_processor_registry(max_pixels: int, video_thumb_frames: int = 10) -> P
     registry.register(BmpProcessor(max_pixels))
     registry.register(HeifProcessor(max_pixels))
     registry.register(AvifProcessor(max_pixels))
+    registry.register(TiffProcessor(max_pixels))
     registry.register(SvgProcessor(max_pixels))
     registry.register(Mp4Processor(max_pixels, video_thumb_frames))
     registry.register(MovProcessor(max_pixels, video_thumb_frames))
