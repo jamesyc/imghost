@@ -142,7 +142,6 @@ class AppState:
             )
 
     async def stop(self) -> None:
-        await self._stop_role()
         if self._should_emit_worker_lifecycle_events():
             await self.telemetry.record_worker_stopped_event(
                 metadata={
@@ -162,6 +161,7 @@ class AppState:
                 "last_worker_stopped_at": self.telemetry.last_worker_stopped_at,
             },
         )
+        await self._stop_role()
         await self._stop_shared()
 
     async def _start_shared(self) -> None:

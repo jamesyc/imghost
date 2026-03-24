@@ -35,6 +35,25 @@ class _RecoveryRepository:
         return media
 
 
+class _RecordingLifecycleTelemetry:
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
+        self.last_worker_started_at = None
+        self.last_worker_stopped_at = None
+
+    async def record_system_startup(self, *, metadata: dict[str, object]) -> None:
+        self.order.append("telemetry.system_startup")
+
+    async def record_worker_started_event(self, *, metadata: dict[str, object]) -> None:
+        self.order.append("telemetry.worker_started")
+
+    async def record_worker_stopped_event(self, *, metadata: dict[str, object]) -> None:
+        self.order.append("telemetry.worker_stopped")
+
+    async def record_system_shutdown(self, *, metadata: dict[str, object]) -> None:
+        self.order.append("telemetry.system_shutdown")
+
+
 def _make_media(media_id: str, *, thumb_status: str) -> Media:
     return Media(
         id=media_id,
@@ -192,3 +211,78 @@ def test_app_state_runtime_status_reports_scheduler_service_shape(tmp_path, monk
     assert payload["services"]["scheduler"]["lease_seconds"] == 600
     assert payload["services"]["scheduler"]["jobs"]["prune_expired_albums"]["interval_seconds"] == 600
     assert payload["services"]["scheduler"]["jobs"]["prune_expired_albums"]["queue"] == "cleanup"
+
+
+def test_app_state_start_emits_lifecycle_telemetry_after_shared_and_role_startup() -> None:
+    order: list[str] = []
+    state = SimpleNamespace(
+        telemetry=_RecordingLifecycleTelemetry(order),
+        process_role="worker",
+        settings=SimpleNamespace(
+            base_url="http://testserver",
+            public_origin_enabled=False,
+            trusted_proxy_cidrs_enabled=False,
+            storage_backend="filesystem",
+            redis_mode="auto",
+            task_queue_mode="async",
+            task_worker_enabled=True,
+            thumbnail_worker_count=1,
+            session_redis_fail_closed=False,
+        ),
+        redis=SimpleNamespace(enabled=False),
+        run_task_worker=True,
+        task_worker_queues=("thumbnails",),
+    )
+
+    async def _start_shared() -> None:
+        order.append("start_shared")
+
+    async def _start_role() -> int:
+        order.append("start_role")
+        return 2
+
+    state._start_shared = _start_shared
+    state._start_role = _start_role
+    state._should_emit_worker_lifecycle_events = lambda: True
+
+    asyncio.run(AppState.start(state))
+
+    assert order == [
+        "start_shared",
+        "start_role",
+        "telemetry.system_startup",
+        "telemetry.worker_started",
+    ]
+
+
+def test_app_state_stop_emits_lifecycle_telemetry_before_role_and_shared_shutdown() -> None:
+    order: list[str] = []
+    state = SimpleNamespace(
+        telemetry=_RecordingLifecycleTelemetry(order),
+        process_role="worker",
+        settings=SimpleNamespace(
+            task_queue_mode="async",
+            thumbnail_worker_count=1,
+        ),
+        run_task_worker=True,
+        task_worker_queues=("thumbnails",),
+    )
+
+    async def _stop_role() -> None:
+        order.append("stop_role")
+
+    async def _stop_shared() -> None:
+        order.append("stop_shared")
+
+    state._stop_role = _stop_role
+    state._stop_shared = _stop_shared
+    state._should_emit_worker_lifecycle_events = lambda: True
+
+    asyncio.run(AppState.stop(state))
+
+    assert order == [
+        "telemetry.worker_stopped",
+        "telemetry.system_shutdown",
+        "stop_role",
+        "stop_shared",
+    ]
