@@ -40,9 +40,14 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         )
         assert response.status_code == 200
         payload = response.json()
+        assert payload["process_role"] == "app"
         assert payload["database"]["ok"] is True
         assert payload["storage"]["ok"] is True
         assert "tasks" in payload
+        assert payload["services"]["app"]["enabled_in_this_process"] is True
+        assert payload["services"]["worker"]["enabled_in_this_process"] is False
+        assert payload["services"]["worker"]["queues"] == []
+        assert payload["services"]["scheduler"]["enabled_in_this_process"] is False
         assert payload["public_origin_enabled"] is True
         assert payload["public_origin_mode"] == "strict"
         assert "trusted_public_origins" in payload
@@ -52,7 +57,7 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         assert payload["trusted_proxy_cidrs"] == ["127.0.0.1/32", "172.16.0.0/12"]
         assert payload["redis"]["session_fail_closed"] is True
         assert "subsystems" in payload["redis"]
-        assert "worker" in payload
+        assert "services" in payload
         assert "tasks" in payload
         assert payload["bootstrap_admin"] == {
             "enabled": False,
@@ -63,6 +68,26 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
             "user_id": None,
             "warning": None,
         }
+
+
+def test_admin_runtime_status_reports_worker_service_view_for_worker_role(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("TASK_WORKER_ENABLED", "true")
+    monkeypatch.setenv("TASK_WORKER_QUEUES", "thumbnails,cleanup")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="statusworkeradmin", email="statusworkeradmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["process_role"] == "app"
+        assert payload["services"]["worker"]["enabled_in_this_process"] is False
+        assert payload["services"]["worker"]["queues"] == []
 
 
 def test_admin_runtime_status_reports_bootstrap_admin_promotion_state(tmp_path, monkeypatch, capsys) -> None:

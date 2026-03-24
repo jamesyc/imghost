@@ -264,13 +264,21 @@ class AppState:
                     ),
                 },
             },
-            "worker": {
-                "enabled_in_this_process": self.run_task_worker,
-                "queues": list(self.task_worker_queues),
-                "last_started_at": self.telemetry.last_worker_started_at,
-                "last_stopped_at": self.telemetry.last_worker_stopped_at,
-                "last_task_failure_at": self.telemetry.last_task_failure_at,
-                "last_task_failure": self.telemetry.last_task_failure,
+            "services": {
+                "app": {
+                    "enabled_in_this_process": self.process_role == "app",
+                },
+                "worker": {
+                    "enabled_in_this_process": self.run_task_worker,
+                    "queues": list(self.task_worker_queues),
+                    "last_started_at": self.telemetry.last_worker_started_at,
+                    "last_stopped_at": self.telemetry.last_worker_stopped_at,
+                    "last_task_failure_at": self.telemetry.last_task_failure_at,
+                    "last_task_failure": self.telemetry.last_task_failure,
+                },
+                "scheduler": {
+                    "enabled_in_this_process": self.process_role == "scheduler",
+                },
             },
             "tasks": {
                 "mode": self.settings.task_queue_mode,

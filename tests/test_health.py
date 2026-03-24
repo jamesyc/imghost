@@ -14,6 +14,7 @@ def _runtime_status_payload(
     task_mode: str = "async",
 ) -> dict[str, object]:
     return {
+        "process_role": "app",
         "database": {"ok": database_ok},
         "storage": {"ok": storage_ok},
         "redis": {
@@ -26,14 +27,19 @@ def _runtime_status_payload(
                 "tasks": {"configured": redis_configured, "mode": "redis" if redis_configured else "fallback"},
             },
         },
-        "worker": {
-            "enabled_in_this_process": True,
-            "last_started_at": None,
-            "last_stopped_at": None,
-            "last_task_failure_at": None,
-            "last_task_failure": None,
+        "services": {
+            "app": {"enabled_in_this_process": True},
+            "worker": {
+                "enabled_in_this_process": False,
+                "queues": [],
+                "last_started_at": None,
+                "last_stopped_at": None,
+                "last_task_failure_at": None,
+                "last_task_failure": None,
+            },
+            "scheduler": {"enabled_in_this_process": False},
         },
-        "tasks": {"mode": task_mode, "queue_lengths": {"default": 0, "thumbnails": 0}},
+        "tasks": {"mode": task_mode, "queues": {"default": 0, "thumbnails": 0}, "worker_queues": []},
         "public_origin_enabled": True,
         "public_origin_mode": "strict",
         "trusted_public_origins": [],

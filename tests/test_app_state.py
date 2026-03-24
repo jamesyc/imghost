@@ -142,3 +142,24 @@ def test_app_state_scheduler_role_skips_worker_lifecycle_and_recovery(tmp_path, 
     assert state.task_worker_queues == ()
     assert state._should_run_thumbnail_startup_recovery() is False
     assert state._should_emit_worker_lifecycle_events() is False
+
+
+def test_app_state_runtime_status_reports_service_shape_for_worker_role(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    async def scenario() -> dict[str, object]:
+        state = AppState(load_settings(), process_role="worker", task_worker_queues=("thumbnails", "cleanup"))
+        await state.database.connect()
+        try:
+            return await state.runtime_status()
+        finally:
+            await state.database.close()
+
+    payload = asyncio.run(scenario())
+
+    assert payload["process_role"] == "worker"
+    assert payload["services"]["app"]["enabled_in_this_process"] is False
+    assert payload["services"]["worker"]["enabled_in_this_process"] is True
+    assert payload["services"]["worker"]["queues"] == ["thumbnails", "cleanup"]
+    assert payload["services"]["scheduler"]["enabled_in_this_process"] is False

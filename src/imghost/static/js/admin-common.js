@@ -70,12 +70,23 @@ window.adminFormatForwardedHeadersPolicy = (value) => {
 };
 
 window.renderAdminRuntimeCards = (payload) => {
+  const workerService = payload.services?.worker || {};
+  const appService = payload.services?.app || {};
+  const schedulerService = payload.services?.scheduler || {};
   const hasSeparateWorkerService = payload.redis?.configured && payload.tasks?.mode === "redis";
   const queueDetails = Object.entries(payload.tasks?.queues || {})
     .map(([name, depth]) => `${name}: ${window.adminFormatNumber(depth)}`)
     .join(" · ");
+  const workerQueueList = (workerService.queues || []).join(", ");
+  const activeRoleLabel = payload.process_role || "unknown";
 
   const entries = [
+    {
+      label: "Process role",
+      status: activeRoleLabel,
+      tone: activeRoleLabel === "worker" ? "ok" : activeRoleLabel === "scheduler" ? "neutral" : "ok",
+      hint: `App=${window.escapeAdminHtml(String(Boolean(appService.enabled_in_this_process)))} · Worker=${window.escapeAdminHtml(String(Boolean(workerService.enabled_in_this_process)))} · Scheduler=${window.escapeAdminHtml(String(Boolean(schedulerService.enabled_in_this_process)))}`,
+    },
     {
       label: "Database",
       status: payload.database?.ok ? "Healthy" : "Unavailable",
@@ -102,17 +113,17 @@ window.renderAdminRuntimeCards = (payload) => {
     },
     {
       label: "Worker",
-      status: payload.worker?.enabled_in_this_process
-        ? "Running in app process"
+      status: workerService.enabled_in_this_process
+        ? "Worker role active"
         : hasSeparateWorkerService
           ? "Separate worker service"
           : "Disabled",
-      tone: payload.worker?.enabled_in_this_process || hasSeparateWorkerService
-        ? (payload.worker?.last_task_failure ? "warn" : "ok")
+      tone: workerService.enabled_in_this_process || hasSeparateWorkerService
+        ? (workerService.last_task_failure ? "warn" : "ok")
         : "neutral",
-      hint: payload.worker?.last_task_failure
-        ? `Last failure: ${window.escapeAdminHtml(String(payload.worker.last_task_failure))}`
-        : `Last started ${window.adminFormatDateTime(payload.worker?.last_started_at)}`,
+      hint: workerService.last_task_failure
+        ? `Queues ${window.escapeAdminHtml(workerQueueList || "none")} · Last failure: ${window.escapeAdminHtml(JSON.stringify(workerService.last_task_failure))}`
+        : `Queues ${window.escapeAdminHtml(workerQueueList || "none")} · Last started ${window.adminFormatDateTime(workerService.last_started_at)}`,
     },
     {
       label: "Public origin mode",
@@ -194,6 +205,9 @@ window.renderAdminNetworkTrust = (payload) => `
 `;
 
 window.renderAdminRuntimeDetails = (payload) => {
+  const workerService = payload.services?.worker || {};
+  const appService = payload.services?.app || {};
+  const schedulerService = payload.services?.scheduler || {};
   const queueRows = Object.entries(payload.tasks?.queues || {})
     .map(
       ([name, depth]) => `
@@ -237,15 +251,26 @@ window.renderAdminRuntimeDetails = (payload) => {
     <div class="item-list">
       <article class="admin-list-row">
         <div>
+          <strong>Process role</strong>
+          <p class="hint">
+            role=${window.escapeAdminHtml(payload.process_role || "unknown")} ·
+            app=${window.escapeAdminHtml(String(Boolean(appService.enabled_in_this_process)))} ·
+            worker=${window.escapeAdminHtml(String(Boolean(workerService.enabled_in_this_process)))} ·
+            scheduler=${window.escapeAdminHtml(String(Boolean(schedulerService.enabled_in_this_process)))}
+          </p>
+        </div>
+      </article>
+      <article class="admin-list-row">
+        <div>
           <strong>Worker</strong>
           <p class="hint">
-            enabled in this process=${window.escapeAdminHtml(String(Boolean(payload.worker?.enabled_in_this_process)))} ·
-            last started=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_started_at))} ·
-            last stopped=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_stopped_at))}
+            queues=${window.escapeAdminHtml((workerService.queues || []).join(", ") || "none")} ·
+            last started=${window.escapeAdminHtml(window.adminFormatDateTime(workerService.last_started_at))} ·
+            last stopped=${window.escapeAdminHtml(window.adminFormatDateTime(workerService.last_stopped_at))}
           </p>
           <p class="hint">
-            last task failure at=${window.escapeAdminHtml(window.adminFormatDateTime(payload.worker?.last_task_failure_at))} ·
-            last task failure=${window.escapeAdminHtml(payload.worker?.last_task_failure ? JSON.stringify(payload.worker.last_task_failure) : "Not recorded")}
+            last task failure at=${window.escapeAdminHtml(window.adminFormatDateTime(workerService.last_task_failure_at))} ·
+            last task failure=${window.escapeAdminHtml(workerService.last_task_failure ? JSON.stringify(workerService.last_task_failure) : "Not recorded")}
           </p>
         </div>
       </article>
@@ -260,7 +285,8 @@ window.renderAdminRuntimeDetails = (payload) => {
           <p class="hint">
             worker count=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.worker_count || 0))} ·
             active workers=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_workers || 0))} ·
-            active jobs=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_jobs || 0))}
+            active jobs=${window.escapeAdminHtml(window.adminFormatNumber(payload.tasks?.active_jobs || 0))} ·
+            worker queues=${window.escapeAdminHtml((payload.tasks?.worker_queues || []).join(", ") || "none")}
           </p>
         </div>
       </article>
