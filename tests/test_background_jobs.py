@@ -1,9 +1,12 @@
+import asyncio
 from io import BytesIO
 from time import monotonic, sleep
 
 from fastapi.testclient import TestClient
 
+from imghost.app_state import AppState
 from imghost.__main__ import main as cli_main
+from imghost.config import load_settings
 from imghost.main import app
 from imghost.models import utcnow
 from imghost.processors import MediaMetadata, SanitizedFile, ThumbnailResult, ValidationResult, VideoProcessingError
@@ -29,6 +32,22 @@ def wait_for_failed_thumbnail(client: TestClient, media_id: str, *, timeout: flo
     raise AssertionError(f"thumbnail for {media_id} did not enter failed state within {timeout} seconds")
 
 
+async def _run_thumbnail_worker_startup_and_wait_for_status(media_id: str, *, expected_status: str) -> None:
+    state = AppState(load_settings(), process_role="worker", task_worker_queues=("thumbnails",))
+    await state.start()
+    try:
+        deadline = monotonic() + 2.0
+        while monotonic() < deadline:
+            media = await state.repository.get_media(media_id)
+            assert media is not None
+            if media.thumb_status == expected_status:
+                return
+            await asyncio.sleep(0.02)
+        raise AssertionError(f"thumbnail for {media_id} did not enter {expected_status!r} within startup timeout")
+    finally:
+        await state.stop()
+
+
 def test_async_thumbnail_worker_recovers_pending_items_on_startup(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
@@ -50,8 +69,9 @@ def test_async_thumbnail_worker_recovers_pending_items_on_startup(tmp_path, monk
         existing.unlink()
 
     monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+    asyncio.run(_run_thumbnail_worker_startup_and_wait_for_status(media_id, expected_status="done"))
+
     with TestClient(app) as client:
-        wait_for_thumbnail(client, media_id)
         album = client.get(f"/api/v1/album/{payload['album_id']}").json()
         assert album["items"][0]["thumb_status"] == "done"
 
@@ -85,8 +105,9 @@ def test_async_thumbnail_worker_marks_processing_item_failed_when_source_missing
         existing.unlink()
 
     monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+    asyncio.run(_run_thumbnail_worker_startup_and_wait_for_status(media_id, expected_status="failed"))
+
     with TestClient(app) as client:
-        wait_for_failed_thumbnail(client, media_id)
         media = client.portal.call(client.app.state.imghost.repository.get_media, media_id)
         assert media is not None
         assert media.thumb_status == "failed"

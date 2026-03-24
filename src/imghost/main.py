@@ -27,7 +27,7 @@ from .web.user_api import router as user_api_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = load_settings()
-    app.state.imghost = AppState(settings)
+    app.state.imghost = AppState(settings, process_role="app")
     await app.state.imghost.start()
     yield
     await app.state.imghost.stop()

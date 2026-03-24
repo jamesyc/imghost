@@ -549,9 +549,9 @@ def test_app_state_worker_lifecycle_is_audited_and_suppressed_when_disabled(tmp_
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.delenv("REDIS_URL", raising=False)
 
-    async def run_state(run_worker: bool) -> tuple[int, int]:
+    async def run_state(process_role: str) -> tuple[int, int]:
         settings = load_settings()
-        state = AppState(settings, run_task_worker=run_worker)
+        state = AppState(settings, process_role=process_role)
         await state.start()
         await state.stop()
         conn = await asyncpg.connect(os.environ["DATABASE_URL"])
@@ -562,7 +562,7 @@ def test_app_state_worker_lifecycle_is_audited_and_suppressed_when_disabled(tmp_
         finally:
             await conn.close()
 
-    started, stopped = asyncio.run(run_state(True))
+    started, stopped = asyncio.run(run_state("worker"))
     assert started == 1
     assert stopped == 1
 
@@ -575,7 +575,7 @@ def test_app_state_worker_lifecycle_is_audited_and_suppressed_when_disabled(tmp_
 
     asyncio.run(truncate_audit())
 
-    started_disabled, stopped_disabled = asyncio.run(run_state(False))
+    started_disabled, stopped_disabled = asyncio.run(run_state("app"))
     assert started_disabled == 0
     assert stopped_disabled == 0
 

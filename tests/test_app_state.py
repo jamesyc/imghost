@@ -85,7 +85,60 @@ def test_app_state_allows_cli_worker_queue_override(tmp_path, monkeypatch) -> No
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("TASK_WORKER_QUEUES", "default,cleanup")
 
-    state = AppState(load_settings(), run_task_worker=True, task_worker_queues=("thumbnails",))
+    state = AppState(load_settings(), process_role="worker", task_worker_queues=("thumbnails",))
 
     assert state.run_task_worker is True
     assert state.task_worker_queues == ("thumbnails",)
+
+
+def test_app_state_app_role_does_not_run_worker_or_recovery(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_WORKER_QUEUES", "thumbnails,cleanup")
+
+    state = AppState(load_settings(), process_role="app")
+
+    assert state.process_role == "app"
+    assert state.run_task_worker is False
+    assert state.task_worker_queues == ()
+    assert state._should_run_thumbnail_startup_recovery() is False
+    assert state._should_emit_worker_lifecycle_events() is False
+
+
+def test_app_state_thumbnail_worker_role_runs_recovery_and_worker_lifecycle(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    state = AppState(load_settings(), process_role="worker", task_worker_queues=("thumbnails",))
+
+    assert state.process_role == "worker"
+    assert state.run_task_worker is True
+    assert state.task_worker_queues == ("thumbnails",)
+    assert state._should_run_thumbnail_startup_recovery() is True
+    assert state._should_emit_worker_lifecycle_events() is True
+
+
+def test_app_state_cleanup_worker_role_skips_thumbnail_recovery(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    state = AppState(load_settings(), process_role="worker", task_worker_queues=("cleanup",))
+
+    assert state.process_role == "worker"
+    assert state.run_task_worker is True
+    assert state.task_worker_queues == ("cleanup",)
+    assert state._should_run_thumbnail_startup_recovery() is False
+    assert state._should_emit_worker_lifecycle_events() is True
+
+
+def test_app_state_scheduler_role_skips_worker_lifecycle_and_recovery(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    state = AppState(load_settings(), process_role="scheduler")
+
+    assert state.process_role == "scheduler"
+    assert state.run_task_worker is False
+    assert state.task_worker_queues == ()
+    assert state._should_run_thumbnail_startup_recovery() is False
+    assert state._should_emit_worker_lifecycle_events() is False

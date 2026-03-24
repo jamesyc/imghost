@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from imghost.__main__ import (
     _confirm_risky_cli_target,
+    _process_role_for_command,
     _requires_cli_confirmation,
     _runs_worker_for_command,
     _worker_queues_for_command,
@@ -62,6 +63,13 @@ def test_worker_command_detection_and_confirmation_cover_split_commands() -> Non
     assert _requires_cli_confirmation("run-worker-thumbnails") is True
     assert _requires_cli_confirmation("run-worker-cleanup") is True
     assert _requires_cli_confirmation("run-worker-default") is True
+
+
+def test_process_role_selection_matches_command_type() -> None:
+    assert _process_role_for_command("run-worker") == "worker"
+    assert _process_role_for_command("run-worker-thumbnails") == "worker"
+    assert _process_role_for_command("retry-thumbnails") == "worker"
+    assert _process_role_for_command("prune") == "app"
 
 
 def test_cli_confirmation_refuses_noninteractive_nonlocal_nontest_target(capsys) -> None:

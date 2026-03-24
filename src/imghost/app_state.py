@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from .telemetry import Telemetry, build_telemetry
 from .config import Settings
@@ -20,17 +20,23 @@ from .storage import build_storage_backend
 from .task_catalog import GENERATE_THUMBNAIL_TASK, register_core_tasks
 from .tasks import AsyncTaskQueue, RedisTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 
+ProcessRole = Literal["app", "worker", "scheduler"]
+
 
 class AppState:
     def __init__(
         self,
         settings: Settings,
         *,
+        process_role: ProcessRole | None = None,
         run_task_worker: bool | None = None,
         task_worker_queues: tuple[str, ...] | None = None,
     ) -> None:
         self.settings = settings
-        self.run_task_worker = settings.task_worker_enabled if run_task_worker is None else run_task_worker
+        if process_role is None:
+            process_role = "worker" if run_task_worker else "app"
+        self.process_role: ProcessRole = process_role
+        self.run_task_worker = self.process_role == "worker"
         selected_worker_queues = settings.task_worker_queues if task_worker_queues is None else task_worker_queues
         self.task_worker_queues = selected_worker_queues if self.run_task_worker else ()
         self.database = Database(settings.database_url)
@@ -96,13 +102,11 @@ class AppState:
         return AsyncTaskQueue(context, worker_count=self.settings.thumbnail_worker_count, telemetry=self.telemetry)
 
     async def start(self) -> None:
-        await self.database.connect()
-        await self._apply_bootstrap_admin_promotion()
-        await self.redis.ensure_startup_ready()
-        await self.tasks.start()
-        recovered = await self.recover_thumbnails(include_failed=False)
+        await self._start_shared()
+        recovered = await self._start_role()
         await self.telemetry.record_system_startup(
             metadata={
+                "process_role": self.process_role,
                 "base_url": self.settings.base_url,
                 "public_origin_enabled": self.settings.public_origin_enabled,
                 "trusted_proxy_cidrs_enabled": self.settings.trusted_proxy_cidrs_enabled,
@@ -118,9 +122,10 @@ class AppState:
                 "recovered_thumbnail_count": recovered,
             },
         )
-        if self.run_task_worker:
+        if self._should_emit_worker_lifecycle_events():
             await self.telemetry.record_worker_started_event(
                 metadata={
+                    "process_role": self.process_role,
                     "task_queue_mode": self.settings.task_queue_mode,
                     "task_worker_queues": list(self.task_worker_queues),
                     "thumbnail_worker_count": self.settings.thumbnail_worker_count,
@@ -129,10 +134,11 @@ class AppState:
             )
 
     async def stop(self) -> None:
-        await self.tasks.stop()
-        if self.run_task_worker:
+        await self._stop_role()
+        if self._should_emit_worker_lifecycle_events():
             await self.telemetry.record_worker_stopped_event(
                 metadata={
+                    "process_role": self.process_role,
                     "task_queue_mode": self.settings.task_queue_mode,
                     "task_worker_queues": list(self.task_worker_queues),
                     "thumbnail_worker_count": self.settings.thumbnail_worker_count,
@@ -140,6 +146,7 @@ class AppState:
             )
         await self.telemetry.record_system_shutdown(
             metadata={
+                "process_role": self.process_role,
                 "task_queue_mode": self.settings.task_queue_mode,
                 "run_task_worker": self.run_task_worker,
                 "task_worker_queues": list(self.task_worker_queues),
@@ -147,8 +154,36 @@ class AppState:
                 "last_worker_stopped_at": self.telemetry.last_worker_stopped_at,
             },
         )
+        await self._stop_shared()
+
+    async def _start_shared(self) -> None:
+        await self.database.connect()
+        await self._apply_bootstrap_admin_promotion()
+        await self.redis.ensure_startup_ready()
+        if self._should_start_task_runtime():
+            await self.tasks.start()
+
+    async def _start_role(self) -> int:
+        if self._should_run_thumbnail_startup_recovery():
+            return await self.recover_thumbnails(include_failed=False)
+        return 0
+
+    async def _stop_role(self) -> None:
+        if self._should_start_task_runtime():
+            await self.tasks.stop()
+
+    async def _stop_shared(self) -> None:
         await self.redis.close()
         await self.database.close()
+
+    def _should_start_task_runtime(self) -> bool:
+        return True
+
+    def _should_run_thumbnail_startup_recovery(self) -> bool:
+        return self.process_role == "worker" and "thumbnails" in self.task_worker_queues
+
+    def _should_emit_worker_lifecycle_events(self) -> bool:
+        return self.process_role == "worker"
 
     async def _enqueue_thumbnail(self, event: MediaUploaded) -> None:
         await self.tasks.enqueue(
@@ -204,6 +239,7 @@ class AppState:
                 "or a cloud proxy, enable trusted proxy CIDRs so only that proxy can set the public host and protocol."
             )
         return {
+            "process_role": self.process_role,
             "database": {"ok": database_ok},
             "storage": {"ok": storage_ok},
             "redis": {

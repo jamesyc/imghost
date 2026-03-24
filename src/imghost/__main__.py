@@ -87,6 +87,12 @@ def _runs_worker_for_command(command: str) -> bool:
     return command in WORKER_COMMAND_QUEUES
 
 
+def _process_role_for_command(command: str) -> str:
+    if _runs_worker_for_command(command):
+        return "worker"
+    return "app"
+
+
 def _confirm_risky_cli_target(
     dsn: str,
     *,
@@ -132,6 +138,7 @@ async def run_cli(argv: list[str] | None = None) -> int:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     state = AppState(
         settings,
+        process_role=_process_role_for_command(args.command),
         run_task_worker=_runs_worker_for_command(args.command),
         task_worker_queues=_worker_queues_for_command(args.command, configured_queues=settings.task_worker_queues),
     )
