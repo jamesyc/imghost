@@ -7,13 +7,18 @@ from hashlib import sha256
 from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from ..audit import actions
-from ..audit.context import anonymous_actor, build_request_context, build_runtime_process_context, hash_client_ip, user_actor
-from ..audit.models import AuditObject
+from ..telemetry import actions
+from ..telemetry.context import anonymous_actor, user_actor
+from ..telemetry.helpers import (
+    record_admin_access_denied,
+    record_api_key_auth_failed,
+    record_api_key_authenticated,
+)
+from ..telemetry.models import TelemetryObject
 from ..config import Settings
 from ..models import User, utcnow
 from .page_context import login_redirect
-from .request_context import correlation_id, get_state
+from .request_context import get_state
 
 
 @dataclass
@@ -50,58 +55,36 @@ async def authenticated_principal(request: Request, *, required: bool = False) -
     header = request.headers.get("Authorization", "")
     scheme, _, token = header.partition(" ")
     if scheme.lower() == "bearer" and token:
-        request.state.audit_auth_method = "api_key"
+        request.state.telemetry_auth_method = "api_key"
         api_key = await state.repository.get_api_key_by_hash(sha256(token.encode("utf-8")).hexdigest())
         if api_key is None:
-            request_context = build_request_context(request, auth_method="api_key")
-            await state.audit.emit_action(
-                event_type=actions.API_KEY_INVALID,
-                action="apikey.auth.failed",
-                result="denied",
+            await record_api_key_auth_failed(
+                state.telemetry,
+                request,
                 actor=anonymous_actor(),
-                object=AuditObject(type="auth", id="api_key"),
-                metadata={"source": "api", "correlation_id": correlation_id(request)},
-                request=request_context,
-                process=build_runtime_process_context("api"),
+                object=TelemetryObject(type="auth", id="api_key"),
                 reason="invalid_api_key",
-                actor_ip_hash=hash_client_ip(request_context.client_ip),
             )
             raise HTTPException(status_code=401, detail="Invalid API key.")
         user = await state.repository.get_user(api_key.user_id)
         if user is None or user.suspended:
-            request_context = build_request_context(request, auth_method="api_key")
-            await state.audit.emit_action(
-                event_type=actions.ADMIN_ACCESS_DENIED if user is not None and user.is_admin else actions.API_KEY_INVALID,
-                action="apikey.auth.failed",
-                result="denied",
+            await record_api_key_auth_failed(
+                state.telemetry,
+                request,
                 actor=user_actor(user) if user is not None else anonymous_actor(),
-                object=AuditObject(type="user", id=api_key.user_id),
-                metadata={"source": "api", "correlation_id": correlation_id(request)},
-                request=request_context,
-                process=build_runtime_process_context("api"),
+                object=TelemetryObject(type="user", id=api_key.user_id),
                 reason="suspended" if user is not None and user.suspended else "missing_user",
-                actor_ip_hash=hash_client_ip(request_context.client_ip),
+                event_type=actions.ADMIN_ACCESS_DENIED if user is not None and user.is_admin else actions.API_KEY_INVALID,
             )
             raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
         api_key.last_used_at = utcnow()
         await state.repository.update_api_key(api_key)
-        request_context = build_request_context(request, auth_method="api_key")
-        await state.audit.emit_action(
-            event_type=actions.API_KEY_AUTHENTICATED,
-            action="apikey.auth.success",
-            result="success",
-            actor=user_actor(user),
-            object=AuditObject(type="user", id=user.id),
-            metadata={"api_key_id": api_key.id, "source": "api", "correlation_id": correlation_id(request)},
-            request=request_context,
-            process=build_runtime_process_context("api"),
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
-        )
+        await record_api_key_authenticated(state.telemetry, request, user=user, api_key_id=api_key.id)
         return ResolvedPrincipal(user=user, raw_api_key=token)
 
     session_token = request.cookies.get(state.settings.session_cookie_name)
     if session_token:
-        request.state.audit_auth_method = "session"
+        request.state.telemetry_auth_method = "session"
         user_id = await state.session_backend.resolve_user(session_token)
         if not user_id:
             request.state.clear_session_cookie = True
@@ -132,33 +115,23 @@ async def require_admin_user(request: Request) -> User:
         user = await authenticated_user(request, required=True)
     except HTTPException as exc:
         if exc.status_code in {401, 403}:
-            request_context = build_request_context(request)
-            await state.audit.emit_action(
-                event_type=actions.ADMIN_ACCESS_DENIED,
-                action="auth.admin.denied",
-                result="denied",
+            await record_admin_access_denied(
+                state.telemetry,
+                request,
                 actor=anonymous_actor(),
-                object=AuditObject(type="admin", id=request.url.path),
-                metadata={"source": "api", "correlation_id": correlation_id(request)},
-                request=request_context,
-                process=build_runtime_process_context("api"),
+                object_type="admin",
                 reason="authentication_required" if exc.status_code == 401 else "forbidden",
-                actor_ip_hash=hash_client_ip(request_context.client_ip),
+                source="api",
             )
         raise
     if user is None or not user.is_admin:
-        request_context = build_request_context(request)
-        await state.audit.emit_action(
-            event_type=actions.ADMIN_ACCESS_DENIED,
-            action="auth.admin.denied",
-            result="denied",
+        await record_admin_access_denied(
+            state.telemetry,
+            request,
             actor=user_actor(user) if user is not None else anonymous_actor(),
-            object=AuditObject(type="admin", id=request.url.path),
-            metadata={"source": "api", "correlation_id": correlation_id(request)},
-            request=request_context,
-            process=build_runtime_process_context("api"),
+            object_type="admin",
             reason="admin_required",
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
+            source="api",
         )
         raise HTTPException(status_code=403, detail="Admin access required.")
     return user
@@ -175,33 +148,23 @@ async def require_page_admin(request: Request) -> User | RedirectResponse:
     state = get_state(request)
     user = await authenticated_user(request, required=False)
     if user is None:
-        request_context = build_request_context(request)
-        await state.audit.emit_action(
-            event_type=actions.ADMIN_ACCESS_DENIED,
-            action="auth.admin.denied",
-            result="denied",
+        await record_admin_access_denied(
+            state.telemetry,
+            request,
             actor=anonymous_actor(),
-            object=AuditObject(type="admin_page", id=request.url.path),
-            metadata={"source": "web", "correlation_id": correlation_id(request)},
-            request=request_context,
-            process=build_runtime_process_context("web"),
+            object_type="admin_page",
             reason="authentication_required",
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
+            source="web",
         )
         return login_redirect(str(request.url.path))
     if not user.is_admin:
-        request_context = build_request_context(request)
-        await state.audit.emit_action(
-            event_type=actions.ADMIN_ACCESS_DENIED,
-            action="auth.admin.denied",
-            result="denied",
+        await record_admin_access_denied(
+            state.telemetry,
+            request,
             actor=user_actor(user),
-            object=AuditObject(type="admin_page", id=request.url.path),
-            metadata={"source": "web", "correlation_id": correlation_id(request)},
-            request=request_context,
-            process=build_runtime_process_context("web"),
+            object_type="admin_page",
             reason="admin_required",
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
+            source="web",
         )
         raise HTTPException(status_code=403, detail="Admin access required.")
     return user

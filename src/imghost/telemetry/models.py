@@ -8,7 +8,7 @@ from ..models import utcnow
 
 
 @dataclass(slots=True)
-class AuditActor:
+class TelemetryActor:
     id: str | None
     type: str
     display: str | None = None
@@ -18,7 +18,7 @@ class AuditActor:
 
 
 @dataclass(slots=True)
-class AuditObject:
+class TelemetryObject:
     type: str
     id: str | None
 
@@ -27,7 +27,7 @@ class AuditObject:
 
 
 @dataclass(slots=True)
-class AuditRequestContext:
+class TelemetryRequestContext:
     request_id: str | None
     correlation_id: str | None
     method: str | None
@@ -46,7 +46,7 @@ class AuditRequestContext:
 
 
 @dataclass(slots=True)
-class AuditProcessContext:
+class TelemetryProcessContext:
     source: str
     hostname: str | None
     pid: int | None
@@ -58,16 +58,16 @@ class AuditProcessContext:
 
 
 @dataclass(slots=True)
-class AuditRecord:
+class TelemetryEvent:
     event_type: str
     action: str
     result: str
-    actor: AuditActor
-    object: AuditObject
+    actor: TelemetryActor
+    object: TelemetryObject
     metadata: dict[str, Any] = field(default_factory=dict)
     occurred_at: datetime = field(default_factory=utcnow)
-    request: AuditRequestContext | None = None
-    process: AuditProcessContext | None = None
+    request: TelemetryRequestContext | None = None
+    process: TelemetryProcessContext | None = None
     reason: str | None = None
     actor_ip_hash: str | None = None
 

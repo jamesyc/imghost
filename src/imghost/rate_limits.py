@@ -9,7 +9,7 @@ from time import monotonic, time
 from fastapi import HTTPException
 
 from .models import User
-from .observability import ObservabilityState
+from .telemetry.state import ObservabilityState
 from .redis_support import RedisHandle, RedisUnavailable
 from .runtime_config import PostgresRuntimeConfig
 

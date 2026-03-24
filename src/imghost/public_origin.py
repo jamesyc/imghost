@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from fastapi import Request
 
 from .config import Settings
-from .observability import ObservabilityState
+from .telemetry.state import ObservabilityState
 
 logger = logging.getLogger(__name__)
 

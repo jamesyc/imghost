@@ -6,9 +6,9 @@ import sys
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from .audit import actions
-from .audit.context import build_cli_process_context, cli_actor
-from .audit.models import AuditObject
+from .telemetry.helpers import record_cli_command_executed
+from .telemetry.context import build_cli_process_context
+from .telemetry.models import TelemetryObject
 from .app_state import AppState
 from .config import load_settings
 from .models import User, utcnow
@@ -111,12 +111,10 @@ async def run_cli(argv: list[str] | None = None) -> int:
     try:
         if args.command == "prune":
             result = await state.uploads.prune_expired_albums(dry_run=args.dry_run)
-            await state.audit.emit_action(
-                event_type=actions.CLI_COMMAND_EXECUTED,
+            await record_cli_command_executed(
+                state.telemetry,
                 action="cli.prune",
-                result="success",
-                actor=cli_actor(),
-                object=AuditObject(type="cli_command", id="prune"),
+                object=TelemetryObject(type="cli_command", id="prune"),
                 metadata={
                     "command": "prune",
                     "dry_run": args.dry_run,
@@ -124,7 +122,6 @@ async def run_cli(argv: list[str] | None = None) -> int:
                     "item_count": result.item_count,
                     "bytes_freed": result.bytes_freed,
                     "correlation_id": command_correlation_id,
-                    "source": "cli",
                 },
                 process=process_context,
             )
@@ -143,13 +140,11 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 await state.tasks.join()
             finally:
                 await state.tasks.stop()
-            await state.audit.emit_action(
-                event_type=actions.CLI_COMMAND_EXECUTED,
+            await record_cli_command_executed(
+                state.telemetry,
                 action="cli.retry_thumbnails",
-                result="success",
-                actor=cli_actor(),
-                object=AuditObject(type="cli_command", id="retry-thumbnails"),
-                metadata={"command": "retry-thumbnails", "enqueued": enqueued, "correlation_id": command_correlation_id, "source": "cli"},
+                object=TelemetryObject(type="cli_command", id="retry-thumbnails"),
+                metadata={"command": "retry-thumbnails", "enqueued": enqueued, "correlation_id": command_correlation_id},
                 process=process_context,
             )
             print(f"re-enqueued thumbnails: {enqueued}")
@@ -157,26 +152,22 @@ async def run_cli(argv: list[str] | None = None) -> int:
 
         if args.command == "init-storage":
             await state.storage.init_storage()
-            await state.audit.emit_action(
-                event_type=actions.CLI_COMMAND_EXECUTED,
+            await record_cli_command_executed(
+                state.telemetry,
                 action="cli.init_storage",
-                result="success",
-                actor=cli_actor(),
-                object=AuditObject(type="cli_command", id="init-storage"),
-                metadata={"command": "init-storage", "correlation_id": command_correlation_id, "source": "cli"},
+                object=TelemetryObject(type="cli_command", id="init-storage"),
+                metadata={"command": "init-storage", "correlation_id": command_correlation_id},
                 process=process_context,
             )
             print("storage initialized")
             return 0
 
         if args.command == "run-worker":
-            await state.audit.emit_action(
-                event_type=actions.CLI_COMMAND_EXECUTED,
+            await record_cli_command_executed(
+                state.telemetry,
                 action="cli.run_worker.start",
-                result="success",
-                actor=cli_actor(),
-                object=AuditObject(type="cli_command", id="run-worker"),
-                metadata={"command": "run-worker", "correlation_id": command_correlation_id, "source": "cli"},
+                object=TelemetryObject(type="cli_command", id="run-worker"),
+                metadata={"command": "run-worker", "correlation_id": command_correlation_id},
                 process=process_context,
             )
             await state.redis.ensure_startup_ready()
@@ -202,12 +193,10 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 updated_at=utcnow(),
             )
             await state.repository.create_user(user)
-            await state.audit.emit_action(
-                event_type=actions.CLI_COMMAND_EXECUTED,
+            await record_cli_command_executed(
+                state.telemetry,
                 action="cli.create_user",
-                result="success",
-                actor=cli_actor(),
-                object=AuditObject(type="user", id=user.id),
+                object=TelemetryObject(type="user", id=user.id),
                 metadata={
                     "command": "create-user",
                     "username": user.username,
@@ -215,7 +204,6 @@ async def run_cli(argv: list[str] | None = None) -> int:
                     "is_admin": user.is_admin,
                     "quota_bytes": user.quota_bytes,
                     "correlation_id": command_correlation_id,
-                    "source": "cli",
                 },
                 process=process_context,
             )
@@ -228,18 +216,15 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 print("user not found")
                 return 1
             issued = await state.uploads.issue_api_key(user)
-            await state.audit.emit_action(
-                event_type=actions.CLI_COMMAND_EXECUTED,
+            await record_cli_command_executed(
+                state.telemetry,
                 action="cli.issue_api_key",
-                result="success",
-                actor=cli_actor(),
-                object=AuditObject(type="user", id=user.id),
+                object=TelemetryObject(type="user", id=user.id),
                 metadata={
                     "command": "issue-api-key",
                     "user_id": user.id,
                     "api_key_id": issued.api_key.id,
                     "correlation_id": command_correlation_id,
-                    "source": "cli",
                 },
                 process=process_context,
             )

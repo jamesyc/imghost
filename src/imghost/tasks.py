@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
 
-from .observability import ObservabilityState
+from .telemetry.state import ObservabilityState
 from .processors import ProcessorRegistry
 from .redis_support import RedisHandle, RedisUnavailable
 from .repositories import PostgresRepository

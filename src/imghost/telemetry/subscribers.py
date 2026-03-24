@@ -24,18 +24,18 @@ from ..events import (
     UserSuspended,
 )
 from . import actions
-from .models import AuditActor, AuditObject
-from .service import AuditService
+from .models import TelemetryActor, TelemetryObject
+from .service import TelemetryService
 
 
-def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None:
+def register_telemetry_subscribers(event_bus: EventBus, telemetry: TelemetryService) -> None:
     async def write_album_created(event: AlbumCreated) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.ALBUM_CREATED,
             action="album.create",
             result="success",
-            actor=AuditActor(id=event.user_id, type=event.actor_kind),
-            object=AuditObject(type="album", id=event.album_id),
+            actor=TelemetryActor(id=event.user_id, type=event.actor_kind),
+            object=TelemetryObject(type="album", id=event.album_id),
             metadata={
                 "album_id": event.album_id,
                 "item_count": event.item_count,
@@ -46,12 +46,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_media_uploaded(event: MediaUploaded) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.MEDIA_UPLOADED,
             action="media.upload",
             result="success",
-            actor=AuditActor(id=event.user_id, type=event.actor_kind),
-            object=AuditObject(type="media", id=event.media_id),
+            actor=TelemetryActor(id=event.user_id, type=event.actor_kind),
+            object=TelemetryObject(type="media", id=event.media_id),
             metadata={
                 "media_id": event.media_id,
                 "album_id": event.album_id,
@@ -65,12 +65,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_album_deleted(event: AlbumDeleted) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.ALBUM_DELETED,
             action="album.delete",
             result="success",
-            actor=AuditActor(id=event.actor_id, type=event.actor_kind),
-            object=AuditObject(type="album", id=event.album_id),
+            actor=TelemetryActor(id=event.actor_id, type=event.actor_kind),
+            object=TelemetryObject(type="album", id=event.album_id),
             metadata={
                 "album_id": event.album_id,
                 "item_count": event.item_count,
@@ -82,12 +82,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_media_deleted(event: MediaDeleted) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.MEDIA_DELETED,
             action="media.delete",
             result="success",
-            actor=AuditActor(id=event.actor_id, type=event.actor_kind),
-            object=AuditObject(type="media", id=event.media_id),
+            actor=TelemetryActor(id=event.actor_id, type=event.actor_kind),
+            object=TelemetryObject(type="media", id=event.media_id),
             metadata={
                 "media_id": event.media_id,
                 "album_id": event.album_id,
@@ -99,12 +99,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_album_title_changed(event: AlbumTitleChanged) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.ALBUM_TITLE_CHANGED,
             action="album.title.update",
             result="success",
-            actor=AuditActor(id=event.actor_id, type=event.actor_kind),
-            object=AuditObject(type="album", id=event.album_id),
+            actor=TelemetryActor(id=event.actor_id, type=event.actor_kind),
+            object=TelemetryObject(type="album", id=event.album_id),
             metadata={
                 "album_id": event.album_id,
                 "old_title": event.old_title,
@@ -115,12 +115,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_album_cover_set(event: AlbumCoverSet) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.ALBUM_COVER_SET,
             action="album.cover.set",
             result="success",
-            actor=AuditActor(id=event.actor_id, type=event.actor_kind),
-            object=AuditObject(type="album", id=event.album_id),
+            actor=TelemetryActor(id=event.actor_id, type=event.actor_kind),
+            object=TelemetryObject(type="album", id=event.album_id),
             metadata={
                 "album_id": event.album_id,
                 "media_id": event.media_id,
@@ -130,12 +130,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_album_reordered(event: AlbumReordered) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.ALBUM_REORDERED,
             action="album.reorder",
             result="success",
-            actor=AuditActor(id=event.actor_id, type=event.actor_kind),
-            object=AuditObject(type="album", id=event.album_id),
+            actor=TelemetryActor(id=event.actor_id, type=event.actor_kind),
+            object=TelemetryObject(type="album", id=event.album_id),
             metadata={
                 "album_id": event.album_id,
                 "actor_kind": event.actor_kind,
@@ -144,12 +144,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_album_expiry_changed(event: AlbumExpiryChanged) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.ALBUM_EXPIRY_CHANGED,
             action="album.expiry.update",
             result="success",
-            actor=AuditActor(id=event.actor_id, type=event.actor_kind),
-            object=AuditObject(type="album", id=event.album_id),
+            actor=TelemetryActor(id=event.actor_id, type=event.actor_kind),
+            object=TelemetryObject(type="album", id=event.album_id),
             metadata={
                 "album_id": event.album_id,
                 "old_expiry": event.old_expiry,
@@ -160,12 +160,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_user_deleted(event: UserDeleted) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.USER_DELETED,
             action="user.delete",
             result="success",
-            actor=AuditActor(id=event.actor_id, type=event.actor_kind),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.actor_id, type=event.actor_kind),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "deleted_by": event.deleted_by,
@@ -178,12 +178,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_user_registered(event: UserRegistered) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.USER_CREATED,
             action="user.create",
             result="success",
-            actor=AuditActor(id=event.actor_id, type="user" if event.actor_id else "system"),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.actor_id, type="user" if event.actor_id else "system"),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "method": event.method,
@@ -193,12 +193,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_user_suspended(event: UserSuspended) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.USER_SUSPENDED,
             action="user.suspension.update",
             result="success",
-            actor=AuditActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "suspended": event.suspended,
@@ -208,12 +208,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_user_password_reset(event: UserPasswordReset) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.USER_PASSWORD_RESET,
             action="user.password.reset",
             result="success",
-            actor=AuditActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "source": event.source,
@@ -222,22 +222,22 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_admin_logged_in(event: AdminLoggedIn) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.ADMIN_LOGIN,
             action="auth.login.success",
             result="success",
-            actor=AuditActor(id=event.admin_id, type="admin"),
-            object=AuditObject(type="user", id=event.admin_id),
+            actor=TelemetryActor(id=event.admin_id, type="admin"),
+            object=TelemetryObject(type="user", id=event.admin_id),
             metadata={"source": event.source, "correlation_id": event.correlation_id},
         )
 
     async def write_login_failed(event: LoginFailed) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.LOGIN_FAILED,
             action="auth.login.failed",
             result="denied",
-            actor=AuditActor(id=None, type="anonymous"),
-            object=AuditObject(type="auth", id=event.login_identifier),
+            actor=TelemetryActor(id=None, type="anonymous"),
+            object=TelemetryObject(type="auth", id=event.login_identifier),
             metadata={
                 "login_identifier": event.login_identifier,
                 "reason": event.reason,
@@ -248,12 +248,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_user_logged_out(event: UserLoggedOut) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.LOGOUT,
             action="auth.logout",
             result="success",
-            actor=AuditActor(id=event.user_id, type="user"),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.user_id, type="user"),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "source": event.source,
@@ -262,12 +262,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_api_key_issued(event: ApiKeyIssued) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.API_KEY_ISSUED,
             action="apikey.issue",
             result="success",
-            actor=AuditActor(id=event.actor_id, type="user" if event.actor_id else "system"),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.actor_id, type="user" if event.actor_id else "system"),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "replaced_existing": event.replaced_existing,
@@ -277,12 +277,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_user_password_changed(event: UserPasswordChanged) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.USER_PASSWORD_CHANGED,
             action="user.password.change",
             result="success",
-            actor=AuditActor(id=event.actor_id, type="user" if event.actor_id else "system"),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.actor_id, type="user" if event.actor_id else "system"),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "source": event.source,
@@ -291,12 +291,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_user_admin_status_changed(event: UserAdminStatusChanged) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.USER_ADMIN_STATUS_CHANGED,
             action="user.role.update",
             result="success",
-            actor=AuditActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "old_is_admin": event.old_is_admin,
@@ -307,12 +307,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_user_limits_changed(event: UserLimitsChanged) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.USER_LIMITS_CHANGED,
             action="user.limits.update",
             result="success",
-            actor=AuditActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
-            object=AuditObject(type="user", id=event.user_id),
+            actor=TelemetryActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
+            object=TelemetryObject(type="user", id=event.user_id),
             metadata={
                 "target_user_id": event.user_id,
                 "changes": event.changes,
@@ -322,12 +322,12 @@ def register_audit_subscribers(event_bus: EventBus, audit: AuditService) -> None
         )
 
     async def write_config_changed(event: ConfigChanged) -> None:
-        await audit.emit_action(
+        await telemetry.emit_event(
             event_type=actions.CONFIG_CHANGED,
             action="config.update",
             result="success",
-            actor=AuditActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
-            object=AuditObject(type="config", id=event.key),
+            actor=TelemetryActor(id=event.actor_id, type="admin" if event.actor_id else "system"),
+            object=TelemetryObject(type="config", id=event.key),
             metadata={
                 "key": event.key,
                 "old_value": event.old_value,

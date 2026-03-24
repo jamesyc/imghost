@@ -36,7 +36,8 @@ from .events import (
 from .ids import generate_album_id, generate_media_id
 from .models import Album, Media, User, utcnow
 from .oauth import OAuthIdentity
-from .observability import ObservabilityState
+from .telemetry.helpers import record_thumbnail_failure
+from .telemetry.state import ObservabilityState
 from .processors import ProcessorRegistry, VideoProcessingError
 from .rate_limits import RateLimiter
 from .repositories import PostgresRepository
@@ -389,20 +390,13 @@ class UploadService:
         correlation_id: str,
         error: Exception,
     ) -> None:
-        details = {
-            "reason": reason,
-            "media_id": media.id,
-            "correlation_id": correlation_id,
-            "storage_key": media.storage_key,
-            "format": media.format,
-        }
-        logger.warning(
-            "thumbnail_generation_failed",
-            extra={**details, "error_type": type(error).__name__},
-            exc_info=error,
+        record_thumbnail_failure(
+            observability=self.observability,
+            media=media,
+            correlation_id=correlation_id,
+            reason=reason,
+            error=error,
         )
-        if self.observability is not None:
-            self.observability.record_task_failure(task_name="generate_thumbnail", details=details)
 
     async def delete_album(
         self,

@@ -6,9 +6,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from ..audit import actions
-from ..audit.context import build_request_context, build_runtime_process_context, hash_client_ip, user_actor
-from ..audit.models import AuditObject
+from ..telemetry.helpers import record_admin_api_read
 from ..events import ConfigChanged
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..payloads import album_to_payload
@@ -31,24 +29,14 @@ async def _audit_admin_read(
     metadata: dict[str, object] | None = None,
 ) -> None:
     state = get_state(request)
-    request_context = build_request_context(request)
-    payload = {
-        "resource": resource,
-        "source": "api",
-        "correlation_id": correlation_id(request),
-    }
-    if metadata:
-        payload.update(metadata)
-    await state.audit.emit_action(
-        event_type=actions.ADMIN_API_READ,
-        action=f"{resource}.read",
-        result="success",
-        actor=user_actor(admin, actor_type="admin"),
-        object=AuditObject(type=object_type, id=object_id or request.url.path),
-        metadata=payload,
-        request=request_context,
-        process=build_runtime_process_context("api"),
-        actor_ip_hash=hash_client_ip(request_context.client_ip),
+    await record_admin_api_read(
+        state.telemetry,
+        request,
+        admin=admin,
+        resource=resource,
+        object_type=object_type,
+        object_id=object_id,
+        metadata=metadata,
     )
 
 
@@ -206,7 +194,7 @@ async def admin_list_audit(
     state = get_state(request)
     admin = await require_admin_user(request)
     validate_pagination(limit, offset, max_limit=500)
-    events = await state.audit.query_audit_log(
+    events = await state.telemetry.query_audit_log(
         event_type=event_type,
         action=action,
         result=result,

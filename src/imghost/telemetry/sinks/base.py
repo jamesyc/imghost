@@ -4,14 +4,14 @@ from datetime import datetime
 from typing import Protocol
 
 from ...models import AuditEvent
-from ..models import AuditRecord
+from ..models import TelemetryEvent
 
 
-class AuditSink(Protocol):
-    async def write(self, record: AuditRecord) -> None: ...
+class TelemetrySink(Protocol):
+    async def write(self, record: TelemetryEvent) -> None: ...
 
 
-class AuditQueryBackend(Protocol):
+class TelemetryQueryBackend(Protocol):
     async def query_audit_log(
         self,
         *,

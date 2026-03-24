@@ -3,9 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ..audit import actions
-from ..audit.context import build_request_context, build_runtime_process_context, hash_client_ip, user_actor
-from ..audit.models import AuditObject
+from ..telemetry.helpers import record_admin_page_viewed
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..public_origin import public_base_url
 from .auth_context import (
@@ -27,18 +25,7 @@ router = APIRouter()
 
 async def _audit_admin_page_view(request: Request, user, page_name: str, *, object_id: str | None = None) -> None:
     state = get_state(request)
-    request_context = build_request_context(request)
-    await state.audit.emit_action(
-        event_type=actions.ADMIN_PAGE_VIEWED,
-        action=f"{page_name}.view",
-        result="success",
-        actor=user_actor(user, actor_type="admin"),
-        object=AuditObject(type="admin_page", id=object_id or request.url.path),
-        metadata={"page": page_name, "source": "web", "correlation_id": request_context.correlation_id},
-        request=request_context,
-        process=build_runtime_process_context("web"),
-        actor_ip_hash=hash_client_ip(request_context.client_ip),
-    )
+    await record_admin_page_viewed(state.telemetry, request, user=user, page_name=page_name, object_id=object_id)
 
 
 @router.get("/", response_class=HTMLResponse)

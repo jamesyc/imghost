@@ -4,9 +4,10 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from ..audit import actions
-from ..audit.context import anonymous_actor, build_request_context, build_runtime_process_context, hash_client_ip, user_actor
-from ..audit.models import AuditObject
+from ..telemetry import actions
+from ..telemetry.context import anonymous_actor, build_request_context, build_runtime_process_context, hash_client_ip, user_actor
+from ..telemetry.helpers import emit_request_action
+from ..telemetry.models import TelemetryObject
 from ..events import AdminLoggedIn
 from ..service import LocalLoginInput, UserCreateInput
 from ..sessions import SessionBackendUnavailable
@@ -38,7 +39,6 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
     state = get_state(request)
     cid = correlation_id(request)
     normalized_login = payload.login.strip()
-    request_context = build_request_context(request, auth_method="password")
     try:
         user = await state.uploads.authenticate_local_user(
             LocalLoginInput(login=payload.login, password=payload.password)
@@ -49,39 +49,39 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
             reason = "missing_credentials"
         elif exc.status_code == 403:
             reason = "suspended"
-        await state.audit.emit_action(
+        await emit_request_action(
+            state.telemetry,
+            request,
             event_type=actions.LOGIN_FAILED,
             action="auth.login.failed",
             result="denied",
             actor=anonymous_actor(),
-            object=AuditObject(type="auth", id=normalized_login),
+            object=TelemetryObject(type="auth", id=normalized_login),
             metadata={
                 "login_identifier": normalized_login,
                 "reason": reason,
                 "source": "web",
                 "correlation_id": cid,
             },
-            request=request_context,
-            process=build_runtime_process_context("web"),
             reason=reason,
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
+            auth_method="password",
         )
         raise
-    await state.audit.emit_action(
+    await emit_request_action(
+        state.telemetry,
+        request,
         event_type=actions.USER_LOGIN,
         action="auth.login.success",
         result="success",
         actor=user_actor(user),
-        object=AuditObject(type="user", id=user.id),
+        object=TelemetryObject(type="user", id=user.id),
         metadata={
             "target_user_id": user.id,
             "remember_me": payload.remember_me,
             "source": "web",
             "correlation_id": cid,
         },
-        request=request_context,
-        process=build_runtime_process_context("web"),
-        actor_ip_hash=hash_client_ip(request_context.client_ip),
+        auth_method="password",
     )
     if user.is_admin:
         await state.event_bus.emit(
@@ -106,23 +106,22 @@ async def register(request: Request, payload: RegistrationRequest) -> JSONRespon
     state = get_state(request)
     cid = correlation_id(request)
     if not await state.runtime_config.get_value("allow_registration"):
-        request_context = build_request_context(request, auth_method="anonymous")
-        await state.audit.emit_action(
+        await emit_request_action(
+            state.telemetry,
+            request,
             event_type=actions.REGISTRATION_DENIED,
             action="auth.registration.denied",
             result="denied",
             actor=anonymous_actor(),
-            object=AuditObject(type="registration", id=payload.username.strip() or None),
+            object=TelemetryObject(type="registration", id=payload.username.strip() or None),
             metadata={
                 "username": payload.username.strip(),
                 "email": payload.email.strip().lower(),
                 "source": "web",
                 "correlation_id": cid,
             },
-            request=request_context,
-            process=build_runtime_process_context("web"),
             reason="registration_disabled",
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
+            auth_method="anonymous",
         )
         raise HTTPException(status_code=403, detail="Registration is disabled.")
     created = await state.uploads.create_user(
@@ -151,7 +150,6 @@ async def register(request: Request, payload: RegistrationRequest) -> JSONRespon
 async def logout(request: Request) -> JSONResponse:
     state = get_state(request)
     cid = correlation_id(request)
-    request_context = build_request_context(request, auth_method="session")
     user = None
     try:
         user = await authenticated_user(request, required=False)
@@ -159,16 +157,16 @@ async def logout(request: Request) -> JSONResponse:
         user = None
     await state.session_backend.clear_session(request.cookies.get(state.settings.session_cookie_name))
     if user is not None:
-        await state.audit.emit_action(
+        await emit_request_action(
+            state.telemetry,
+            request,
             event_type=actions.LOGOUT,
             action="auth.logout",
             result="success",
             actor=user_actor(user),
-            object=AuditObject(type="user", id=user.id),
+            object=TelemetryObject(type="user", id=user.id),
             metadata={"target_user_id": user.id, "source": "web", "correlation_id": cid},
-            request=request_context,
-            process=build_runtime_process_context("web"),
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
+            auth_method="session",
         )
     response = JSONResponse({"authenticated": False}, headers={"X-Correlation-ID": cid})
     clear_session_cookie(response, state.settings)

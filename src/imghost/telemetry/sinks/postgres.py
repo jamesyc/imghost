@@ -5,14 +5,14 @@ from uuid import uuid4
 
 from ...db import Database
 from ...models import AuditEvent
-from ..models import AuditRecord
+from ..models import TelemetryEvent
 
 
-class PostgresAuditSink:
+class PostgresTelemetrySink:
     def __init__(self, database: Database) -> None:
         self.database = database
 
-    async def write(self, record: AuditRecord) -> None:
+    async def write(self, record: TelemetryEvent) -> None:
         pool = self.database.require_pool()
         event_id = str(uuid4())
         correlation_id = None
@@ -53,7 +53,8 @@ class PostgresAuditSink:
                 record.actor.id,
                 record.actor_ip_hash,
                 record.request.request_id if record.request is not None else metadata.get("request_id"),
-                (record.request.route if record.request is not None else None) or (record.request.path if record.request is not None else None),
+                (record.request.route if record.request is not None else None)
+                or (record.request.path if record.request is not None else None),
                 record.request.method if record.request is not None else None,
                 record.reason,
                 record.object.type,
@@ -145,7 +146,9 @@ class PostgresAuditSink:
                 source=row["source"] or (row["metadata"] or {}).get("source"),
                 actor_type=row["actor_type"] or (row["metadata"] or {}).get("actor_type"),
                 request_id=row["request_id"] or (row["metadata"] or {}).get("request_id"),
-                route=row["route"] or (((row["metadata"] or {}).get("request") or {}).get("route") or ((row["metadata"] or {}).get("request") or {}).get("path")),
+                route=row["route"]
+                or (((row["metadata"] or {}).get("request") or {}).get("route")
+                or ((row["metadata"] or {}).get("request") or {}).get("path")),
                 method=row["method"] or ((row["metadata"] or {}).get("request") or {}).get("method"),
                 reason=row["reason"] or (row["metadata"] or {}).get("reason"),
             )

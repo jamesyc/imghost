@@ -7,15 +7,16 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from ..audit import actions
-from ..audit.context import (
+from ..telemetry import actions
+from ..telemetry.context import (
     anonymous_actor,
     build_request_context,
     build_runtime_process_context,
     hash_client_ip,
     user_actor,
 )
-from ..audit.models import AuditObject
+from ..telemetry.helpers import emit_request_action
+from ..telemetry.models import TelemetryObject
 from ..oauth import OAuthStatePayload, build_code_challenge, generate_code_verifier
 from ..public_origin import public_base_url
 from ..sessions import SessionBackendUnavailable
@@ -40,18 +41,17 @@ def _callback_url(request: Request) -> str:
 
 async def _audit_oauth_denied(request: Request, *, reason: str, object_id: str | None = None) -> None:
     state = get_state(request)
-    request_context = build_request_context(request, auth_method="oauth")
-    await state.audit.emit_action(
+    await emit_request_action(
+        state.telemetry,
+        request,
         event_type=actions.OAUTH_DENIED,
         action="oauth.denied",
         result="denied",
         actor=anonymous_actor(),
-        object=AuditObject(type="oauth", id=object_id or "google"),
+        object=TelemetryObject(type="oauth", id=object_id or "google"),
         metadata={"provider": "google", "source": "web", "correlation_id": correlation_id(request)},
-        request=request_context,
-        process=build_runtime_process_context("web"),
         reason=reason,
-        actor_ip_hash=hash_client_ip(request_context.client_ip),
+        auth_method="oauth",
     )
 
 
@@ -174,19 +174,18 @@ async def google_oauth_callback(
             source="web",
         )
     except HTTPException as exc:
-        request_context = build_request_context(request, auth_method="oauth")
         actor = user_actor(current_user) if current_user is not None else anonymous_actor()
-        await app_state.audit.emit_action(
+        await emit_request_action(
+            app_state.telemetry,
+            request,
             event_type=actions.OAUTH_DENIED,
             action="oauth.denied",
             result="denied",
             actor=actor,
-            object=AuditObject(type="oauth", id="google"),
+            object=TelemetryObject(type="oauth", id="google"),
             metadata={"provider": "google", "source": "web", "correlation_id": correlation_id(request)},
-            request=request_context,
-            process=build_runtime_process_context("web"),
             reason=str(exc.detail),
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
+            auth_method="oauth",
         )
         target = "/settings" if oauth_state.mode == "link" else "/login"
         key = "oauth_status" if oauth_state.mode == "link" else "oauth_error"
@@ -195,13 +194,14 @@ async def google_oauth_callback(
 
     event_type = actions.OAUTH_LINKED if outcome == "linked" else actions.OAUTH_LOGIN
     action = "oauth.linked" if outcome == "linked" else "oauth.login.success"
-    request_context = build_request_context(request, auth_method="oauth")
-    await app_state.audit.emit_action(
+    await emit_request_action(
+        app_state.telemetry,
+        request,
         event_type=event_type,
         action=action,
         result="success",
         actor=user_actor(user),
-        object=AuditObject(type="user", id=user.id),
+        object=TelemetryObject(type="user", id=user.id),
         metadata={
             "provider": "google",
             "provider_uid": identity.provider_uid,
@@ -209,9 +209,7 @@ async def google_oauth_callback(
             "source": "web",
             "correlation_id": correlation_id(request),
         },
-        request=request_context,
-        process=build_runtime_process_context("web"),
-        actor_ip_hash=hash_client_ip(request_context.client_ip),
+        auth_method="oauth",
     )
 
     if oauth_state.mode == "link":
@@ -220,17 +218,17 @@ async def google_oauth_callback(
     try:
         token, expires_at = await app_state.session_backend.create_session(user, remember_me=True)
     except SessionBackendUnavailable:
-        await app_state.audit.emit_action(
+        await emit_request_action(
+            app_state.telemetry,
+            request,
             event_type=actions.OAUTH_DENIED,
             action="oauth.denied",
             result="denied",
             actor=user_actor(user),
-            object=AuditObject(type="oauth", id="google"),
+            object=TelemetryObject(type="oauth", id="google"),
             metadata={"provider": "google", "source": "web", "correlation_id": correlation_id(request)},
-            request=request_context,
-            process=build_runtime_process_context("web"),
             reason="session_unavailable",
-            actor_ip_hash=hash_client_ip(request_context.client_ip),
+            auth_method="oauth",
         )
         return _query_redirect("/login", oauth_error="Google sign-in is temporarily unavailable.")
     response = _query_redirect(next_path)

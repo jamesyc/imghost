@@ -6,19 +6,19 @@ from datetime import datetime
 from typing import Any, Mapping, Sequence
 
 from ..models import AuditEvent
-from .models import AuditActor, AuditObject, AuditProcessContext, AuditRecord, AuditRequestContext
+from .models import TelemetryActor, TelemetryEvent, TelemetryObject, TelemetryProcessContext, TelemetryRequestContext
 from .redaction import redact_record
-from .sinks.base import AuditQueryBackend, AuditSink
+from .sinks.base import TelemetryQueryBackend, TelemetrySink
 
 logger = logging.getLogger(__name__)
 
 
-class AuditService:
-    def __init__(self, sinks: Sequence[AuditSink], *, query_backend: AuditQueryBackend | None = None) -> None:
+class TelemetryService:
+    def __init__(self, sinks: Sequence[TelemetrySink], *, query_backend: TelemetryQueryBackend | None = None) -> None:
         self._sinks = list(sinks)
         self._query_backend = query_backend
 
-    async def emit(self, record: AuditRecord) -> None:
+    async def emit(self, record: TelemetryEvent) -> None:
         redacted = redact_record(record)
         for sink in self._sinks:
             try:
@@ -27,22 +27,22 @@ class AuditService:
                 logger.exception("audit_sink_write_failed", extra={"event_type": redacted.event_type, "sink": type(sink).__name__})
                 await asyncio.sleep(0)
 
-    async def emit_action(
+    async def emit_event(
         self,
         *,
         event_type: str,
         action: str,
         result: str,
-        actor: AuditActor,
-        object: AuditObject,
+        actor: TelemetryActor,
+        object: TelemetryObject,
         metadata: Mapping[str, Any] | None = None,
-        request: AuditRequestContext | None = None,
-        process: AuditProcessContext | None = None,
+        request: TelemetryRequestContext | None = None,
+        process: TelemetryProcessContext | None = None,
         reason: str | None = None,
         actor_ip_hash: str | None = None,
     ) -> None:
         await self.emit(
-            AuditRecord(
+            TelemetryEvent(
                 event_type=event_type,
                 action=action,
                 result=result,

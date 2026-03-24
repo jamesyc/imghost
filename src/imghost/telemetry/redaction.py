@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Mapping
 
-from .models import AuditRecord
+from .models import TelemetryEvent
 
 _REDACTED = "[REDACTED]"
 _SECRET_KEYS = {
@@ -24,7 +24,7 @@ def redact_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
     return _redact_value(dict(metadata))
 
 
-def redact_record(record: AuditRecord) -> AuditRecord:
+def redact_record(record: TelemetryEvent) -> TelemetryEvent:
     redacted = deepcopy(record)
     redacted.metadata = redact_metadata(redacted.metadata)
     return redacted

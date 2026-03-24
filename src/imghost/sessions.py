@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from .config import Settings
 from .models import User, utcnow
-from .observability import ObservabilityState
+from .telemetry.state import ObservabilityState
 from .redis_support import RedisHandle, RedisUnavailable
 
 logger = logging.getLogger(__name__)

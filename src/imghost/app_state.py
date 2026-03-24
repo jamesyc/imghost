@@ -3,14 +3,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .audit import AuditService, JsonLogAuditSink, PostgresAuditSink, actions, register_audit_subscribers
-from .audit.context import build_runtime_process_context
-from .audit.models import AuditActor, AuditObject
+from .telemetry import TelemetryService, JsonLogTelemetrySink, PostgresTelemetrySink, actions, register_telemetry_subscribers
+from .telemetry.helpers import record_system_action
 from .config import Settings
 from .db import Database
 from .events import EventBus, MediaUploaded
 from .models import utcnow
-from .observability import ObservabilityState
+from .telemetry.state import ObservabilityState
 from .oauth import GoogleOAuthProvider, OAuthProvider, OAuthStateManager
 from .processors import build_processor_registry
 from .rate_limits import build_rate_limiter
@@ -31,10 +30,10 @@ class AppState:
         self.observability = ObservabilityState()
         self.event_bus = EventBus()
         self.repository = PostgresRepository(self.database)
-        audit_db_sink = PostgresAuditSink(self.database)
-        self.audit = AuditService(
-            [audit_db_sink, JsonLogAuditSink(logging.getLogger("imghost.audit"))],
-            query_backend=audit_db_sink,
+        telemetry_db_sink = PostgresTelemetrySink(self.database)
+        self.telemetry = TelemetryService(
+            [telemetry_db_sink, JsonLogTelemetrySink(logging.getLogger("imghost.telemetry"))],
+            query_backend=telemetry_db_sink,
         )
         self.runtime_config = PostgresRuntimeConfig(self.database)
         self.redis = RedisHandle(settings)
@@ -65,7 +64,7 @@ class AppState:
         )
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
-        register_audit_subscribers(self.event_bus, self.audit)
+        register_telemetry_subscribers(self.event_bus, self.telemetry)
         self.bootstrap_admin_status: dict[str, Any] = {
             "enabled": bool(settings.promote_username_to_admin),
             "configured_username": settings.promote_username_to_admin,
@@ -321,12 +320,12 @@ class AppState:
         object_id: str = "imghost",
         metadata: dict[str, Any],
     ) -> None:
-        await self.audit.emit_action(
+        await record_system_action(
+            self.telemetry,
             event_type=event_type,
             action=action,
-            result="success",
-            actor=AuditActor(id=None, type=source),
-            object=AuditObject(type=object_type, id=object_id),
-            metadata={**metadata, "source": source},
-            process=build_runtime_process_context(source),
+            source=source,
+            object_type=object_type,
+            object_id=object_id,
+            metadata=metadata,
         )

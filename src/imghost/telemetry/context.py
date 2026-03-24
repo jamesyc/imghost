@@ -11,22 +11,22 @@ from fastapi import Request
 
 from ..models import User
 from ..public_origin import trusted_forwarded_client_ip
-from .models import AuditActor, AuditProcessContext, AuditRequestContext
+from .models import TelemetryActor, TelemetryProcessContext, TelemetryRequestContext
 
 
-def user_actor(user: User, *, actor_type: str | None = None) -> AuditActor:
-    return AuditActor(id=user.id, type=actor_type or ("admin" if user.is_admin else "user"), display=user.username)
+def user_actor(user: User, *, actor_type: str | None = None) -> TelemetryActor:
+    return TelemetryActor(id=user.id, type=actor_type or ("admin" if user.is_admin else "user"), display=user.username)
 
 
-def anonymous_actor() -> AuditActor:
-    return AuditActor(id=None, type="anonymous")
+def anonymous_actor() -> TelemetryActor:
+    return TelemetryActor(id=None, type="anonymous")
 
 
-def cli_actor() -> AuditActor:
-    return AuditActor(id=None, type="cli", display=_safe_username())
+def cli_actor() -> TelemetryActor:
+    return TelemetryActor(id=None, type="cli", display=_safe_username())
 
 
-def build_request_context(request: Request, *, auth_method: str | None = None) -> AuditRequestContext:
+def build_request_context(request: Request, *, auth_method: str | None = None) -> TelemetryRequestContext:
     settings = getattr(getattr(request.app.state, "imghost", None), "settings", None)
     client_ip = None
     if settings is not None:
@@ -38,7 +38,7 @@ def build_request_context(request: Request, *, auth_method: str | None = None) -
     correlation_id = (
         getattr(request.state, "correlation_id", None) or request.headers.get("X-Correlation-ID") or str(uuid4())
     )
-    return AuditRequestContext(
+    return TelemetryRequestContext(
         request_id=request_id,
         correlation_id=correlation_id,
         method=request.method,
@@ -50,12 +50,12 @@ def build_request_context(request: Request, *, auth_method: str | None = None) -
         user_agent=request.headers.get("User-Agent"),
         client_ip=client_ip,
         forwarded_for=request.headers.get("X-Forwarded-For"),
-        auth_method=auth_method or getattr(request.state, "audit_auth_method", None),
+        auth_method=auth_method or getattr(request.state, "telemetry_auth_method", None),
     )
 
 
-def build_runtime_process_context(source: str, *, command: str | None = None) -> AuditProcessContext:
-    return AuditProcessContext(
+def build_runtime_process_context(source: str, *, command: str | None = None) -> TelemetryProcessContext:
+    return TelemetryProcessContext(
         source=source,
         hostname=socket.gethostname(),
         pid=os.getpid(),
@@ -64,7 +64,7 @@ def build_runtime_process_context(source: str, *, command: str | None = None) ->
     )
 
 
-def build_cli_process_context(argv: Sequence[str]) -> AuditProcessContext:
+def build_cli_process_context(argv: Sequence[str]) -> TelemetryProcessContext:
     return build_runtime_process_context("cli", command=" ".join(argv))
 
 

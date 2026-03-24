@@ -9,10 +9,10 @@ from fastapi.testclient import TestClient
 import pytest
 
 from imghost.app_state import AppState
-from imghost.audit.context import anonymous_actor
-from imghost.audit.models import AuditObject
-from imghost.audit.service import AuditService
-from imghost.audit.sinks.jsonlog import JsonLogAuditSink
+from imghost.telemetry.context import anonymous_actor
+from imghost.telemetry.models import TelemetryObject
+from imghost.telemetry.service import TelemetryService
+from imghost.telemetry.sinks.jsonlog import JsonLogTelemetrySink
 from imghost.config import load_settings
 from imghost.main import app
 
@@ -178,16 +178,16 @@ def test_csrf_denial_is_audited(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_json_log_sink_redacts_secret_fields(caplog) -> None:
-    service = AuditService([JsonLogAuditSink(logging.getLogger("imghost.audit.test"))])
+    service = TelemetryService([JsonLogTelemetrySink(logging.getLogger("imghost.telemetry.test"))])
 
-    with caplog.at_level(logging.INFO, logger="imghost.audit.test"):
+    with caplog.at_level(logging.INFO, logger="imghost.telemetry.test"):
         asyncio.run(
-            service.emit_action(
+            service.emit_event(
                 event_type="secret_test",
                 action="secret.test",
                 result="success",
                 actor=anonymous_actor(),
-                object=AuditObject(type="test", id="secret"),
+                object=TelemetryObject(type="test", id="secret"),
                 metadata={
                     "password": "super-secret",
                     "api_key": "raw-key",
@@ -204,16 +204,16 @@ def test_json_log_sink_redacts_secret_fields(caplog) -> None:
 
 def test_audit_service_continues_when_one_sink_fails(caplog) -> None:
     recording_sink = _RecordingSink()
-    service = AuditService([_FailingSink(), recording_sink])
+    service = TelemetryService([_FailingSink(), recording_sink])
 
     with caplog.at_level(logging.ERROR):
         asyncio.run(
-            service.emit_action(
+            service.emit_event(
                 event_type="sink_test",
                 action="sink.test",
                 result="success",
                 actor=anonymous_actor(),
-                object=AuditObject(type="test", id="sink"),
+                object=TelemetryObject(type="test", id="sink"),
                 metadata={"source": "system"},
             )
         )
@@ -224,7 +224,7 @@ def test_audit_service_continues_when_one_sink_fails(caplog) -> None:
 
 
 def test_audit_service_query_requires_query_backend() -> None:
-    service = AuditService([])
+    service = TelemetryService([])
 
     async def run() -> None:
         await service.query_audit_log()
@@ -235,16 +235,16 @@ def test_audit_service_query_requires_query_backend() -> None:
 
 def test_audit_service_still_returns_query_results_when_non_query_sink_fails(caplog) -> None:
     backend = _QueryBackend(rows=["ok-row"])
-    service = AuditService([_FailingSink(), _RecordingSink()], query_backend=backend)
+    service = TelemetryService([_FailingSink(), _RecordingSink()], query_backend=backend)
 
     with caplog.at_level(logging.ERROR):
         asyncio.run(
-            service.emit_action(
+            service.emit_event(
                 event_type="queryable_sink_test",
                 action="sink.queryable",
                 result="success",
                 actor=anonymous_actor(),
-                object=AuditObject(type="test", id="queryable"),
+                object=TelemetryObject(type="test", id="queryable"),
             )
         )
         rows = asyncio.run(service.query_audit_log(limit=5))
@@ -270,16 +270,16 @@ def test_audit_service_still_returns_query_results_when_non_query_sink_fails(cap
 
 
 def test_audit_service_swallows_all_sink_failures(caplog) -> None:
-    service = AuditService([_FailingSink(), _FailingSink()])
+    service = TelemetryService([_FailingSink(), _FailingSink()])
 
     with caplog.at_level(logging.ERROR):
         asyncio.run(
-            service.emit_action(
+            service.emit_event(
                 event_type="all_sinks_fail",
                 action="sink.all_fail",
                 result="error",
                 actor=anonymous_actor(),
-                object=AuditObject(type="test", id="all-fail"),
+                object=TelemetryObject(type="test", id="all-fail"),
             )
         )
 

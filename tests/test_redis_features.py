@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from imghost.config import Settings
 from imghost.main import app
 from imghost.models import User, utcnow
-from imghost.observability import ObservabilityState
+from imghost.telemetry.state import ObservabilityState
 from imghost.rate_limits import InMemoryRateLimiter, RedisRateLimiter
 from imghost.redis_support import RedisHandle
 from imghost.sessions import RedisBackedSessionBackend

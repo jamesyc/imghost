@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from imghost.config import Settings
 from imghost.events import ApiKeyIssued, UserAdminStatusChanged, UserLimitsChanged, UserPasswordChanged
 from imghost.models import Album, ApiKey, Media, User, UserSsoLink, utcnow
-from imghost.observability import ObservabilityState
+from imghost.telemetry.state import ObservabilityState
 from imghost.processors import MediaMetadata, ThumbnailResult
 from imghost.storage import StorageStream
 from imghost.payloads import album_to_payload
