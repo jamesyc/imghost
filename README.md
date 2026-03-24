@@ -235,8 +235,28 @@ Important behavior:
 
 - `/health/live` returns a simple liveness response for process-level checks.
 - `/health/ready` returns a low-noise readiness snapshot covering database, storage, Redis reachability, subsystem modes, worker state, and task queue status.
+- `/metrics` returns Prometheus text-format telemetry metrics.
 - `/api/v1/admin/runtime-status` returns a richer admin-only operational snapshot including trusted public origins, worker/task state, and Redis subsystem degradation status.
 - Redis observability is transition-oriented rather than per-operation noisy, so degraded and recovered states are logged while repeated fallback behavior is suppressed.
+
+### Metrics
+
+Metrics now live inside the `telemetry/` package as a dedicated sibling subsystem to the audit/log event pipeline.
+
+Current `/metrics` coverage includes:
+
+- HTTP request count and duration
+- upload results and uploaded bytes
+- thumbnail job results and duration
+- auth and OAuth event counters
+- Redis-backed subsystem degraded/recovered state
+- worker-running and task-enqueue counters
+
+Operational guidance:
+
+- expose `/metrics` only to Prometheus or another trusted scraper
+- prefer reverse-proxy restriction rather than app-layer auth
+- `/metrics` is intentionally excluded from its own HTTP request counters to avoid scrape noise
 
 ## URL Generation
 
@@ -271,7 +291,7 @@ The test harness will refuse to run against database names that do not look like
 
 Current full suite status at the time these docs were updated:
 
-- `408 passed`
+- `482 passed`
 
 The test suite uses PostgreSQL and truncates tables between tests. Run it only against a dedicated test database.
 

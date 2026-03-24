@@ -14,7 +14,9 @@ from .web.auth import router as auth_router
 from .web.oauth import router as oauth_router
 from .web.csrf import enforce_session_csrf
 from .web.health import router as health_router
+from .web.metrics import router as metrics_router
 from .web.media import router as media_router
+from .web.metrics_middleware import observe_http_metrics
 from .web.pages import router as pages_router
 from .web.public_api import router as public_api_router
 from .web.request_context import assign_request_context
@@ -35,6 +37,7 @@ app = FastAPI(title="imghost V1", lifespan=lifespan)
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.middleware("http")(assign_request_context)
+app.middleware("http")(observe_http_metrics)
 app.middleware("http")(add_security_headers)
 app.middleware("http")(enforce_session_csrf)
 app.middleware("http")(clear_stale_session_cookie)
@@ -47,3 +50,4 @@ app.include_router(user_api_router)
 app.include_router(admin_api_router)
 app.include_router(media_router)
 app.include_router(health_router)
+app.include_router(metrics_router)

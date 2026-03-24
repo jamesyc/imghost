@@ -119,6 +119,7 @@ class DummyTelemetryService:
         self.degraded: list[tuple[str, str, str]] = []
         self.recovered: list[tuple[str, str]] = []
         self.task_failures: list[tuple[str, dict[str, object]]] = []
+        self.enqueued: list[tuple[str, str]] = []
         self.worker_started = 0
         self.worker_stopped = 0
 
@@ -130,6 +131,9 @@ class DummyTelemetryService:
 
     def record_task_failure(self, *, task_name: str, details: dict[str, object]) -> None:
         self.task_failures.append((task_name, details))
+
+    def record_task_enqueued(self, *, queue: str, task_name: str) -> None:
+        self.enqueued.append((queue, task_name))
 
     def mark_worker_started(self) -> None:
         self.worker_started += 1

@@ -223,6 +223,20 @@ def test_audit_service_continues_when_one_sink_fails(caplog) -> None:
     assert any(record.message == "audit_sink_write_failed" for record in caplog.records)
 
 
+def test_audit_service_allows_emit_with_no_sinks() -> None:
+    service = TelemetryService([])
+
+    asyncio.run(
+        service.emit_event(
+            event_type="no_sink_test",
+            action="sink.none",
+            result="success",
+            actor=anonymous_actor(),
+            object=TelemetryObject(type="test", id="none"),
+        )
+    )
+
+
 def test_audit_service_query_requires_query_backend() -> None:
     service = TelemetryService([])
 
@@ -267,6 +281,46 @@ def test_audit_service_still_returns_query_results_when_non_query_sink_fails(cap
         }
     ]
     assert any(record.message == "audit_sink_write_failed" for record in caplog.records)
+
+
+def test_audit_service_query_passes_all_filters_to_backend() -> None:
+    backend = _QueryBackend(rows=[])
+    service = TelemetryService([], query_backend=backend)
+
+    rows = asyncio.run(
+        service.query_audit_log(
+            event_type="user_login",
+            action="auth.login.success",
+            result="success",
+            source="web",
+            actor_id="user-1",
+            user_id="user-2",
+            correlation_id="corr-1",
+            request_id="req-1",
+            after=os.environ.get("NO_SUCH_ENV"),
+            before=None,
+            limit=10,
+            offset=5,
+        )
+    )
+
+    assert rows == []
+    assert backend.calls == [
+        {
+            "event_type": "user_login",
+            "action": "auth.login.success",
+            "result": "success",
+            "source": "web",
+            "actor_id": "user-1",
+            "user_id": "user-2",
+            "correlation_id": "corr-1",
+            "request_id": "req-1",
+            "after": None,
+            "before": None,
+            "limit": 10,
+            "offset": 5,
+        }
+    ]
 
 
 def test_audit_service_swallows_all_sink_failures(caplog) -> None:

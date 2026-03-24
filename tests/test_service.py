@@ -204,6 +204,7 @@ class RecordingTelemetry:
     def __init__(self) -> None:
         self.last_task_failure_at: float | None = None
         self.last_task_failure: dict[str, object] | None = None
+        self.thumbnail_jobs: list[dict[str, object]] = []
 
     def record_thumbnail_failure(self, *, media: Media, correlation_id: str, reason: str, error: Exception) -> None:
         self.last_task_failure = {
@@ -215,6 +216,23 @@ class RecordingTelemetry:
             "format": media.format,
             "error_type": type(error).__name__,
         }
+
+    def record_thumbnail_job(
+        self,
+        *,
+        result: str,
+        media_type: str,
+        reason: str | None = None,
+        duration_seconds: float | None = None,
+    ) -> None:
+        self.thumbnail_jobs.append(
+            {
+                "result": result,
+                "media_type": media_type,
+                "reason": reason,
+                "duration_seconds": duration_seconds,
+            }
+        )
 
 
 def make_service(user: User | None = None, *, storage=None, processors=None) -> tuple[UploadService, DummyRepository, DummyEventBus, RecordingTelemetry]:

@@ -52,8 +52,9 @@ class QueuedTask:
 
 
 class AsyncTaskQueue(TaskQueue):
-    def __init__(self, context: TaskContext, worker_count: int = 1) -> None:
+    def __init__(self, context: TaskContext, worker_count: int = 1, telemetry: Telemetry | None = None) -> None:
         self.context = context
+        self.telemetry = telemetry
         self.worker_count = max(1, worker_count)
         self._handlers: dict[str, TaskHandler] = {}
         self._queue: asyncio.Queue[QueuedTask | None] = asyncio.Queue()
@@ -79,6 +80,8 @@ class AsyncTaskQueue(TaskQueue):
         if task_name not in self._handlers:
             raise KeyError(task_name)
         await self._queue.put(QueuedTask(task_name=task_name, kwargs=kwargs))
+        if self.telemetry is not None:
+            self.telemetry.record_task_enqueued(queue=queue, task_name=task_name)
 
     async def _run_worker(self, worker_index: int) -> None:
         while True:
@@ -106,8 +109,9 @@ class AsyncTaskQueue(TaskQueue):
 
 
 class SyncTaskQueue(TaskQueue):
-    def __init__(self, context: TaskContext) -> None:
+    def __init__(self, context: TaskContext, telemetry: Telemetry | None = None) -> None:
         self.context = context
+        self.telemetry = telemetry
         self._handlers: dict[str, TaskHandler] = {}
 
     def register(self, task_name: str, handler: TaskHandler) -> None:
@@ -115,6 +119,8 @@ class SyncTaskQueue(TaskQueue):
 
     async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
         handler = self._handlers[task_name]
+        if self.telemetry is not None:
+            self.telemetry.record_task_enqueued(queue=queue, task_name=task_name)
         await handler(**kwargs)
 
     async def runtime_status(self) -> dict[str, object]:
@@ -137,7 +143,7 @@ class RedisTaskQueue(TaskQueue):
         self.worker_count = max(1, worker_count)
         self.run_worker = run_worker
         self._handlers: dict[str, TaskHandler] = {}
-        self._fallback = AsyncTaskQueue(context, worker_count=worker_count)
+        self._fallback = AsyncTaskQueue(context, worker_count=worker_count, telemetry=telemetry)
         self._workers: list[asyncio.Task[None]] = []
         self._active_jobs = 0
         self._known_queues = set(KNOWN_QUEUES)
@@ -181,6 +187,7 @@ class RedisTaskQueue(TaskQueue):
             await self._fallback.enqueue(task_name, queue=queue, **kwargs)
             return
         self.telemetry.mark_subsystem_recovered("tasks", operation="enqueue task")
+        self.telemetry.record_task_enqueued(queue=queue, task_name=task_name)
 
     async def join(self) -> None:
         await self._fallback.join()

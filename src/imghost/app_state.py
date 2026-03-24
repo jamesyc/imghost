@@ -70,7 +70,7 @@ class AppState:
     def _build_task_queue(self) -> TaskQueue:
         context = TaskContext(self.repository, self.storage, self.processors)
         if self.settings.task_queue_mode == "sync":
-            return SyncTaskQueue(context)
+            return SyncTaskQueue(context, self.telemetry)
         if self.settings.task_queue_mode == "redis" and self.redis.enabled:
             return RedisTaskQueue(
                 self.redis,
@@ -79,7 +79,7 @@ class AppState:
                 worker_count=self.settings.thumbnail_worker_count,
                 run_worker=self.run_task_worker,
             )
-        return AsyncTaskQueue(context, worker_count=self.settings.thumbnail_worker_count)
+        return AsyncTaskQueue(context, worker_count=self.settings.thumbnail_worker_count, telemetry=self.telemetry)
 
     async def start(self) -> None:
         await self.database.connect()

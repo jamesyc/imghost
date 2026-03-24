@@ -6,6 +6,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from time import monotonic
 from zipfile import ZIP_DEFLATED
 
 from zipstream import ZipStream
@@ -129,39 +130,82 @@ class UploadService:
         delete_token: str | None = None,
         rate_limit_key: str | None = None,
     ) -> UploadResult:
-        payload = await self._read_bounded_upload(file)
-        if not payload:
-            raise HTTPException(status_code=400, detail="Empty file upload.")
-
         actor = actor or CurrentActor(user=None, source="web")
-        if rate_limit_key:
-            await self.rate_limiter.enforce_upload_limits(
-                actor_key=rate_limit_key,
-                byte_count=len(payload),
-                user=actor.user,
-            )
-        await self._enforce_storage_quotas(actor.user, incoming_bytes=len(payload))
+        started_at = monotonic()
+        inferred_media_type = self._infer_upload_media_type(file)
+        actor_kind = "user" if actor.user is not None else "anonymous"
         created_album = album_id is None
-        album = await self._get_or_create_album(
-            album_id=album_id,
-            title=title,
-            correlation_id=correlation_id,
-            actor=actor,
-            delete_token=delete_token,
-        )
-        if len(await self.repository.list_album_media(album.id)) >= MAX_ALBUM_ITEMS:
-            raise HTTPException(status_code=413, detail="Album item limit reached.")
+        album: Album | None = None
+        payload: bytes | None = None
         try:
+            payload = await self._read_bounded_upload(file)
+            if not payload:
+                raise HTTPException(status_code=400, detail="Empty file upload.")
+            if rate_limit_key:
+                await self.rate_limiter.enforce_upload_limits(
+                    actor_key=rate_limit_key,
+                    byte_count=len(payload),
+                    user=actor.user,
+                )
+            await self._enforce_storage_quotas(actor.user, incoming_bytes=len(payload))
+            album = await self._get_or_create_album(
+                album_id=album_id,
+                title=title,
+                correlation_id=correlation_id,
+                actor=actor,
+                delete_token=delete_token,
+            )
+            if len(await self.repository.list_album_media(album.id)) >= MAX_ALBUM_ITEMS:
+                raise HTTPException(status_code=413, detail="Album item limit reached.")
             media = await self._create_media(album.id, file, payload, correlation_id, actor=actor)
+        except HTTPException:
+            if self.telemetry is not None:
+                self.telemetry.record_upload(
+                    result="rejected",
+                    media_type=inferred_media_type,
+                    actor_kind=actor_kind,
+                    source=actor.source,
+                    duration_seconds=monotonic() - started_at,
+                )
+            if created_album and album is not None and not await self.repository.list_album_media(album.id):
+                await self.repository.delete_album(album.id)
+            raise
         except Exception:
-            if created_album and not await self.repository.list_album_media(album.id):
+            if self.telemetry is not None:
+                self.telemetry.record_upload(
+                    result="failed",
+                    media_type=inferred_media_type,
+                    actor_kind=actor_kind,
+                    source=actor.source,
+                    duration_seconds=monotonic() - started_at,
+                )
+            if created_album and album is not None and not await self.repository.list_album_media(album.id):
                 await self.repository.delete_album(album.id)
             raise
         album.updated_at = utcnow()
         if not album.title and title:
             album.title = title
         await self.repository.update_album(album)
+        if self.telemetry is not None:
+            self.telemetry.record_upload(
+                result="success",
+                media_type=media.media_type,
+                actor_kind=actor_kind,
+                source=actor.source,
+                byte_count=media.file_size,
+                duration_seconds=monotonic() - started_at,
+            )
         return UploadResult(album=album, media=media)
+
+    def _infer_upload_media_type(self, file: UploadFile) -> str:
+        content_type = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
+        suffix = Path(file.filename or "upload.bin").suffix.lower()
+        fmt = suffix.lstrip(".") or content_type.split("/")[-1]
+        if content_type.startswith("video/") or fmt.lower() in VIDEO_FORMATS:
+            return "video"
+        if content_type.startswith("image/"):
+            return "image"
+        return "unknown"
 
     async def _read_bounded_upload(self, file: UploadFile) -> bytes:
         chunks: list[bytes] = []
@@ -306,6 +350,7 @@ class UploadService:
         if media is None or media.thumb_status == "done":
             return
 
+        started_at = monotonic()
         media.thumb_status = "processing"
         await self.repository.update_media(media)
 
@@ -331,6 +376,12 @@ class UploadService:
                 media.thumb_size = thumbnail.size
             media.thumb_status = "done"
             await self.repository.update_media(media)
+            if self.telemetry is not None:
+                self.telemetry.record_thumbnail_job(
+                    result="success",
+                    media_type=media.media_type,
+                    duration_seconds=monotonic() - started_at,
+                )
             return
         except Exception as exc:
             reason = self._thumbnail_failure_reason(exc)
@@ -340,6 +391,13 @@ class UploadService:
                 correlation_id=correlation_id,
                 error=exc,
             )
+            if self.telemetry is not None:
+                self.telemetry.record_thumbnail_job(
+                    result="failed",
+                    media_type=media.media_type,
+                    reason=reason,
+                    duration_seconds=monotonic() - started_at,
+                )
             media.thumb_status = "failed"
             media.thumb_key = None
             media.thumb_size = None

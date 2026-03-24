@@ -29,6 +29,7 @@ from .helpers import (
     record_system_event,
     record_thumbnail_failure,
 )
+from .metrics import TelemetryMetrics
 from .service import TelemetryService
 from .sinks.jsonlog import JsonLogTelemetrySink
 from .sinks.postgres import PostgresTelemetrySink
@@ -37,18 +38,23 @@ from .subscribers import register_telemetry_subscribers
 
 
 class Telemetry:
-    def __init__(self, service: TelemetryService, state: TelemetryState) -> None:
+    def __init__(self, service: TelemetryService, state: TelemetryState, metrics: TelemetryMetrics | None = None) -> None:
         self._service = service
         self._state = state
+        self._metrics = metrics
 
     async def emit_event(self, **kwargs) -> None:
         await self._service.emit_event(**kwargs)
 
     async def record_login_failed(self, request: Request, *, login_identifier: str, reason: str) -> None:
         await record_login_failed(self._service, request, login_identifier=login_identifier, reason=reason)
+        if self._metrics is not None:
+            self._metrics.record_auth_event(event="login", method="password", result="denied")
 
     async def record_login_succeeded(self, request: Request, *, user: User, remember_me: bool) -> None:
         await record_login_succeeded(self._service, request, user=user, remember_me=remember_me)
+        if self._metrics is not None:
+            self._metrics.record_auth_event(event="login", method="password", result="success")
 
     async def record_registration_denied(
         self,
@@ -59,9 +65,13 @@ class Telemetry:
         reason: str = "registration_disabled",
     ) -> None:
         await record_registration_denied(self._service, request, username=username, email=email, reason=reason)
+        if self._metrics is not None:
+            self._metrics.record_auth_event(event="register", method="password", result="denied")
 
     async def record_logout_succeeded(self, request: Request, *, user: User) -> None:
         await record_logout_succeeded(self._service, request, user=user)
+        if self._metrics is not None:
+            self._metrics.record_auth_event(event="logout", method="session", result="success")
 
     async def record_api_key_auth_failed(
         self,
@@ -82,9 +92,13 @@ class Telemetry:
             reason=reason,
             admin_denial=admin_denial,
         )
+        if self._metrics is not None:
+            self._metrics.record_auth_event(event="api_key_auth", method="api_key", result="denied")
 
     async def record_api_key_authenticated(self, request: Request, *, user: User, api_key_id: str) -> None:
         await record_api_key_authenticated(self._service, request, user=user, api_key_id=api_key_id)
+        if self._metrics is not None:
+            self._metrics.record_auth_event(event="api_key_auth", method="api_key", result="success")
 
     async def record_admin_access_denied(
         self,
@@ -96,6 +110,8 @@ class Telemetry:
         source: str,
     ) -> None:
         await record_admin_access_denied(self._service, request, actor=actor, object_type=object_type, reason=reason, source=source)
+        if self._metrics is not None:
+            self._metrics.record_auth_event(event="admin_access", method=source, result="denied")
 
     async def record_csrf_blocked(self, request: Request) -> None:
         await record_csrf_blocked(self._service, request)
@@ -139,6 +155,8 @@ class Telemetry:
         object_id: str | None = None,
     ) -> None:
         await record_oauth_denied(self._service, request, reason=reason, actor=actor, object_id=object_id)
+        if self._metrics is not None:
+            self._metrics.record_oauth_event(provider="google", event="callback", result="denied")
 
     async def record_oauth_succeeded(
         self,
@@ -157,9 +175,17 @@ class Telemetry:
             provider_uid=provider_uid,
             outcome=outcome,
         )
+        if self._metrics is not None:
+            self._metrics.record_oauth_event(
+                provider=provider,
+                event="link" if outcome == "linked" else "login",
+                result="success",
+            )
 
     async def record_oauth_disconnected(self, request: Request, *, user: User, provider: str) -> None:
         await record_oauth_disconnected(self._service, request, user=user, provider=provider)
+        if self._metrics is not None:
+            self._metrics.record_oauth_event(provider=provider, event="disconnect", result="success")
 
     async def record_system_startup(self, *, metadata: dict[str, Any]) -> None:
         await record_system_event(
@@ -241,6 +267,8 @@ class Telemetry:
             reason=reason,
             error=error,
         )
+        if self._metrics is not None:
+            self._metrics.record_thumbnail_job(result="failed", media_type=media.media_type, reason=reason)
 
     async def query_audit_log(
         self,
@@ -275,9 +303,13 @@ class Telemetry:
 
     def mark_subsystem_degraded(self, subsystem: str, *, operation: str, reason: str) -> None:
         self._state.mark_subsystem_degraded(subsystem, operation=operation, reason=reason)
+        if self._metrics is not None:
+            self._metrics.mark_subsystem_degraded(subsystem=subsystem)
 
     def mark_subsystem_recovered(self, subsystem: str, *, operation: str) -> None:
         self._state.mark_subsystem_recovered(subsystem, operation=operation)
+        if self._metrics is not None:
+            self._metrics.mark_subsystem_recovered(subsystem=subsystem)
 
     def subsystem_snapshot(self, subsystem: str, *, configured: bool, default_mode: str) -> dict[str, Any]:
         return self._state.subsystem_snapshot(subsystem, configured=configured, default_mode=default_mode)
@@ -290,9 +322,71 @@ class Telemetry:
 
     def mark_worker_started(self) -> None:
         self._state.mark_worker_started()
+        if self._metrics is not None:
+            self._metrics.mark_worker_started()
 
     def mark_worker_stopped(self) -> None:
         self._state.mark_worker_stopped()
+        if self._metrics is not None:
+            self._metrics.mark_worker_stopped()
+
+    def observe_http_request(self, *, method: str, route: str, status_code: int, duration_seconds: float) -> None:
+        if self._metrics is None:
+            return
+        self._metrics.observe_http_request(
+            method=method,
+            route=route,
+            status_code=status_code,
+            duration_seconds=duration_seconds,
+        )
+
+    def record_upload(
+        self,
+        *,
+        result: str,
+        media_type: str,
+        actor_kind: str,
+        source: str,
+        byte_count: int | None = None,
+        duration_seconds: float | None = None,
+    ) -> None:
+        if self._metrics is None:
+            return
+        self._metrics.record_upload(
+            result=result,
+            media_type=media_type,
+            actor_kind=actor_kind,
+            source=source,
+            byte_count=byte_count,
+            duration_seconds=duration_seconds,
+        )
+
+    def record_thumbnail_job(
+        self,
+        *,
+        result: str,
+        media_type: str,
+        reason: str | None = None,
+        duration_seconds: float | None = None,
+    ) -> None:
+        if self._metrics is None:
+            return
+        self._metrics.record_thumbnail_job(
+            result=result,
+            media_type=media_type,
+            reason=reason,
+            duration_seconds=duration_seconds,
+        )
+
+    def record_task_enqueued(self, *, queue: str, task_name: str) -> None:
+        if self._metrics is None:
+            return
+        self._metrics.record_task_enqueued(queue=queue, task_name=task_name)
+
+    def render_metrics(self) -> bytes:
+        if self._metrics is None:
+            return b""
+        return self._metrics.render()
 
     @property
     def last_worker_started_at(self) -> float | None:
@@ -313,11 +407,12 @@ class Telemetry:
 
 def build_telemetry(database: Database, event_bus: EventBus) -> Telemetry:
     telemetry_state = TelemetryState()
+    telemetry_metrics = TelemetryMetrics()
     telemetry_db_sink = PostgresTelemetrySink(database)
     service = TelemetryService(
         [telemetry_db_sink, JsonLogTelemetrySink(logging.getLogger("imghost.telemetry"))],
         query_backend=telemetry_db_sink,
     )
-    telemetry = Telemetry(service, telemetry_state)
+    telemetry = Telemetry(service, telemetry_state, telemetry_metrics)
     register_telemetry_subscribers(event_bus, service)
     return telemetry
