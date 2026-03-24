@@ -1,5 +1,6 @@
 from datetime import timedelta
 from io import BytesIO
+import time
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -620,6 +621,8 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         assert '"file_size_display"' in anonymous_page.text
         assert '<script src="/static/js/public-album.js" defer></script>' in anonymous_page.text
         assert "Public album" in anonymous_page.text
+        assert "created " in anonymous_page.text
+        assert "last edited " not in anonymous_page.text
         assert 'id="flash"' not in anonymous_page.text
         assert "Edit Album" not in anonymous_page.text
         assert "delete_token=" not in anonymous_page.text
@@ -635,6 +638,7 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         assert owner_page.status_code == 200
         assert f'href="/albums/{upload.json()["album_id"]}"' in owner_page.text
         assert "Edit Album" in owner_page.text
+        assert "created " in owner_page.text
         client.post("/api/v1/auth/logout", headers=browser_session_headers("https://testserver", "/"))
 
         set_user_password(client, stranger_id, "stranger-pass")
@@ -647,6 +651,47 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         stranger_page = client.get(f'/a/{upload.json()["album_id"]}')
         assert stranger_page.status_code == 200
         assert "Edit Album" not in stranger_page.text
+
+
+def test_public_album_page_shows_last_edited_only_after_album_changes(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, api_key = create_user_and_api_key(capsys, username="editedowner", email="editedowner@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("edited.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Before Edit"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+
+        initial_page = client.get(f'/a/{upload.json()["album_id"]}')
+        assert initial_page.status_code == 200
+        assert "last edited " not in initial_page.text
+
+        set_user_password(client, user_id, "secret-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "editedowner@example.com", "password": "secret-pass"},
+        )
+        assert login.status_code == 200
+
+        time.sleep(1.1)
+        update = client.patch(
+            f'/api/v1/album/{upload.json()["album_id"]}',
+            json={"title": "After Edit"},
+            headers=browser_session_headers("https://testserver", f'/albums/{upload.json()["album_id"]}'),
+        )
+        assert update.status_code == 200
+
+        edited_page = client.get(f'/a/{upload.json()["album_id"]}')
+        assert edited_page.status_code == 200
+        assert "created " in edited_page.text
+        assert "last edited " in edited_page.text
 
 
 def test_public_user_albums_page_does_not_render_flash_markup(tmp_path, monkeypatch, capsys) -> None:
@@ -821,6 +866,8 @@ def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path,
         assert 'id="settings-api-warning"' in page.text
         assert 'id="settings-api-warning" class="settings-warning-bubble hidden"' in page.text
         assert 'id="settings-account-summary"' in page.text
+        assert 'id="settings-storage-usage-bar"' in page.text
+        assert 'id="settings-storage-usage-copy"' in page.text
         assert 'id="reveal-api-key"' in page.text
         assert 'id="download-sharex-settings"' in page.text
         assert 'id="settings-password-form"' in page.text

@@ -533,9 +533,9 @@ This means drag-to-reorder is a single `UPDATE media SET position = {new_pos} WH
 
 ### Album Page (`/a/{albumId}`)
 
-- Album title (editable by owner, inline)
+- Album title
 - Created datetime + last edited datetime (shown only if the album has been edited after creation)
-- All items rendered in position order: images as `<img>`, videos as `<video controls>`
+- All items rendered in position order as preview cards; images open in a lightbox and videos play in a lightbox with `<video controls>`
 - Right-clicking an image gives the browser's native "Copy image address" — resolves to `https://yourdomain.com/i/{mediaId}.jpg` (clean, permanent URL with correct extension; storage backend is completely invisible)
 - Per-item **direct URL text box** at the bottom of each image for non-technical users to copy
 - **Expiry banner** if `expires_at` is set: *"This album expires in X hours / X days"* — shown to all viewers including anonymous
@@ -545,7 +545,7 @@ This means drag-to-reorder is a single `UPDATE media SET position = {new_pos} WH
 
 Logged-in owners can:
 
-- Edit album title (inline)
+- Edit album title from the album edit page
 - Delete individual items from the album
 - Add more items to an existing album (up to 1000-item limit)
 - Set the album cover image
@@ -554,8 +554,8 @@ Logged-in owners can:
 
 ### Expiry
 
-- **Anonymous uploads:** Always expire. Default = 24 hours from upload (configurable via runtime config)
-- **Authenticated uploads:** No expiry by default
+- **Anonymous uploads:** Always expire 24 hours from upload
+- **Authenticated uploads:** Do not expire
 - **Admin can:** Set or clear expiry on any album (e.g. rescue an anon upload, or force-expire a user album)
 - Albums where `expires_at < NOW()` return 404 immediately on any request, before the pruning job runs
 
@@ -777,9 +777,9 @@ The upload-size policy should stay deliberately simple unless separate image/vid
 - **Change password:** Requires current password when one already exists; SSO-only users can set their first local password from Settings
 - **Connected accounts:** Shows linked SSO providers; "Connect Google"; "Disconnect" only when another sign-in method remains
 - **Connected-account guidance:** The page should explain that Google will not auto-merge onto an existing local account and should warn clearly when Google is the last remaining sign-in method
-- **API Key:** Manage the current API key from Settings; if no key exists yet, the page auto-issues one for the user; revealing or rotating a key always shows a fresh raw value because only the hash is stored server-side; "Download ShareX Config" downloads `.sxcu`
+- **API Key:** Manage the current API key from Settings; revealing or rotating a key always shows a fresh raw value because only the hash is stored server-side; "Download ShareX Config" downloads `.sxcu`
 - **Storage usage:** Used / quota displayed as a progress bar with byte values
-- **Delete account:** Confirmation flow requiring password (or SSO re-auth)
+- **Delete account:** Confirmation flow requiring the current password for accounts with a local password; SSO-only accounts must complete a fresh provider re-auth, which returns a short-lived deletion token consumed by the delete request
 
 ### Account Deletion
 
@@ -980,7 +980,7 @@ POST /api/v1/upload
 GET    /api/v1/album/{albumId}            album metadata + ordered item list
 GET    /api/v1/album/{albumId}/delete     delete album via GET (ShareX DeletionURL — requires API key auth)
 DELETE /api/v1/album/{albumId}            delete album (owner or admin)
-PATCH  /api/v1/album/{albumId}            edit title, cover_media_id, expiry
+PATCH  /api/v1/album/{albumId}            edit title, cover_media_id
 GET    /api/v1/album/{albumId}/zip        stream ZIP download (public — no auth required)
 PATCH  /api/v1/album/{albumId}/order      reorder items: [{media_id, position}, ...]
 ```

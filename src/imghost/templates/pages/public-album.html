@@ -7,7 +7,12 @@
     <div class="public-album-hero-copy">
       <p class="eyebrow">Public album</p>
       <h1>{{ album_payload["title"] or "Untitled album" }}</h1>
-      <p class="lede">{{ album_payload["item_count"] }} item(s) · {{ album_payload["total_size_display"] }} · updated {{ album_payload["updated_at_display"] }}</p>
+      <p class="lede">
+        {{ album_payload["item_count"] }} item(s) · {{ album_payload["total_size_display"] }} · created {{ album_payload["created_at_display"] }}
+        {% if album_payload["last_edited_display"] %}
+        · last edited {{ album_payload["last_edited_display"] }}
+        {% endif %}
+      </p>
     </div>
     <div class="row row-actions public-album-hero-actions" id="public-album-hero-actions">
       <a class="button-link secondary-link" href="/api/v1/album/{{ album_payload['id'] }}/zip">Download ZIP</a>

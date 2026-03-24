@@ -15,6 +15,8 @@ if (settingsBootstrapNode) {
   const deleteHint = document.getElementById("settings-delete-hint");
   const deletePasswordInput = document.getElementById("settings-delete-current-password");
   const deleteOauthActions = document.getElementById("settings-delete-oauth-actions");
+  const storageUsageBar = document.getElementById("settings-storage-usage-bar");
+  const storageUsageCopy = document.getElementById("settings-storage-usage-copy");
   const defaultApiWarningText = apiWarning?.textContent || "";
 
   const state = {
@@ -39,6 +41,8 @@ if (settingsBootstrapNode) {
     const precision = size >= 10 || unitIndex === 0 ? 0 : 1;
     return `${size.toFixed(precision)} ${units[unitIndex]}`;
   };
+
+  const formatPercent = (value) => `${Math.round(Math.max(0, Math.min(100, value)))}%`;
 
   const setInlineStatus = (node, message = "", tone = "") => {
     if (!node) {
@@ -112,6 +116,17 @@ if (settingsBootstrapNode) {
     document.getElementById("settings-media-count").textContent = formatNumber(user.media_count);
     document.getElementById("settings-storage-used").textContent = formatBytes(user.storage_used_bytes);
     document.getElementById("settings-storage-quota").textContent = formatBytes(user.quota_bytes);
+    const usedBytes = Number(user.storage_used_bytes || 0);
+    const quotaBytes = Number(user.quota_bytes || 0);
+    const usagePercent = quotaBytes > 0 ? (usedBytes / quotaBytes) * 100 : 0;
+    if (storageUsageBar) {
+      storageUsageBar.style.width = quotaBytes > 0 ? formatPercent(usagePercent) : "0%";
+    }
+    if (storageUsageCopy) {
+      storageUsageCopy.textContent = quotaBytes > 0
+        ? `Using ${formatBytes(usedBytes)} of ${formatBytes(quotaBytes)}.`
+        : `Using ${formatBytes(usedBytes)} with no quota limit set.`;
+    }
     const linkedProviders = Array.isArray(user.sso_providers) ? user.sso_providers : [];
     const hasPassword = !!user.has_password;
     const googleLinked = linkedProviders.some((provider) => provider.provider === "google");

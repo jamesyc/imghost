@@ -31,7 +31,13 @@ def build_public_album_page_context(
 ) -> dict[str, Any]:
     album_payload = album_to_payload(base_url, album, items)
     album_payload["total_size_display"] = humanize_bytes(int(album_payload["total_size"]))
+    album_payload["created_at_display"] = display_timestamp(album_payload["created_at"])
     album_payload["updated_at_display"] = display_timestamp(album_payload["updated_at"])
+    album_payload["last_edited_display"] = (
+        album_payload["updated_at_display"]
+        if album_payload["updated_at_display"] != album_payload["created_at_display"]
+        else None
+    )
     for item in album_payload["items"]:
         item["file_size_display"] = humanize_bytes(int(item["file_size"]))
     return {
