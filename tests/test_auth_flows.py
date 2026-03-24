@@ -210,6 +210,7 @@ def test_local_login_supports_username_session_cookie_and_browser_sharex_downloa
         assert new_auth_header.startswith("Bearer ")
         new_api_key = new_auth_header.removeprefix("Bearer ")
         assert new_api_key != old_api_key
+        assert payload["DeletionURL"] == "$json:delete_url$"
 
         old_me = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {old_api_key}"})
         assert old_me.status_code == 401

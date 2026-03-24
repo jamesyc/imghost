@@ -189,6 +189,9 @@ async def settings_page(request: Request) -> HTMLResponse:
             "session_user": session_user,
             "oauth_status": (request.query_params.get("oauth_status") or "").strip() or None,
             "oauth_tone": (request.query_params.get("oauth_tone") or "").strip() or None,
+            "delete_reauth_token": (request.query_params.get("delete_reauth_token") or "").strip() or None,
+            "delete_reauth_status": (request.query_params.get("delete_reauth_status") or "").strip() or None,
+            "delete_reauth_tone": (request.query_params.get("delete_reauth_tone") or "").strip() or None,
         },
         script_paths=["js/settings.js"],
     )

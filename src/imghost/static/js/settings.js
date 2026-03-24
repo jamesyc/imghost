@@ -12,10 +12,14 @@ if (settingsBootstrapNode) {
   const googleDisconnect = document.getElementById("settings-google-disconnect");
   const passwordHint = document.getElementById("settings-password-hint");
   const oauthHint = document.getElementById("settings-oauth-hint");
+  const deleteHint = document.getElementById("settings-delete-hint");
+  const deletePasswordInput = document.getElementById("settings-delete-current-password");
+  const deleteOauthActions = document.getElementById("settings-delete-oauth-actions");
   const defaultApiWarningText = apiWarning?.textContent || "";
 
   const state = {
     user: bootstrap.session_user || null,
+    deleteReauthToken: bootstrap.delete_reauth?.token || "",
   };
 
   const formatNumber = (value) => new Intl.NumberFormat().format(Number(value || 0));
@@ -47,6 +51,17 @@ if (settingsBootstrapNode) {
     } else {
       delete node.dataset.tone;
     }
+  };
+
+  const providerDisplayName = (provider) => {
+    const normalized = String(provider || "").trim().toLowerCase();
+    if (normalized === "google") {
+      return "Google";
+    }
+    if (normalized === "github") {
+      return "GitHub";
+    }
+    return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : "OAuth";
   };
 
   const revealApiWarning = () => {
@@ -132,6 +147,35 @@ if (settingsBootstrapNode) {
       googleDisconnect.title = disconnectBlocked
         ? "Set a local password before disconnecting Google."
         : "";
+    }
+    if (deleteHint) {
+      if (hasPassword && linkedProviders.length) {
+        deleteHint.textContent = "Delete this account by entering your current password, or confirm with a fresh OAuth sign-in from one of your linked providers.";
+      } else if (hasPassword) {
+        deleteHint.textContent = "Delete this account by entering your current password.";
+      } else if (linkedProviders.length) {
+        deleteHint.textContent = "Delete this account by confirming with a fresh OAuth sign-in from one of your linked providers.";
+      } else {
+        deleteHint.textContent = "This account cannot be deleted until it has a usable local password or linked OAuth provider.";
+      }
+    }
+    if (deletePasswordInput) {
+      deletePasswordInput.classList.toggle("hidden", !hasPassword);
+      if (!hasPassword) {
+        deletePasswordInput.value = "";
+      }
+    }
+    if (deleteOauthActions) {
+      deleteOauthActions.innerHTML = linkedProviders.length
+        ? linkedProviders
+            .map((provider) => {
+              const providerName = providerDisplayName(provider.provider);
+              const href = `/auth/${encodeURIComponent(provider.provider)}/start?mode=delete_account&next=%2Fsettings`;
+              return `<a class="button secondary" href="${href}">Re-auth With ${providerName}</a>`;
+            })
+            .join("")
+        : "";
+      deleteOauthActions.classList.toggle("hidden", linkedProviders.length === 0);
     }
   };
 
@@ -228,12 +272,29 @@ if (settingsBootstrapNode) {
       return;
     }
     try {
-      await requestJson("/api/v1/user/me", { method: "DELETE" });
+      const currentPassword = String(deletePasswordInput?.value || "");
+      let payload;
+      if (currentPassword) {
+        payload = { method: "password", current_password: currentPassword };
+      } else if (state.deleteReauthToken) {
+        payload = { method: "oauth_reauth", reauth_token: state.deleteReauthToken };
+      } else {
+        setInlineStatus(deleteStatus, "Enter your current password or complete OAuth re-authentication before deleting your account.", "error");
+        return;
+      }
+      await requestJson("/api/v1/user/me", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       window.location.href = "/";
     } catch (error) {
       setInlineStatus(deleteStatus, error.message, "error");
     }
   });
 
+  if (bootstrap.delete_reauth?.status) {
+    setInlineStatus(deleteStatus, bootstrap.delete_reauth.status, bootstrap.delete_reauth.tone || "");
+  }
   renderUser();
 }

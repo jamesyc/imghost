@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<script id="settings-bootstrap" type="application/json">{{ {"session_user": session_user}|tojson }}</script>
+<script id="settings-bootstrap" type="application/json">{{ {"session_user": session_user, "delete_reauth": {"token": delete_reauth_token, "status": delete_reauth_status, "tone": delete_reauth_tone}}|tojson }}</script>
 <section class="stack settings-shell">
   <section class="card hero-card settings-hero">
     <div class="settings-hero-copy">
@@ -91,13 +91,15 @@
     <section class="card settings-card">
       <p class="eyebrow">Danger Zone</p>
       <h2>Delete account</h2>
-      <p class="hint">This permanently deletes your account and all owned albums and files.</p>
+      <p class="hint" id="settings-delete-hint">This permanently deletes your account and all owned albums and files. Confirm with your current password or a fresh OAuth sign-in.</p>
       <form id="settings-delete-account-form" class="stack settings-form">
+        <input id="settings-delete-current-password" type="password" name="current_password" placeholder="Current password (if enabled on this account)">
+        <div id="settings-delete-oauth-actions" class="row row-actions settings-action-row"></div>
         <div class="row row-actions">
           <button type="submit" class="danger">Delete My Account</button>
         </div>
       </form>
-      <p id="settings-delete-status" class="inline-status hidden" aria-live="polite"></p>
+      <p id="settings-delete-status" class="inline-status{% if not delete_reauth_status %} hidden{% endif %}" {% if delete_reauth_tone %}data-tone="{{ delete_reauth_tone }}"{% endif %} aria-live="polite">{{ delete_reauth_status or "" }}</p>
     </section>
   </section>
 </section>

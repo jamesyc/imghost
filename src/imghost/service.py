@@ -15,6 +15,7 @@ from fastapi import HTTPException, UploadFile
 
 from .account_service import (
     UNSET,
+    AccountDeletionConfirmationInput,
     AccountService,
     ApiKeyIssueResult,
     LocalLoginInput,
@@ -1145,3 +1146,13 @@ class UploadService:
 
     async def disconnect_oauth_provider(self, user: User, provider: str) -> None:
         await self.accounts.disconnect_oauth_provider(user, provider)
+
+    async def issue_account_delete_reauth_token(self, user: User, *, provider: str, provider_uid: str) -> str:
+        return await self.accounts.issue_account_delete_reauth_token(user, provider=provider, provider_uid=provider_uid)
+
+    async def validate_account_deletion_confirmation(
+        self,
+        user: User,
+        payload: AccountDeletionConfirmationInput,
+    ) -> None:
+        await self.accounts.validate_account_deletion_confirmation(user, payload)

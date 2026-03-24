@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..ids import ALBUM_ID_LENGTH, MEDIA_ID_LENGTH, is_valid_id
 from ..payloads import album_to_payload, media_url, thumb_format, thumb_url
 from ..public_origin import public_base_url
+from ..sharex_delete import ShareXDeletePayload, ShareXDeleteTokenManager
 from ..service import CurrentActor, UNSET
-from .auth_context import authenticated_user
+from .auth_context import authenticated_principal, authenticated_user
 from .display_helpers import album_manage_url, is_expired
 from .request_context import correlation_id, get_state
 from .request_helpers import upload_rate_limit_key
@@ -26,6 +29,11 @@ class AlbumOrderItem(BaseModel):
     position: int
 
 
+def build_sharex_delete_url(base_url: str, secret_key: str, album_id: str, user_id: str) -> str:
+    token = ShareXDeleteTokenManager(secret_key).dumps(ShareXDeletePayload(album_id=album_id, user_id=user_id))
+    return f"{base_url}/api/v1/album/{album_id}/delete?{urlencode({'token': token})}"
+
+
 @router.post("/api/v1/upload")
 async def upload(
     request: Request,
@@ -37,10 +45,12 @@ async def upload(
     state = get_state(request)
     base_url = public_base_url(request, state.settings)
     cid = correlation_id(request)
-    user = await authenticated_user(request, required=False)
+    principal = await authenticated_principal(request, required=False)
+    user = principal.user if principal is not None else None
     if user is None and not await state.runtime_config.get_value("anon_upload_enabled"):
         raise HTTPException(status_code=403, detail="Anonymous uploads are disabled.")
-    actor = CurrentActor(user=user, source="api" if user else "web")
+    is_api_key_upload = principal is not None and principal.raw_api_key is not None
+    actor = CurrentActor(user=user, source="api" if is_api_key_upload else "web")
     results = []
     active_album_id = album_id
     active_delete_token = delete_token
@@ -67,6 +77,11 @@ async def upload(
         "media_url": media_url(base_url, primary.media.id, primary.media.format),
         "thumb_url": thumb_url(base_url, primary.media.id, primary.media.format),
         "manage_url": album_manage_url(base_url, primary.album, include_token=True) if primary.album.delete_token else None,
+        "delete_url": (
+            build_sharex_delete_url(base_url, state.settings.secret_key, primary.album.id, user.id)
+            if is_api_key_upload and user is not None and primary.album.user_id == user.id
+            else None
+        ),
         "expires_at": primary.album.expires_at.isoformat() if primary.album.expires_at else None,
         "items": [
             {
@@ -80,6 +95,35 @@ async def upload(
     }
     headers = {"X-Correlation-ID": cid}
     return JSONResponse(payload, headers=headers)
+
+
+@router.get("/api/v1/album/{album_id}/delete")
+async def delete_album_via_sharex(request: Request, album_id: str, token: str) -> JSONResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    cid = correlation_id(request)
+    try:
+        payload = ShareXDeleteTokenManager(state.settings.secret_key).loads(token)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.") from exc
+    if payload.album_id != album_id:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    album = await state.repository.get_album(album_id)
+    if album is None or album.user_id != payload.user_id:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    actor_user = await state.repository.get_user(payload.user_id)
+    if actor_user is None or actor_user.suspended:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    deleted_album, items = await state.uploads.delete_album(album_id, None, cid, actor_user=actor_user)
+    return JSONResponse(
+        {
+            "deleted": True,
+            "album_id": deleted_album.id,
+            "item_count": len(items),
+        },
+        headers={"X-Correlation-ID": cid},
+    )
 
 
 @router.get("/api/v1/album/{album_id}")

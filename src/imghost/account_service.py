@@ -9,6 +9,7 @@ import bcrypt
 from fastapi import HTTPException
 
 from .config import Settings
+from .account_delete_reauth import AccountDeleteReauthPayload, AccountDeleteReauthTokenManager
 from .events import (
     ApiKeyIssued,
     EventBus,
@@ -68,6 +69,13 @@ class LocalLoginInput:
     password: str
 
 
+@dataclass
+class AccountDeletionConfirmationInput:
+    method: str
+    current_password: str | None = None
+    reauth_token: str | None = None
+
+
 class AccountService:
     def __init__(
         self,
@@ -80,6 +88,13 @@ class AccountService:
         self.repository = repository
         self.storage = storage
         self.event_bus = event_bus
+
+    def _provider_label(self, provider: str) -> str:
+        normalized = provider.strip().lower()
+        return {
+            "google": "Google",
+            "github": "GitHub",
+        }.get(normalized, normalized.capitalize() or "OAuth")
 
     def _require_password_value(self, password: str, *, label: str) -> str:
         if not password.strip():
@@ -475,6 +490,45 @@ class AccountService:
     async def delete_user_account(self, user: User, correlation_id: str) -> dict[str, int]:
         return await self.delete_user_by_id(user.id, correlation_id, deleted_by="self", actor_id=user.id)
 
+    async def issue_account_delete_reauth_token(self, user: User, *, provider: str, provider_uid: str) -> str:
+        existing_link = await self.repository.get_user_sso_link(provider, provider_uid)
+        if existing_link is None or existing_link.user_id != user.id:
+            raise HTTPException(status_code=403, detail="The selected OAuth account is not linked to this user.")
+        return AccountDeleteReauthTokenManager(self.settings.secret_key).dumps(
+            AccountDeleteReauthPayload(user_id=user.id, provider=provider, provider_uid=provider_uid)
+        )
+
+    async def validate_account_deletion_confirmation(
+        self,
+        user: User,
+        payload: AccountDeletionConfirmationInput,
+    ) -> None:
+        method = payload.method.strip().lower()
+        if method == "password":
+            if user.password_hash is None:
+                raise HTTPException(status_code=400, detail="This account does not have a local password.")
+            current_password = (payload.current_password or "").strip()
+            if not current_password:
+                raise HTTPException(status_code=400, detail="Current password is required.")
+            if not self._verify_password(current_password, user.password_hash):
+                raise HTTPException(status_code=403, detail="Current password is incorrect.")
+            return
+        if method == "oauth_reauth":
+            reauth_token = (payload.reauth_token or "").strip()
+            if not reauth_token:
+                raise HTTPException(status_code=400, detail="OAuth re-authentication is required.")
+            try:
+                reauth = AccountDeleteReauthTokenManager(self.settings.secret_key).loads(reauth_token)
+            except ValueError as exc:
+                raise HTTPException(status_code=403, detail="OAuth re-authentication has expired or is invalid.") from exc
+            if reauth.user_id != user.id:
+                raise HTTPException(status_code=403, detail="OAuth re-authentication has expired or is invalid.")
+            links = await self.repository.list_user_sso_links(user.id)
+            if not any(link.provider == reauth.provider and link.provider_uid == reauth.provider_uid for link in links):
+                raise HTTPException(status_code=403, detail="OAuth re-authentication has expired or is invalid.")
+            return
+        raise HTTPException(status_code=400, detail="Unsupported account deletion confirmation method.")
+
     async def delete_user_by_id(
         self,
         user_id: str,
@@ -524,9 +578,12 @@ class AccountService:
         source: str = "web",
     ) -> tuple[User, str]:
         if not identity.provider_uid.strip() or not identity.email.strip():
-            raise HTTPException(status_code=403, detail="Google sign-in could not be verified.")
+            raise HTTPException(status_code=403, detail=f"{self._provider_label(identity.provider)} sign-in could not be verified.")
         if not identity.email_verified:
-            raise HTTPException(status_code=403, detail="Your Google account must have a verified email address.")
+            raise HTTPException(
+                status_code=403,
+                detail=f"Your {self._provider_label(identity.provider)} account must have a verified email address.",
+            )
 
         existing_link = await self.repository.get_user_sso_link(identity.provider, identity.provider_uid)
         if existing_link is not None:
@@ -536,7 +593,10 @@ class AccountService:
             if linked_user.suspended:
                 raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
             if current_user is not None and current_user.id != linked_user.id:
-                raise HTTPException(status_code=409, detail="This Google account is already linked to a different user.")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"This {self._provider_label(identity.provider)} account is already linked to a different user.",
+                )
             return linked_user, "existing_link"
 
         if current_user is not None:
@@ -552,7 +612,10 @@ class AccountService:
         if existing_email_user is not None:
             raise HTTPException(
                 status_code=409,
-                detail="An account with this email already exists. Sign in locally first, then connect Google from Settings.",
+                detail=(
+                    "An account with this email already exists. "
+                    f"Sign in locally first, then connect {self._provider_label(identity.provider)} from Settings."
+                ),
             )
 
         new_user = await self.create_user(
@@ -581,7 +644,10 @@ class AccountService:
         if user.password_hash is None and not remaining:
             raise HTTPException(
                 status_code=400,
-                detail="You must keep at least one login method. Set a password before disconnecting Google.",
+                detail=(
+                    "You must keep at least one login method. "
+                    f"Set a password before disconnecting {self._provider_label(provider)}."
+                ),
             )
         await self.repository.delete_user_sso_link(user.id, provider)
 

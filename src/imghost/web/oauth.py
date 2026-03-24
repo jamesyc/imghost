@@ -24,9 +24,21 @@ def _query_redirect(path: str, **params: str | None) -> RedirectResponse:
     return RedirectResponse(url=location, status_code=303)
 
 
-def _callback_url(request: Request) -> str:
+def _provider_label(provider: str) -> str:
+    normalized = provider.strip().lower()
+    return {
+        "google": "Google",
+        "github": "GitHub",
+    }.get(normalized, normalized.capitalize() or "OAuth")
+
+
+def _callback_url(request: Request, provider: str) -> str:
     state = get_state(request)
-    return f"{public_base_url(request, state.settings)}/auth/google/callback"
+    return f"{public_base_url(request, state.settings)}/auth/{provider}/callback"
+
+
+def _oauth_redirect_message(provider: str, suffix: str) -> str:
+    return f"{_provider_label(provider)} {suffix}"
 
 
 async def _audit_oauth_denied(request: Request, *, reason: str, object_id: str | None = None) -> None:
@@ -34,18 +46,17 @@ async def _audit_oauth_denied(request: Request, *, reason: str, object_id: str |
     await state.telemetry.record_oauth_denied(request, reason=reason, object_id=object_id)
 
 
-@router.get("/auth/google/start")
-async def start_google_oauth(request: Request, next: str | None = None, mode: str = "login") -> RedirectResponse:
+async def _start_oauth(request: Request, provider_name: str, *, next: str | None = None, mode: str = "login") -> RedirectResponse:
     state = get_state(request)
-    provider = state.oauth_providers.get("google")
+    provider = state.oauth_providers.get(provider_name)
     if provider is None:
         raise HTTPException(status_code=404)
     mode = (mode or "login").strip().lower()
-    if mode not in {"login", "link"}:
+    if mode not in {"login", "link", "delete_account"}:
         mode = "login"
     next_path = normalize_next_path(next, default="/dashboard" if mode == "login" else "/settings")
     user = await authenticated_user(request, required=False)
-    if mode == "link" and user is None:
+    if mode in {"link", "delete_account"} and user is None:
         return login_redirect("/settings")
     await state.repository.delete_expired_oauth_state_nonces()
     code_verifier = generate_code_verifier()
@@ -53,7 +64,7 @@ async def start_google_oauth(request: Request, next: str | None = None, mode: st
         OAuthStateNonce(
             jti=str(uuid4()),
             mode=mode,
-            user_id=user.id if mode == "link" and user is not None else None,
+            user_id=user.id if mode in {"link", "delete_account"} and user is not None else None,
             code_verifier=code_verifier,
             created_at=utcnow(),
             expires_at=utcnow() + timedelta(minutes=10),
@@ -64,12 +75,12 @@ async def start_google_oauth(request: Request, next: str | None = None, mode: st
             mode=mode,
             next_path=next_path,
             jti=nonce.jti,
-            user_id=user.id if mode == "link" and user is not None else None,
+            user_id=user.id if mode in {"link", "delete_account"} and user is not None else None,
         )
     )
     return RedirectResponse(
         url=provider.authorization_url(
-            redirect_uri=_callback_url(request),
+            redirect_uri=_callback_url(request, provider_name),
             state=signed_state,
             code_challenge=build_code_challenge(code_verifier),
             code_challenge_method="S256",
@@ -78,15 +89,25 @@ async def start_google_oauth(request: Request, next: str | None = None, mode: st
     )
 
 
-@router.get("/auth/google/callback")
-async def google_oauth_callback(
+@router.get("/auth/google/start")
+async def start_google_oauth(request: Request, next: str | None = None, mode: str = "login") -> RedirectResponse:
+    return await _start_oauth(request, "google", next=next, mode=mode)
+
+
+@router.get("/auth/{provider}/start")
+async def start_oauth(request: Request, provider: str, next: str | None = None, mode: str = "login") -> RedirectResponse:
+    return await _start_oauth(request, provider.strip().lower(), next=next, mode=mode)
+
+
+async def _oauth_callback(
     request: Request,
+    provider_name: str,
     state: str | None = None,
     code: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
     app_state = get_state(request)
-    provider = app_state.oauth_providers.get("google")
+    provider = app_state.oauth_providers.get(provider_name)
     if provider is None:
         raise HTTPException(status_code=404)
 
@@ -94,57 +115,87 @@ async def google_oauth_callback(
         oauth_state = app_state.oauth_state.loads(state or "")
     except ValueError:
         await _audit_oauth_denied(request, reason="invalid_state")
-        return _query_redirect("/login", oauth_error="Google sign-in could not be verified.")
+        return _query_redirect("/login", oauth_error=_oauth_redirect_message(provider_name, "sign-in could not be verified."))
     if not oauth_state.jti:
         await _audit_oauth_denied(request, reason="invalid_state")
-        return _query_redirect("/login", oauth_error="Google sign-in could not be verified.")
+        return _query_redirect("/login", oauth_error=_oauth_redirect_message(provider_name, "sign-in could not be verified."))
     nonce = await app_state.repository.consume_oauth_state_nonce(oauth_state.jti)
     if nonce is None:
         await _audit_oauth_denied(request, reason="invalid_state_nonce")
-        return _query_redirect("/login", oauth_error="Google sign-in could not be verified.")
+        return _query_redirect("/login", oauth_error=_oauth_redirect_message(provider_name, "sign-in could not be verified."))
 
     next_path = normalize_next_path(
         oauth_state.next_path,
         default="/dashboard" if oauth_state.mode == "login" else "/settings",
     )
     current_user = await authenticated_user(request, required=False)
-    if oauth_state.mode == "link":
+    if oauth_state.mode in {"link", "delete_account"}:
         if current_user is None or current_user.id != oauth_state.user_id:
-            await _audit_oauth_denied(request, reason="link_session_mismatch")
-            return _query_redirect("/settings", oauth_status="Please sign in again before connecting Google.", oauth_tone="error")
-    else:
+            await _audit_oauth_denied(
+                request,
+                reason="link_session_mismatch" if oauth_state.mode == "link" else "delete_account_session_mismatch",
+            )
+            message = (
+                f"Please sign in again before connecting {_provider_label(provider_name)}."
+                if oauth_state.mode == "link"
+                else f"Please sign in again before confirming account deletion with {_provider_label(provider_name)}."
+            )
+            key = "oauth_status" if oauth_state.mode == "link" else "delete_reauth_status"
+            tone = {"oauth_tone": "error"} if oauth_state.mode == "link" else {"delete_reauth_tone": "error"}
+            return _query_redirect("/settings", **{key: message}, **tone)
+    if oauth_state.mode == "login":
         current_user = None
 
     if error:
         await _audit_oauth_denied(request, reason="provider_error")
-        target = "/settings" if oauth_state.mode == "link" else "/login"
-        key = "oauth_status" if oauth_state.mode == "link" else "oauth_error"
-        tone = {"oauth_tone": "error"} if oauth_state.mode == "link" else {}
+        target = "/settings" if oauth_state.mode in {"link", "delete_account"} else "/login"
+        key = "oauth_status" if oauth_state.mode == "link" else "delete_reauth_status" if oauth_state.mode == "delete_account" else "oauth_error"
+        tone = {"oauth_tone": "error"} if oauth_state.mode == "link" else {"delete_reauth_tone": "error"} if oauth_state.mode == "delete_account" else {}
         return _query_redirect(
             target,
             next=next_path if target == "/login" else None,
-            **{key: "Google sign-in was cancelled or denied."},
+            **{key: _oauth_redirect_message(provider_name, "sign-in was cancelled or denied.")},
             **tone,
         )
 
     if not code:
         await _audit_oauth_denied(request, reason="missing_code")
-        target = "/settings" if oauth_state.mode == "link" else "/login"
-        key = "oauth_status" if oauth_state.mode == "link" else "oauth_error"
-        tone = {"oauth_tone": "error"} if oauth_state.mode == "link" else {}
+        target = "/settings" if oauth_state.mode in {"link", "delete_account"} else "/login"
+        key = "oauth_status" if oauth_state.mode == "link" else "delete_reauth_status" if oauth_state.mode == "delete_account" else "oauth_error"
+        tone = {"oauth_tone": "error"} if oauth_state.mode == "link" else {"delete_reauth_tone": "error"} if oauth_state.mode == "delete_account" else {}
         return _query_redirect(
             target,
             next=next_path if target == "/login" else None,
-            **{key: "Google sign-in did not return a code."},
+            **{key: _oauth_redirect_message(provider_name, "sign-in did not return a code.")},
             **tone,
         )
 
     try:
         identity = await provider.exchange_code(
             code=code,
-            redirect_uri=_callback_url(request),
+            redirect_uri=_callback_url(request, provider_name),
             code_verifier=nonce.code_verifier,
         )
+        if oauth_state.mode == "delete_account":
+            assert current_user is not None
+            reauth_token = await app_state.uploads.issue_account_delete_reauth_token(
+                current_user,
+                provider=identity.provider,
+                provider_uid=identity.provider_uid,
+            )
+            await app_state.telemetry.record_oauth_succeeded(
+                request,
+                user=current_user,
+                provider=provider_name,
+                provider_uid=identity.provider_uid,
+                outcome="delete_account_reauth",
+            )
+            return _query_redirect(
+                "/settings",
+                delete_reauth_status=f"{_provider_label(provider_name)} re-authentication confirmed. You can now delete your account.",
+                delete_reauth_tone="success",
+                delete_reauth_token=reauth_token,
+            )
         user, outcome = await app_state.uploads.complete_oauth_login(
             identity,
             current_user=current_user,
@@ -157,23 +208,23 @@ async def google_oauth_callback(
             request,
             reason=str(exc.detail),
             actor=current_user,
-            object_id="google",
+            object_id=provider_name,
         )
-        target = "/settings" if oauth_state.mode == "link" else "/login"
-        key = "oauth_status" if oauth_state.mode == "link" else "oauth_error"
-        tone = {"oauth_tone": "error"} if oauth_state.mode == "link" else {}
+        target = "/settings" if oauth_state.mode in {"link", "delete_account"} else "/login"
+        key = "oauth_status" if oauth_state.mode == "link" else "delete_reauth_status" if oauth_state.mode == "delete_account" else "oauth_error"
+        tone = {"oauth_tone": "error"} if oauth_state.mode == "link" else {"delete_reauth_tone": "error"} if oauth_state.mode == "delete_account" else {}
         return _query_redirect(target, next=next_path if target == "/login" else None, **{key: str(exc.detail)}, **tone)
 
     await app_state.telemetry.record_oauth_succeeded(
         request,
         user=user,
-        provider="google",
+        provider=provider_name,
         provider_uid=identity.provider_uid,
         outcome=outcome,
     )
 
     if oauth_state.mode == "link":
-        return _query_redirect("/settings", oauth_status="Google account connected.", oauth_tone="success")
+        return _query_redirect("/settings", oauth_status=f"{_provider_label(provider_name)} account connected.", oauth_tone="success")
 
     try:
         token, expires_at = await app_state.session_backend.create_session(user, remember_me=True)
@@ -182,9 +233,30 @@ async def google_oauth_callback(
             request,
             reason="session_unavailable",
             actor=user,
-            object_id="google",
+            object_id=provider_name,
         )
-        return _query_redirect("/login", oauth_error="Google sign-in is temporarily unavailable.")
+        return _query_redirect("/login", oauth_error=_oauth_redirect_message(provider_name, "sign-in is temporarily unavailable."))
     response = _query_redirect(next_path)
     apply_session_cookie(response, app_state.settings, token, expires_at=expires_at)
     return response
+
+
+@router.get("/auth/google/callback")
+async def google_oauth_callback(
+    request: Request,
+    state: str | None = None,
+    code: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    return await _oauth_callback(request, "google", state=state, code=code, error=error)
+
+
+@router.get("/auth/{provider}/callback")
+async def oauth_callback(
+    request: Request,
+    provider: str,
+    state: str | None = None,
+    code: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    return await _oauth_callback(request, provider.strip().lower(), state=state, code=code, error=error)

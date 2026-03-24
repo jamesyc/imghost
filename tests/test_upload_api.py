@@ -8,7 +8,7 @@ from PIL import Image
 from imghost.main import app
 from imghost.processors import MediaMetadata, SanitizedFile, ValidationResult, VideoProcessingError
 
-from .helpers import PNG_1X1, wait_for_thumbnail
+from .helpers import PNG_1X1, create_user_and_api_key, wait_for_thumbnail
 
 
 def jpeg_bytes(color: str = "red", size: tuple[int, int] = (8, 8)) -> bytes:
@@ -162,6 +162,57 @@ def test_anonymous_manage_token_can_append_and_edit_album(tmp_path, monkeypatch)
         assert patched.status_code == 200
         assert patched.json()["title"] == "Anonymous Album Edited"
         assert patched.json()["item_count"] == 2
+
+
+def test_api_key_upload_returns_sharex_delete_url_and_delete_endpoint_works(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexdelete", email="sharexdelete@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "ShareX upload"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["manage_url"] is None
+        assert payload["delete_url"].startswith(f"http://testserver/api/v1/album/{payload['album_id']}/delete?token=")
+
+        deleted = client.get(payload["delete_url"])
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+
+        missing = client.get(f"/api/v1/album/{payload['album_id']}")
+        assert missing.status_code == 404
+
+
+def test_sharex_delete_endpoint_rejects_tampered_token(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexreject", email="sharexreject@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["delete_url"] is not None
+
+        tampered = payload["delete_url"][:-1] + ("0" if payload["delete_url"][-1] != "0" else "1")
+        rejected = client.get(tampered)
+        assert rejected.status_code == 403
+        assert rejected.json()["detail"] == "Invalid ShareX deletion URL."
 
 
 def test_invalid_image_upload_is_rejected(tmp_path, monkeypatch) -> None:

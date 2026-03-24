@@ -65,6 +65,12 @@ class FakeGoogleProvider:
         return self.identity
 
 
+class FakeGenericProvider(FakeGoogleProvider):
+    def __init__(self, *, name: str, identity: FakeGoogleIdentity | None = None, error: Exception | None = None) -> None:
+        super().__init__(identity=identity, error=error)
+        self.name = name
+
+
 def _create_raw_user(
     client: TestClient,
     *,
@@ -724,6 +730,82 @@ def test_google_oauth_disconnect_succeeds_when_local_password_exists(tmp_path, m
         assert response.json()["disconnected"] is True
         links = client.portal.call(client.app.state.imghost.repository.list_user_sso_links, user.id)
         assert links == []
+
+
+def test_google_oauth_delete_account_mode_issues_reauth_token_for_account_deletion(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("SECRET_KEY", "oauth-delete-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        user = _create_raw_user(client, username="oauthdelete", email="oauthdelete@example.com")
+        _link_google_account(client, user_id=user.id, provider_uid="oauth-delete-google")
+        _set_browser_session(client, user)
+        _install_fake_google_provider(
+            client,
+            FakeGoogleProvider(identity=FakeGoogleIdentity(provider_uid="oauth-delete-google", email="oauthdelete@example.com")),
+        )
+
+        started = client.get("/auth/google/start", params={"mode": "delete_account"}, follow_redirects=False)
+        assert started.status_code == 303
+        state = _oauth_state_from_redirect(started)
+
+        callback = client.get("/auth/google/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert callback.status_code == 303
+        query = parse_qs(urlparse(callback.headers["location"]).query)
+        assert query["delete_reauth_tone"] == ["success"]
+        assert "delete_reauth_token" in query
+        reauth_token = query["delete_reauth_token"][0]
+
+        deleted = client.request(
+            "DELETE",
+            "/api/v1/user/me",
+            headers=browser_session_headers("https://testserver", "/settings"),
+            json={"method": "oauth_reauth", "reauth_token": reauth_token},
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+        assert client.portal.call(client.app.state.imghost.repository.get_user, user.id) is None
+
+
+def test_generic_provider_delete_account_mode_uses_provider_agnostic_routes(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "oauth-delete-secret")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        user = _create_raw_user(client, username="githubdelete", email="githubdelete@example.com")
+        client.portal.call(
+            client.app.state.imghost.repository.create_user_sso_link,
+            UserSsoLink(
+                id=str(uuid4()),
+                user_id=user.id,
+                provider="github",
+                provider_uid="github-user-1",
+                linked_at=datetime.now(UTC),
+            ),
+        )
+        _set_browser_session(client, user)
+        provider = FakeGenericProvider(
+            name="github",
+            identity=FakeGoogleIdentity(provider="github", provider_uid="github-user-1", email="githubdelete@example.com"),
+        )
+        client.app.state.imghost.oauth_providers["github"] = provider
+
+        started = client.get("/auth/github/start", params={"mode": "delete_account"}, follow_redirects=False)
+        assert started.status_code == 303
+        assert started.headers["location"].startswith("https://fake.google/auth?")
+        assert provider.last_redirect_uri == "https://testserver/auth/github/callback"
+        state = _oauth_state_from_redirect(started)
+
+        callback = client.get("/auth/github/callback", params={"state": state, "code": "abc"}, follow_redirects=False)
+        assert callback.status_code == 303
+        query = parse_qs(urlparse(callback.headers["location"]).query)
+        assert query["delete_reauth_tone"] == ["success"]
+        assert "GitHub re-authentication confirmed." in query["delete_reauth_status"][0]
 
 
 def test_google_oauth_suspended_linked_user_cannot_sign_in(tmp_path, monkeypatch) -> None:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from ..account_service import AccountDeletionConfirmationInput
 from ..service import PasswordChangeInput
 from ..public_origin import public_base_url
 from .auth_context import authenticated_principal, authenticated_user
@@ -16,6 +19,12 @@ router = APIRouter()
 class UserPasswordPatchRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+class UserDeleteRequest(BaseModel):
+    method: Literal["password", "oauth_reauth"]
+    current_password: str | None = None
+    reauth_token: str | None = None
 
 
 @router.get("/api/v1/user/me")
@@ -95,6 +104,7 @@ async def download_sharex_config(request: Request) -> Response:
         "FileFormName": "file",
         "URL": "$json:media_url$",
         "ThumbnailURL": "$json:thumb_url$",
+        "DeletionURL": "$json:delete_url$",
     }
     return Response(
         content=JSONResponse(payload).body,
@@ -107,10 +117,18 @@ async def download_sharex_config(request: Request) -> Response:
 
 
 @router.delete("/api/v1/user/me")
-async def delete_current_user(request: Request) -> JSONResponse:
+async def delete_current_user(request: Request, payload: UserDeleteRequest) -> JSONResponse:
     state = get_state(request)
     user = await authenticated_user(request, required=True)
     cid = correlation_id(request)
+    await state.uploads.validate_account_deletion_confirmation(
+        user,
+        AccountDeletionConfirmationInput(
+            method=payload.method,
+            current_password=payload.current_password,
+            reauth_token=payload.reauth_token,
+        ),
+    )
     deleted = await state.uploads.delete_user_account(user, cid)
     return JSONResponse(
         {
