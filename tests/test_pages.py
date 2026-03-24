@@ -1,5 +1,6 @@
 from datetime import timedelta
 from io import BytesIO
+from pathlib import Path
 import time
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ from .helpers import (
     create_user_and_api_key,
     set_user_password,
     update_album_record,
+    update_media_record,
     wait_for_thumbnail,
 )
 
@@ -692,6 +694,51 @@ def test_public_album_page_shows_last_edited_only_after_album_changes(tmp_path, 
         assert edited_page.status_code == 200
         assert "created " in edited_page.text
         assert "last edited " in edited_page.text
+
+
+def test_public_album_page_renders_videos_inline_instead_of_video_thumbnail_buttons(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="videopublic", email="videopublic@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        upload = client.post(
+            "/api/v1/upload",
+            files=[("file", ("public.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Video Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert upload.status_code == 200
+
+        media_id = upload.json()["media_id"]
+        update_media_record(
+            client,
+            media_id,
+            media_type="video",
+            format="mp4",
+            mime_type="video/mp4",
+            thumb_status="done",
+        )
+
+        page = client.get(f'/a/{upload.json()["album_id"]}')
+        assert page.status_code == 200
+        assert '<video controls preload="metadata"' in page.text
+        assert f"/i/{media_id}.mp4" in page.text
+        assert "public-album-preview-badge" not in page.text
+        assert 'data-thumb-src="' not in page.text
+
+
+def test_album_detail_renderer_uses_video_thumbnail_urls_for_video_previews() -> None:
+    script = (
+        Path("/home/james/imghost/src/imghost/static/js/album-detail-render.js")
+        .read_text(encoding="utf-8")
+    )
+
+    assert 'item.thumb_status === "done"' in script
+    assert 'item.thumb_url' in script
+    assert 'item.media_type !== "video"' in script
 
 
 def test_public_user_albums_page_does_not_render_flash_markup(tmp_path, monkeypatch, capsys) -> None:

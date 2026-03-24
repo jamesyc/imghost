@@ -435,6 +435,15 @@
   background: rgba(255, 255, 255, 0.14);
 }
 
+.album-detail-thumb.is-video img,
+.album-detail-thumb.is-video .public-album-preview-placeholder {
+  min-height: 240px;
+}
+
+.album-detail-thumb.is-video img {
+  object-fit: cover;
+}
+
 .album-detail-item {
   transition: opacity 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -567,6 +576,17 @@ body.upload-modal-open {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.album-detail-lightbox-video {
+  display: block;
+  width: auto;
+  max-width: calc(100vw - 4px);
+  max-height: calc(100vh - 76px);
+  margin: 0 auto;
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .dashboard-recent-album-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 160px;
@@ -674,6 +694,13 @@ body.upload-modal-open {
   height: auto;
   min-height: 0;
   object-fit: contain;
+}
+
+.public-album-preview video {
+  display: block;
+  width: 100%;
+  max-height: min(70vh, 720px);
+  background: rgba(10, 14, 22, 0.92);
 }
 
 .public-album-preview.is-video img,

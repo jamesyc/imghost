@@ -59,7 +59,11 @@
   ns.dom.itemsRoot?.addEventListener("click", async (event) => {
     const lightboxButton = event.target.closest(".album-detail-thumb");
     if (lightboxButton) {
-      ns.openLightbox(lightboxButton.dataset.lightboxUrl, lightboxButton.dataset.lightboxFilename);
+      ns.openLightbox(
+        lightboxButton.dataset.lightboxUrl,
+        lightboxButton.dataset.lightboxFilename,
+        lightboxButton.dataset.mediaType,
+      );
       return;
     }
 

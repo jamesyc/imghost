@@ -35,33 +35,22 @@
         <h2>{{ item.filename or item.id }}</h2>
         <p class="hint">{{ item.file_size_display }}</p>
       </div>
+      {% if item.media_type != "video" %}
       <button
         type="button"
-        class="public-album-preview{% if item.media_type == 'video' %} is-video{% endif %}"
+        class="public-album-preview"
         data-media-url="{{ item.media_url }}"
         data-media-type="{{ item.media_type }}"
         data-filename="{{ item.filename or item.id }}"
-        {% if item.media_type == "video" and item.thumb_status == "done" %}
-        data-thumb-src="{{ item.thumb_url }}"
-        {% elif item.media_type == "video" and (item.thumb_status == "pending" or item.thumb_status == "processing") %}
-        data-thumb-src="{{ item.thumb_url }}"
-        data-thumb-status="{{ item.thumb_status }}"
-        {% endif %}
         aria-label="Open {{ item.filename or item.id }}"
       >
-        {% if item.media_type != "video" %}
         <img src="{{ item.media_url }}" alt="{{ item.filename or item.id }}">
-        {% elif item.thumb_status == "done" %}
-        <img src="{{ item.thumb_url }}" alt="{{ item.filename or item.id }}">
-        {% elif item.thumb_status == "failed" %}
-        <span class="public-album-preview-placeholder">Thumbnail failed</span>
-        {% else %}
-        <span class="public-album-preview-placeholder" data-thumb-status="{{ item.thumb_status }}">Thumbnail pending</span>
-        {% endif %}
-        {% if item.media_type == "video" %}
-        <span class="public-album-preview-badge">Video</span>
-        {% endif %}
       </button>
+      {% else %}
+      <div class="public-album-preview is-video">
+        <video controls preload="metadata" src="{{ item.media_url }}" aria-label="{{ item.filename or item.id }}"></video>
+      </div>
+      {% endif %}
       {% if item.compat_warning %}
       <p class="public-album-inline-warning">{{ item.compat_warning }}</p>
       {% endif %}
