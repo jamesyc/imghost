@@ -223,20 +223,27 @@ Important behavior:
 
 ## Queue And Rate-Limit Notes
 
-- `TASK_QUEUE_MODE=redis` enables Redis-backed thumbnail dispatch.
+- `TASK_QUEUE_MODE=redis` enables Redis-backed task dispatch.
 - `TASK_WORKER_ENABLED=false` is intended for the web app container.
-- `TASK_WORKER_ENABLED=true` is intended for the dedicated worker container.
+- `TASK_WORKER_ENABLED=true` is intended for dedicated worker containers.
+- The preferred split worker commands are:
+  - `python -m imghost run-worker-thumbnails`
+  - `python -m imghost run-worker-cleanup`
+  - `python -m imghost run-worker-default`
+- `python -m imghost run-worker` remains available as a generic worker command and uses `TASK_WORKER_QUEUES`.
+- The web app process runs as the `app` role and does not perform startup thumbnail recovery.
+- Startup thumbnail recovery belongs to the thumbnail worker role.
 - If Redis is unavailable at runtime:
   - sessions degrade to signed-cookie validation
   - upload rate limiting falls back to in-process memory
-  - thumbnail jobs fall back to in-process async execution
+  - queued jobs fall back to in-process async execution
 
 ## Health And Runtime Status
 
 - `/health/live` returns a simple liveness response for process-level checks.
 - `/health/ready` returns a low-noise readiness snapshot covering database, storage, Redis reachability, subsystem modes, worker state, and task queue status.
 - `/metrics` returns Prometheus text-format telemetry metrics.
-- `/api/v1/admin/runtime-status` returns a richer admin-only operational snapshot including trusted public origins, worker/task state, and Redis subsystem degradation status.
+- `/api/v1/admin/runtime-status` returns a richer admin-only operational snapshot including process role, service state, trusted public origins, queue status, and Redis subsystem degradation status.
 - Redis observability is transition-oriented rather than per-operation noisy, so degraded and recovered states are logged while repeated fallback behavior is suppressed.
 
 ### Metrics
