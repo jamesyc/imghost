@@ -17,6 +17,7 @@ from .runtime_config import PostgresRuntimeConfig
 from .service import UploadService
 from .sessions import SessionBackend, build_session_backend
 from .storage import build_storage_backend
+from .task_catalog import GENERATE_THUMBNAIL_TASK, register_core_tasks
 from .tasks import AsyncTaskQueue, RedisTaskQueue, SyncTaskQueue, TaskContext, TaskQueue
 
 
@@ -63,7 +64,11 @@ class AppState:
             self.rate_limiter,
             self.telemetry,
         )
-        self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
+        register_core_tasks(
+            self.tasks,
+            uploads=self.uploads,
+            recover_thumbnails=self.recover_thumbnails,
+        )
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
         self.bootstrap_admin_status: dict[str, Any] = {
             "enabled": bool(settings.promote_username_to_admin),
@@ -147,8 +152,7 @@ class AppState:
 
     async def _enqueue_thumbnail(self, event: MediaUploaded) -> None:
         await self.tasks.enqueue(
-            "generate_thumbnail",
-            queue="thumbnails",
+            GENERATE_THUMBNAIL_TASK.name,
             media_id=event.media_id,
             correlation_id=event.correlation_id,
         )
@@ -167,8 +171,7 @@ class AppState:
                 media.thumb_status = "pending"
                 await self.repository.update_media(media)
             await self.tasks.enqueue(
-                "generate_thumbnail",
-                queue="thumbnails",
+                GENERATE_THUMBNAIL_TASK.name,
                 media_id=media.id,
                 correlation_id=f"recovery-{media.id}",
             )

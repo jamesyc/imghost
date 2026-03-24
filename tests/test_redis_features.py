@@ -440,6 +440,33 @@ def test_redis_task_queue_processes_jobs_with_worker_enabled() -> None:
     assert calls == ["ok"]
 
 
+def test_redis_task_queue_uses_registered_default_queue_when_enqueue_omits_queue() -> None:
+    fake = FakeRedis()
+    settings = make_settings(redis_url="redis://fake")
+    handle = RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0)
+    queue = RedisTaskQueue(
+        handle,
+        TaskContext(None, None, None),
+        make_telemetry(),
+        worker_count=1,
+        run_worker=True,
+        worker_queues=("cleanup",),
+    )  # type: ignore[arg-type]
+    calls: list[str] = []
+    queue.register("demo", lambda value: _record_call(calls, value), default_queue="cleanup")
+
+    async def scenario() -> None:
+        await queue.start()
+        await queue.enqueue("demo", value="ok")
+        await queue.join()
+        await queue.stop()
+
+    asyncio.run(scenario())
+
+    assert calls == ["ok"]
+    assert fake.lists[handle.prefixed("queue:cleanup")] == []
+
+
 def test_redis_task_queue_worker_only_consumes_selected_queues() -> None:
     fake = FakeRedis()
     settings = make_settings(redis_url="redis://fake")

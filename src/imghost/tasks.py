@@ -40,10 +40,10 @@ class TaskContext:
 
 
 class TaskQueue:
-    def register(self, task_name: str, handler: TaskHandler) -> None:
+    def register(self, task_name: str, handler: TaskHandler, *, default_queue: str = "default") -> None:
         raise NotImplementedError
 
-    async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
+    async def enqueue(self, task_name: str, queue: str | None = None, **kwargs) -> None:
         raise NotImplementedError
 
     async def start(self) -> None:
@@ -65,17 +65,23 @@ class QueuedTask:
     kwargs: dict[str, object]
 
 
+@dataclass(slots=True)
+class RegisteredTask:
+    handler: TaskHandler
+    default_queue: str
+
+
 class AsyncTaskQueue(TaskQueue):
     def __init__(self, context: TaskContext, worker_count: int = 1, telemetry: Telemetry | None = None) -> None:
         self.context = context
         self.telemetry = telemetry
         self.worker_count = max(1, worker_count)
-        self._handlers: dict[str, TaskHandler] = {}
+        self._tasks: dict[str, RegisteredTask] = {}
         self._queue: asyncio.Queue[QueuedTask | None] = asyncio.Queue()
         self._workers: list[asyncio.Task[None]] = []
 
-    def register(self, task_name: str, handler: TaskHandler) -> None:
-        self._handlers[task_name] = handler
+    def register(self, task_name: str, handler: TaskHandler, *, default_queue: str = "default") -> None:
+        self._tasks[task_name] = RegisteredTask(handler=handler, default_queue=default_queue)
 
     async def start(self) -> None:
         if self._workers:
@@ -90,12 +96,13 @@ class AsyncTaskQueue(TaskQueue):
         await asyncio.gather(*self._workers, return_exceptions=True)
         self._workers = []
 
-    async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
-        if task_name not in self._handlers:
+    async def enqueue(self, task_name: str, queue: str | None = None, **kwargs) -> None:
+        if task_name not in self._tasks:
             raise KeyError(task_name)
+        resolved_queue = self._resolve_queue_name(task_name, queue)
         await self._queue.put(QueuedTask(task_name=task_name, kwargs=kwargs))
         if self.telemetry is not None:
-            self.telemetry.record_task_enqueued(queue=queue, task_name=task_name)
+            self.telemetry.record_task_enqueued(queue=resolved_queue, task_name=task_name)
 
     async def _run_worker(self, worker_index: int) -> None:
         while True:
@@ -103,7 +110,7 @@ class AsyncTaskQueue(TaskQueue):
             try:
                 if item is None:
                     return
-                handler = self._handlers[item.task_name]
+                handler = self._tasks[item.task_name].handler
                 await handler(**item.kwargs)
             except Exception:
                 logger.exception("task_worker_failed", extra={"worker_index": worker_index})
@@ -121,21 +128,27 @@ class AsyncTaskQueue(TaskQueue):
             "queue_depth": self._queue.qsize(),
         }
 
+    def _resolve_queue_name(self, task_name: str, queue: str | None) -> str:
+        if queue is not None:
+            return queue
+        return self._tasks[task_name].default_queue
+
 
 class SyncTaskQueue(TaskQueue):
     def __init__(self, context: TaskContext, telemetry: Telemetry | None = None) -> None:
         self.context = context
         self.telemetry = telemetry
-        self._handlers: dict[str, TaskHandler] = {}
+        self._tasks: dict[str, RegisteredTask] = {}
 
-    def register(self, task_name: str, handler: TaskHandler) -> None:
-        self._handlers[task_name] = handler
+    def register(self, task_name: str, handler: TaskHandler, *, default_queue: str = "default") -> None:
+        self._tasks[task_name] = RegisteredTask(handler=handler, default_queue=default_queue)
 
-    async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
-        handler = self._handlers[task_name]
+    async def enqueue(self, task_name: str, queue: str | None = None, **kwargs) -> None:
+        task = self._tasks[task_name]
+        resolved_queue = queue if queue is not None else task.default_queue
         if self.telemetry is not None:
-            self.telemetry.record_task_enqueued(queue=queue, task_name=task_name)
-        await handler(**kwargs)
+            self.telemetry.record_task_enqueued(queue=resolved_queue, task_name=task_name)
+        await task.handler(**kwargs)
 
     async def runtime_status(self) -> dict[str, object]:
         return {"queue_backend": "sync"}
@@ -158,7 +171,7 @@ class RedisTaskQueue(TaskQueue):
         self.worker_count = max(1, worker_count)
         self.run_worker = run_worker
         self.worker_queues = normalize_task_queues(worker_queues)
-        self._handlers: dict[str, TaskHandler] = {}
+        self._tasks: dict[str, RegisteredTask] = {}
         self._fallback = AsyncTaskQueue(context, worker_count=worker_count, telemetry=telemetry)
         self._workers: list[asyncio.Task[None]] = []
         self._active_jobs = 0
@@ -166,9 +179,9 @@ class RedisTaskQueue(TaskQueue):
         if self.worker_queues is not None:
             self._known_queues.update(self.worker_queues)
 
-    def register(self, task_name: str, handler: TaskHandler) -> None:
-        self._handlers[task_name] = handler
-        self._fallback.register(task_name, handler)
+    def register(self, task_name: str, handler: TaskHandler, *, default_queue: str = "default") -> None:
+        self._tasks[task_name] = RegisteredTask(handler=handler, default_queue=default_queue)
+        self._fallback.register(task_name, handler, default_queue=default_queue)
 
     async def start(self) -> None:
         await self._fallback.start()
@@ -188,15 +201,16 @@ class RedisTaskQueue(TaskQueue):
             self.telemetry.mark_worker_stopped()
         await self._fallback.stop()
 
-    async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
-        if task_name not in self._handlers:
+    async def enqueue(self, task_name: str, queue: str | None = None, **kwargs) -> None:
+        if task_name not in self._tasks:
             raise KeyError(task_name)
-        self._known_queues.add(queue)
+        resolved_queue = queue if queue is not None else self._tasks[task_name].default_queue
+        self._known_queues.add(resolved_queue)
         message = json.dumps({"task_name": task_name, "kwargs": kwargs}, separators=(",", ":"))
         try:
             await self.redis.execute(
                 "enqueue task",
-                lambda client: client.rpush(self.redis.prefixed(f"queue:{queue}"), message),
+                lambda client: client.rpush(self.redis.prefixed(f"queue:{resolved_queue}"), message),
             )
         except RedisUnavailable:
             self.telemetry.mark_subsystem_degraded(
@@ -204,10 +218,10 @@ class RedisTaskQueue(TaskQueue):
                 operation="enqueue task",
                 reason="redis_unavailable",
             )
-            await self._fallback.enqueue(task_name, queue=queue, **kwargs)
+            await self._fallback.enqueue(task_name, queue=resolved_queue, **kwargs)
             return
         self.telemetry.mark_subsystem_recovered("tasks", operation="enqueue task")
-        self.telemetry.record_task_enqueued(queue=queue, task_name=task_name)
+        self.telemetry.record_task_enqueued(queue=resolved_queue, task_name=task_name)
 
     async def join(self) -> None:
         await self._fallback.join()
@@ -265,7 +279,7 @@ class RedisTaskQueue(TaskQueue):
                 payload = json.loads(raw_payload)
                 task_name = payload["task_name"]
                 kwargs = payload["kwargs"]
-                handler = self._handlers[task_name]
+                handler = self._tasks[task_name].handler
                 self._active_jobs += 1
                 await handler(**kwargs)
             except asyncio.CancelledError:

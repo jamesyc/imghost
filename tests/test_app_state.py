@@ -6,14 +6,16 @@ from types import SimpleNamespace
 from imghost.app_state import AppState
 from imghost.config import load_settings
 from imghost.models import Media, utcnow
+from imghost.task_catalog import default_queue_for
 
 
 class _RecordingTasks:
     def __init__(self) -> None:
         self.enqueued: list[tuple[str, str, str]] = []
 
-    async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
-        self.enqueued.append((task_name, queue, str(kwargs["media_id"])))
+    async def enqueue(self, task_name: str, queue: str | None = None, **kwargs) -> None:
+        resolved_queue = queue if queue is not None else default_queue_for(task_name)
+        self.enqueued.append((task_name, resolved_queue, str(kwargs["media_id"])))
 
 
 class _RecoveryRepository:
