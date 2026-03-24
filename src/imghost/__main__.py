@@ -58,7 +58,7 @@ def _database_host(dsn: str) -> str:
 
 def _is_local_database(dsn: str) -> bool:
     host = _database_host(dsn)
-    return host in {"", "localhost", "127.0.0.1", "::1", "postgres"}
+    return host in {"", "localhost", "127.0.0.1", "::1", "postgres", "pgbouncer"}
 
 
 def _is_test_database(dsn: str) -> bool:

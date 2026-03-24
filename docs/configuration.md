@@ -40,6 +40,8 @@ Practical modes:
   Used to sign browser-session cookies.
 - `DATABASE_URL`
   Direct PostgreSQL DSN for non-Compose or app-only runs.
+- `DATABASE_USE_PGBOUNCER`
+  When `true`, the app adjusts asyncpg pool behavior for PgBouncer transaction pooling by disabling statement caching.
 - `REDIS_URL`
   Canonical Redis connection URL.
 - `REDIS_PASSWORD`
@@ -95,13 +97,15 @@ Practical modes:
 Practical deployment shapes:
 
 - beginner Docker stack:
+  - `DATABASE_USE_PGBOUNCER=false`
   - `REDIS_MODE=disabled`
   - `TASK_QUEUE_MODE=async`
   - no separate worker or scheduler service
 - advanced Docker stack:
+  - `DATABASE_USE_PGBOUNCER=true`
   - `REDIS_MODE=auto`
   - `TASK_QUEUE_MODE=redis`
-  - split worker services and scheduler
+  - split worker services, scheduler, and PgBouncer
 
 ## Docker/Compose settings
 
@@ -113,6 +117,7 @@ They include all of the app-level concepts above, plus Docker-stack-specific set
 ### Host/service ports
 
 - `PORT`
+- `PGBOUNCER_PORT`
 - `REDIS_PORT`
 - `POSTGRES_PORT`
 - `GARAGE_S3_PORT`
@@ -127,6 +132,14 @@ They include all of the app-level concepts above, plus Docker-stack-specific set
 - `POSTGRES_CONNECT_PORT`
 
 Compose derives `DATABASE_URL` from these values instead of storing a second copy in `docker/.env`.
+
+### PgBouncer values
+
+- `PGBOUNCER_PORT`
+- `PGBOUNCER_MAX_CLIENT_CONN`
+- `PGBOUNCER_DEFAULT_POOL_SIZE`
+
+The advanced stack uses these to configure the bundled PgBouncer service and publishes it on the host for optional inspection/debugging.
 
 ### Garage cluster/bootstrap values
 

@@ -6,8 +6,9 @@ import asyncpg
 
 
 class Database:
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, *, use_pgbouncer: bool = False) -> None:
         self.dsn = dsn
+        self.use_pgbouncer = use_pgbouncer
         self.pool: asyncpg.Pool | None = None
 
     async def connect(self) -> None:
@@ -29,12 +30,12 @@ class Database:
                 format="text",
             )
 
-        self.pool = await asyncpg.create_pool(
-            dsn=self.dsn,
-            min_size=1,
-            max_size=10,
-            init=init_connection,
-        )
+        connect_kwargs: dict[str, object] = {}
+        if self.use_pgbouncer:
+            # Disable asyncpg's prepared-statement cache for PgBouncer transaction pooling.
+            connect_kwargs["statement_cache_size"] = 0
+
+        self.pool = await asyncpg.create_pool(dsn=self.dsn, min_size=1, max_size=10, init=init_connection, **connect_kwargs)
 
     async def close(self) -> None:
         if self.pool is None:

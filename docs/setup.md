@@ -169,6 +169,7 @@ This starts:
 - worker-cleanup
 - worker-default
 - scheduler
+- pgbouncer
 - postgres
 - redis
 - garage
@@ -179,6 +180,7 @@ This starts:
 On first successful startup:
 
 - Postgres initializes its data directory
+- PgBouncer starts and waits for Postgres
 - Redis starts with AOF enabled and password auth if `REDIS_PASSWORD` is set
 - Garage starts
 - `garage-init` assigns layout, imports the S3 key, creates the bucket, and grants access
@@ -201,6 +203,7 @@ Check health:
 ```bash
 curl http://127.0.0.1:8000/health/live
 curl http://127.0.0.1:8000/health/ready
+docker compose -f docker/docker-compose.yml --env-file docker/.env exec pgbouncer sh -lc 'pg_isready -h 127.0.0.1 -p 5432 -d "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432/pgbouncer"'
 ```
 
 Expected:

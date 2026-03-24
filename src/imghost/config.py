@@ -41,6 +41,7 @@ class Settings:
     task_worker_enabled: bool
     thumbnail_worker_count: int
     task_worker_queues: tuple[str, ...] = ("default", "thumbnails")
+    database_use_pgbouncer: bool = False
     scheduler_enabled: bool = False
     scheduler_poll_seconds: int = 30
     scheduler_lease_seconds: int = 900
@@ -158,6 +159,7 @@ def load_settings() -> Settings:
         task_worker_enabled=_env_bool("TASK_WORKER_ENABLED") if _env_bool("TASK_WORKER_ENABLED") is not None else True,
         task_worker_queues=_dedupe_strings(_env_csv("TASK_WORKER_QUEUES")) or ("default", "thumbnails"),
         thumbnail_worker_count=max(1, int(os.getenv("THUMBNAIL_WORKER_COUNT", "1"))),
+        database_use_pgbouncer=_env_bool("DATABASE_USE_PGBOUNCER") or False,
         scheduler_enabled=_env_bool("SCHEDULER_ENABLED") or False,
         scheduler_poll_seconds=max(1, int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))),
         scheduler_lease_seconds=max(1, int(os.getenv("SCHEDULER_LEASE_SECONDS", "900"))),

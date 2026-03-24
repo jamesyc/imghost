@@ -40,7 +40,7 @@ class AppState:
         self.run_task_worker = self.process_role == "worker"
         selected_worker_queues = settings.task_worker_queues if task_worker_queues is None else task_worker_queues
         self.task_worker_queues = selected_worker_queues if self.run_task_worker else ()
-        self.database = Database(settings.database_url)
+        self.database = Database(settings.database_url, use_pgbouncer=settings.database_use_pgbouncer)
         self.event_bus = EventBus()
         self.repository = PostgresRepository(self.database)
         self.telemetry: Telemetry = build_telemetry(self.database, self.event_bus)

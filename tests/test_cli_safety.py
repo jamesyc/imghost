@@ -16,6 +16,11 @@ def test_cli_confirmation_bypasses_local_database() -> None:
         command="create-user",
         stdin_isatty=False,
     )
+    assert _confirm_risky_cli_target(
+        "postgresql://imghost:imghost@pgbouncer:5432/imghost",
+        command="create-user",
+        stdin_isatty=False,
+    )
 
 
 def test_cli_confirmation_bypasses_test_database() -> None:

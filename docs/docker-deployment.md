@@ -29,6 +29,8 @@ Advanced stack adds:
   Runs `python -m imghost run-worker-default`.
 - `scheduler`
   Runs `python -m imghost run-scheduler`.
+- `pgbouncer`
+  Transaction-pooling proxy in front of PostgreSQL for the app, workers, and scheduler.
 - `redis`
   Redis for optional sessions, rate limits, task queues, and scheduler leases.
 
@@ -42,6 +44,7 @@ Optional nginx companion adds:
 In the advanced stack, the app, workers, and scheduler depend on:
 
 - healthy Postgres
+- healthy PgBouncer
 - healthy Redis
 - completed `garage-init`
 
@@ -100,14 +103,25 @@ The advanced stack injects additional derived values like `DATABASE_URL` into ap
 Notably:
 
 - `TASK_WORKER_ENABLED` is overridden per service in Compose
-- `DATABASE_URL` is built from `POSTGRES_*` values
+- `DATABASE_URL` points app services at `pgbouncer:5432`
+- `DATABASE_USE_PGBOUNCER=true` is set for the advanced stack
 - Redis auth is handled by `REDIS_PASSWORD` plus `REDIS_URL`
 
 The beginner stack forces:
 
+- `DATABASE_USE_PGBOUNCER=false`
 - `REDIS_MODE=disabled`
 - `TASK_QUEUE_MODE=async`
 - no separate worker or scheduler container
+
+## Advanced PgBouncer behavior
+
+The advanced stack keeps PostgreSQL as the backing database, but application traffic goes through PgBouncer first:
+
+- app, workers, and scheduler connect to `pgbouncer:5432`
+- PgBouncer connects onward to `postgres:5432`
+- PgBouncer runs in `transaction` pool mode
+- the Python app disables asyncpg statement caching when `DATABASE_USE_PGBOUNCER=true`
 
 ## Optional Compose nginx
 

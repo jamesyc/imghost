@@ -90,6 +90,7 @@ docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.begi
 That stack is intentionally simple:
 
 - no Redis
+- no PgBouncer
 - no separate worker container
 - no separate scheduler container
 - background jobs run in-process inside the app container
@@ -127,6 +128,7 @@ The main Compose project name is `imghost`, so containers come up as:
 - `imghost-worker-cleanup-1`
 - `imghost-worker-default-1`
 - `imghost-scheduler-1`
+- `imghost-pgbouncer-1`
 - `imghost-postgres-1`
 - `imghost-redis-1`
 - `imghost-garage-1`
@@ -197,12 +199,10 @@ The same Compose file supports both:
 
 - single-machine defaults:
   - `POSTGRES_HOST=postgres`
-  - `POSTGRES_CONNECT_PORT=5432`
   - `REDIS_URL=redis://redis:6379/0`
   - `S3_ENDPOINT_URL=http://garage:3900`
 - remote service overrides:
   - set `POSTGRES_HOST` to a reachable hostname/IP
-  - set `POSTGRES_CONNECT_PORT` if needed
   - set `REDIS_URL` to a reachable Redis instance
   - set `S3_ENDPOINT_URL` to the remote Garage/S3 endpoint
 
@@ -265,6 +265,8 @@ Important behavior:
 ## Queue And Rate-Limit Notes
 
 - The beginner Docker stack uses `docker/docker-compose.beginner.yml` with `TASK_QUEUE_MODE=async` and `REDIS_MODE=disabled`, so background jobs run in-process inside the app container.
+- The beginner Docker stack connects directly to Postgres.
+- The advanced Docker stack routes app, worker, and scheduler DB traffic through PgBouncer.
 - The beginner no-Redis stack does not run a separate worker or scheduler service.
 - `TASK_QUEUE_MODE=redis` enables Redis-backed task dispatch.
 - `TASK_WORKER_ENABLED=false` is intended for the web app container.

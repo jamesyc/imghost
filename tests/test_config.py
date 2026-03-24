@@ -45,6 +45,24 @@ def test_load_settings_uses_redis_password_when_present(monkeypatch, tmp_path) -
     assert settings.redis_url == "redis://:s3cret%21@redis:6379/0"
 
 
+def test_load_settings_defaults_database_use_pgbouncer_to_false(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.delenv("DATABASE_USE_PGBOUNCER", raising=False)
+
+    settings = load_settings()
+    assert settings.database_use_pgbouncer is False
+
+
+def test_load_settings_parses_database_use_pgbouncer(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("DATABASE_USE_PGBOUNCER", "true")
+
+    settings = load_settings()
+    assert settings.database_use_pgbouncer is True
+
+
 def test_load_settings_defaults_session_redis_fail_closed_to_false(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
