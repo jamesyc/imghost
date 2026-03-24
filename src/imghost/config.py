@@ -43,6 +43,7 @@ class Settings:
     task_worker_queues: tuple[str, ...] = ("default", "thumbnails")
     scheduler_enabled: bool = False
     scheduler_poll_seconds: int = 30
+    scheduler_lease_seconds: int = 900
     cleanup_interval_seconds: int = 900
     promote_username_to_admin: str | None = None
     google_oauth_enabled: bool = False
@@ -159,6 +160,7 @@ def load_settings() -> Settings:
         thumbnail_worker_count=max(1, int(os.getenv("THUMBNAIL_WORKER_COUNT", "1"))),
         scheduler_enabled=_env_bool("SCHEDULER_ENABLED") or False,
         scheduler_poll_seconds=max(1, int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))),
+        scheduler_lease_seconds=max(1, int(os.getenv("SCHEDULER_LEASE_SECONDS", "900"))),
         cleanup_interval_seconds=max(1, int(os.getenv("CLEANUP_INTERVAL_SECONDS", "900"))),
         google_oauth_enabled=google_oauth_enabled,
         google_client_id=google_client_id,

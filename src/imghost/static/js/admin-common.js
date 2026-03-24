@@ -135,7 +135,7 @@ window.renderAdminRuntimeCards = (payload) => {
         ? (schedulerService.last_enqueue_error ? "warn" : "ok")
         : "neutral",
       hint: schedulerService.enabled_in_this_process
-        ? `Poll ${window.adminFormatNumber(schedulerService.poll_seconds || 0)}s${schedulerJobs ? ` · ${window.escapeAdminHtml(schedulerJobs)}` : ""}`
+        ? `Poll ${window.adminFormatNumber(schedulerService.poll_seconds || 0)}s · Lease ${schedulerService.lease_enabled ? `${window.adminFormatNumber(schedulerService.lease_seconds || 0)}s (Redis)` : "disabled"}${schedulerJobs ? ` · ${window.escapeAdminHtml(schedulerJobs)}` : ""}`
         : "No scheduler loop active in this process.",
     },
     {
@@ -293,10 +293,13 @@ window.renderAdminRuntimeDetails = (payload) => {
           <p class="hint">
             enabled in this process=${window.escapeAdminHtml(String(Boolean(schedulerService.enabled_in_this_process)))} ·
             configured=${window.escapeAdminHtml(String(Boolean(schedulerService.configured)))} ·
-            poll seconds=${window.escapeAdminHtml(window.adminFormatNumber(schedulerService.poll_seconds || 0))}
+            poll seconds=${window.escapeAdminHtml(window.adminFormatNumber(schedulerService.poll_seconds || 0))} ·
+            lease=${window.escapeAdminHtml(schedulerService.lease_enabled ? `${window.adminFormatNumber(schedulerService.lease_seconds || 0)}s via Redis` : "disabled")}
           </p>
           <p class="hint">
             last tick=${window.escapeAdminHtml(window.adminFormatDateTime(schedulerService.last_tick_at))} ·
+            last lease acquire=${window.escapeAdminHtml(window.adminFormatDateTime(schedulerService.last_lease_acquired_at))} ·
+            last lease error=${window.escapeAdminHtml(schedulerService.last_lease_error || "Not recorded")} ·
             last enqueue=${window.escapeAdminHtml(window.adminFormatDateTime(schedulerService.last_enqueue_at))} ·
             last enqueue error=${window.escapeAdminHtml(schedulerService.last_enqueue_error || "Not recorded")}
           </p>

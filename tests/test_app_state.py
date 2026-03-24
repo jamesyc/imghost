@@ -171,6 +171,7 @@ def test_app_state_runtime_status_reports_scheduler_service_shape(tmp_path, monk
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
     monkeypatch.setenv("SCHEDULER_POLL_SECONDS", "15")
+    monkeypatch.setenv("SCHEDULER_LEASE_SECONDS", "120")
     monkeypatch.setenv("CLEANUP_INTERVAL_SECONDS", "600")
 
     async def scenario() -> dict[str, object]:
@@ -187,5 +188,7 @@ def test_app_state_runtime_status_reports_scheduler_service_shape(tmp_path, monk
     assert payload["services"]["scheduler"]["enabled_in_this_process"] is True
     assert payload["services"]["scheduler"]["configured"] is True
     assert payload["services"]["scheduler"]["poll_seconds"] == 15
+    assert payload["services"]["scheduler"]["lease_enabled"] is False
+    assert payload["services"]["scheduler"]["lease_seconds"] == 600
     assert payload["services"]["scheduler"]["jobs"]["prune_expired_albums"]["interval_seconds"] == 600
     assert payload["services"]["scheduler"]["jobs"]["prune_expired_albums"]["queue"] == "cleanup"

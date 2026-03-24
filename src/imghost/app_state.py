@@ -80,6 +80,8 @@ class AppState:
             self.tasks,
             poll_seconds=self.settings.scheduler_poll_seconds,
             cleanup_interval_seconds=self.settings.cleanup_interval_seconds,
+            redis=self.redis,
+            lease_seconds=self.settings.scheduler_lease_seconds,
         )
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
         self.bootstrap_admin_status: dict[str, Any] = {

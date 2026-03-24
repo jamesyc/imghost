@@ -226,6 +226,7 @@ def test_admin_runtime_status_reports_redis_disabled_when_redis_queue_mode_is_no
         assert payload["tasks"]["mode"] == "redis"
         assert payload["redis"]["configured"] is False
         assert payload["redis"]["reachable"] is False
+        assert payload["services"]["scheduler"]["lease_enabled"] is False
 
 
 def test_admin_browser_session_can_patch_runtime_config_used_by_admin_ui(tmp_path, monkeypatch, capsys) -> None:
