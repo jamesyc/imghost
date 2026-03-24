@@ -4,7 +4,6 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
-from ..telemetry.helpers import record_oauth_disconnected
 from ..service import PasswordChangeInput
 from ..public_origin import public_base_url
 from .auth_context import authenticated_principal, authenticated_user
@@ -130,6 +129,6 @@ async def disconnect_google_oauth(request: Request) -> JSONResponse:
     user = await authenticated_user(request, required=True)
     cid = correlation_id(request)
     await state.uploads.disconnect_oauth_provider(user, "google")
-    await record_oauth_disconnected(state.telemetry, request, user=user, provider="google")
+    await state.telemetry.record_oauth_disconnected(request, user=user, provider="google")
     summary = await state.uploads.get_current_user_summary(user)
     return JSONResponse({"disconnected": True, "provider": "google", "user": summary}, headers={"X-Correlation-ID": cid})

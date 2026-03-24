@@ -3,13 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .telemetry import TelemetryService, JsonLogTelemetrySink, PostgresTelemetrySink, actions, register_telemetry_subscribers
-from .telemetry.helpers import record_system_action
+from .telemetry import Telemetry, build_telemetry
 from .config import Settings
 from .db import Database
 from .events import EventBus, MediaUploaded
 from .models import utcnow
-from .telemetry.state import ObservabilityState
 from .oauth import GoogleOAuthProvider, OAuthProvider, OAuthStateManager
 from .processors import build_processor_registry
 from .rate_limits import build_rate_limiter
@@ -27,18 +25,13 @@ class AppState:
         self.settings = settings
         self.run_task_worker = settings.task_worker_enabled if run_task_worker is None else run_task_worker
         self.database = Database(settings.database_url)
-        self.observability = ObservabilityState()
         self.event_bus = EventBus()
         self.repository = PostgresRepository(self.database)
-        telemetry_db_sink = PostgresTelemetrySink(self.database)
-        self.telemetry = TelemetryService(
-            [telemetry_db_sink, JsonLogTelemetrySink(logging.getLogger("imghost.telemetry"))],
-            query_backend=telemetry_db_sink,
-        )
+        self.telemetry: Telemetry = build_telemetry(self.database, self.event_bus)
         self.runtime_config = PostgresRuntimeConfig(self.database)
         self.redis = RedisHandle(settings)
-        self.session_backend: SessionBackend = build_session_backend(settings, self.redis, self.observability)
-        self.rate_limiter = build_rate_limiter(self.runtime_config, self.redis, self.observability)
+        self.session_backend: SessionBackend = build_session_backend(settings, self.redis, self.telemetry)
+        self.rate_limiter = build_rate_limiter(self.runtime_config, self.redis, self.telemetry)
         self.storage = build_storage_backend(settings)
         self.oauth_state = OAuthStateManager(settings.secret_key)
         self.oauth_providers: dict[str, OAuthProvider] = {}
@@ -60,11 +53,10 @@ class AppState:
             self.processors,
             self.runtime_config,
             self.rate_limiter,
-            self.observability,
+            self.telemetry,
         )
         self.tasks.register("generate_thumbnail", self.uploads.generate_thumbnail)
         self.event_bus.subscribe(MediaUploaded, self._enqueue_thumbnail)
-        register_telemetry_subscribers(self.event_bus, self.telemetry)
         self.bootstrap_admin_status: dict[str, Any] = {
             "enabled": bool(settings.promote_username_to_admin),
             "configured_username": settings.promote_username_to_admin,
@@ -83,7 +75,7 @@ class AppState:
             return RedisTaskQueue(
                 self.redis,
                 context,
-                self.observability,
+                self.telemetry,
                 worker_count=self.settings.thumbnail_worker_count,
                 run_worker=self.run_task_worker,
             )
@@ -95,10 +87,7 @@ class AppState:
         await self.redis.ensure_startup_ready()
         await self.tasks.start()
         recovered = await self.recover_thumbnails(include_failed=False)
-        await self._audit_system_event(
-            event_type=actions.SYSTEM_STARTUP,
-            action="system.startup",
-            source="system",
+        await self.telemetry.record_system_startup(
             metadata={
                 "base_url": self.settings.base_url,
                 "public_origin_enabled": self.settings.public_origin_enabled,
@@ -115,10 +104,7 @@ class AppState:
             },
         )
         if self.run_task_worker:
-            await self._audit_system_event(
-                event_type=actions.WORKER_STARTED,
-                action="worker.start",
-                source="worker",
+            await self.telemetry.record_worker_started_event(
                 metadata={
                     "task_queue_mode": self.settings.task_queue_mode,
                     "thumbnail_worker_count": self.settings.thumbnail_worker_count,
@@ -129,24 +115,18 @@ class AppState:
     async def stop(self) -> None:
         await self.tasks.stop()
         if self.run_task_worker:
-            await self._audit_system_event(
-                event_type=actions.WORKER_STOPPED,
-                action="worker.stop",
-                source="worker",
+            await self.telemetry.record_worker_stopped_event(
                 metadata={
                     "task_queue_mode": self.settings.task_queue_mode,
                     "thumbnail_worker_count": self.settings.thumbnail_worker_count,
                 },
             )
-        await self._audit_system_event(
-            event_type=actions.SYSTEM_SHUTDOWN,
-            action="system.shutdown",
-            source="system",
+        await self.telemetry.record_system_shutdown(
             metadata={
                 "task_queue_mode": self.settings.task_queue_mode,
                 "run_task_worker": self.run_task_worker,
-                "last_worker_started_at": self.observability.last_worker_started_at,
-                "last_worker_stopped_at": self.observability.last_worker_stopped_at,
+                "last_worker_started_at": self.telemetry.last_worker_started_at,
+                "last_worker_stopped_at": self.telemetry.last_worker_stopped_at,
             },
         )
         await self.redis.close()
@@ -215,17 +195,17 @@ class AppState:
                 "reachable": redis_reachable,
                 "session_fail_closed": self.settings.session_redis_fail_closed,
                 "subsystems": {
-                    "sessions": self.observability.subsystem_snapshot(
+                    "sessions": self.telemetry.subsystem_snapshot(
                         "sessions",
                         configured=redis_configured,
                         default_mode="redis" if redis_configured else "disabled",
                     ),
-                    "rate_limits": self.observability.subsystem_snapshot(
+                    "rate_limits": self.telemetry.subsystem_snapshot(
                         "rate_limits",
                         configured=redis_configured,
                         default_mode="redis" if redis_configured else "disabled",
                     ),
-                    "tasks": self.observability.subsystem_snapshot(
+                    "tasks": self.telemetry.subsystem_snapshot(
                         "tasks",
                         configured=tasks_configured,
                         default_mode="redis" if tasks_configured else "fallback",
@@ -234,10 +214,10 @@ class AppState:
             },
             "worker": {
                 "enabled_in_this_process": self.run_task_worker,
-                "last_started_at": self.observability.last_worker_started_at,
-                "last_stopped_at": self.observability.last_worker_stopped_at,
-                "last_task_failure_at": self.observability.last_task_failure_at,
-                "last_task_failure": self.observability.last_task_failure,
+                "last_started_at": self.telemetry.last_worker_started_at,
+                "last_stopped_at": self.telemetry.last_worker_stopped_at,
+                "last_task_failure_at": self.telemetry.last_task_failure_at,
+                "last_task_failure": self.telemetry.last_task_failure,
             },
             "tasks": {
                 "mode": self.settings.task_queue_mode,
@@ -282,14 +262,7 @@ class AppState:
         await self.repository.update_user(user)
         self.bootstrap_admin_status["promoted"] = True
         logger.warning("bootstrap_admin_user_promoted", extra={"username": username, "user_id": user.id})
-        await self._audit_system_event(
-            event_type=actions.SYSTEM_BOOTSTRAP_ADMIN_PROMOTED,
-            action="system.bootstrap_admin.promote",
-            source="system",
-            object_type="user",
-            object_id=user.id,
-            metadata={"username": username},
-        )
+        await self.telemetry.record_bootstrap_admin_promoted(user_id=user.id, username=username)
 
     async def readiness_status(self) -> dict[str, Any]:
         runtime = await self.runtime_status()
@@ -309,23 +282,3 @@ class AppState:
                 "mode": runtime["tasks"]["mode"],
             },
         }
-
-    async def _audit_system_event(
-        self,
-        *,
-        event_type: str,
-        action: str,
-        source: str,
-        object_type: str = "system",
-        object_id: str = "imghost",
-        metadata: dict[str, Any],
-    ) -> None:
-        await record_system_action(
-            self.telemetry,
-            event_type=event_type,
-            action=action,
-            source=source,
-            object_type=object_type,
-            object_id=object_id,
-            metadata=metadata,
-        )

@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from imghost.config import Settings
 from imghost.main import app
 from imghost.models import User, utcnow
-from imghost.telemetry.state import ObservabilityState
 from imghost.rate_limits import InMemoryRateLimiter, RedisRateLimiter
 from imghost.redis_support import RedisHandle
 from imghost.sessions import RedisBackedSessionBackend
@@ -115,6 +114,34 @@ class DummyRuntimeConfig:
         return self.values[key]
 
 
+class DummyTelemetryService:
+    def __init__(self) -> None:
+        self.degraded: list[tuple[str, str, str]] = []
+        self.recovered: list[tuple[str, str]] = []
+        self.task_failures: list[tuple[str, dict[str, object]]] = []
+        self.worker_started = 0
+        self.worker_stopped = 0
+
+    def mark_subsystem_degraded(self, subsystem: str, *, operation: str, reason: str) -> None:
+        self.degraded.append((subsystem, operation, reason))
+
+    def mark_subsystem_recovered(self, subsystem: str, *, operation: str) -> None:
+        self.recovered.append((subsystem, operation))
+
+    def record_task_failure(self, *, task_name: str, details: dict[str, object]) -> None:
+        self.task_failures.append((task_name, details))
+
+    def mark_worker_started(self) -> None:
+        self.worker_started += 1
+
+    def mark_worker_stopped(self) -> None:
+        self.worker_stopped += 1
+
+
+def make_telemetry() -> DummyTelemetryService:
+    return DummyTelemetryService()
+
+
 def make_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "base_url": "https://testserver",
@@ -177,7 +204,7 @@ def test_redis_session_backend_falls_back_to_cookie_when_redis_is_down() -> None
     backend = RedisBackedSessionBackend(
         settings,
         RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
-        ObservabilityState(),
+        make_telemetry(),
     )
 
     token, _ = asyncio.run(backend.create_session(make_user(), remember_me=True))
@@ -192,7 +219,7 @@ def test_redis_session_backend_uses_redis_when_available_and_gracefully_falls_ba
     backend = RedisBackedSessionBackend(
         settings,
         RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
-        ObservabilityState(),
+        make_telemetry(),
     )
 
     token, _ = asyncio.run(backend.create_session(make_user(), remember_me=True))
@@ -214,7 +241,7 @@ def test_redis_session_backend_strict_mode_rejects_session_creation_when_redis_i
     backend = RedisBackedSessionBackend(
         settings,
         RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
-        ObservabilityState(),
+        make_telemetry(),
     )
 
     with pytest.raises(SessionBackendUnavailable, match="Redis-backed sessions"):
@@ -227,7 +254,7 @@ def test_redis_session_backend_strict_mode_fails_closed_when_redis_goes_down_aft
     backend = RedisBackedSessionBackend(
         settings,
         RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
-        ObservabilityState(),
+        make_telemetry(),
     )
 
     token, _ = asyncio.run(backend.create_session(make_user(), remember_me=True))
@@ -253,7 +280,7 @@ def test_redis_rate_limiter_enforces_limits_when_available() -> None:
         runtime,
         RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
         InMemoryRateLimiter(runtime),
-        ObservabilityState(),
+        make_telemetry(),
     )
     user = make_user()
 
@@ -281,7 +308,7 @@ def test_redis_rate_limiter_falls_back_to_in_memory_when_redis_is_down() -> None
         runtime,
         RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
         InMemoryRateLimiter(runtime),
-        ObservabilityState(),
+        make_telemetry(),
     )
     user = make_user()
 
@@ -332,24 +359,22 @@ def test_redis_rate_limiter_recovers_after_redis_returns() -> None:
             "rate_limit_global_anon_bph": 1000,
         }
     )
-    observability = ObservabilityState()
+    telemetry = make_telemetry()
     limiter = RedisRateLimiter(
         runtime,
         RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
         InMemoryRateLimiter(runtime),
-        observability,
+        telemetry,
     )
     user = make_user()
 
     fake.fail = True
     asyncio.run(limiter.enforce_upload_limits(actor_key=user.id, byte_count=10, user=user))
-    status = observability.subsystem_snapshot("rate_limits", configured=True, default_mode="redis")
-    assert status["degraded"] is True
+    assert telemetry.degraded == [("rate_limits", "rate limit check", "redis_unavailable")]
 
     fake.fail = False
     asyncio.run(limiter.enforce_upload_limits(actor_key=user.id, byte_count=10, user=user))
-    status = observability.subsystem_snapshot("rate_limits", configured=True, default_mode="redis")
-    assert status["degraded"] is False
+    assert telemetry.recovered == [("rate_limits", "rate limit check")]
 
 
 def test_redis_rate_limiter_uses_per_user_overrides_instead_of_runtime_defaults() -> None:
@@ -369,7 +394,7 @@ def test_redis_rate_limiter_uses_per_user_overrides_instead_of_runtime_defaults(
         runtime,
         RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
         InMemoryRateLimiter(runtime),
-        ObservabilityState(),
+        make_telemetry(),
     )
     user = make_user()
     user.rate_limit_rpm = 1
@@ -400,7 +425,7 @@ def test_redis_task_queue_processes_jobs_with_worker_enabled() -> None:
     queue = RedisTaskQueue(
         handle,
         TaskContext(None, None, None),
-        ObservabilityState(),
+        make_telemetry(),
         worker_count=1,
         run_worker=True,
     )  # type: ignore[arg-type]
@@ -419,7 +444,7 @@ def test_redis_task_queue_falls_back_to_local_async_queue_when_redis_is_down() -
     queue = RedisTaskQueue(
         handle,
         TaskContext(None, None, None),
-        ObservabilityState(),
+        make_telemetry(),
         worker_count=1,
         run_worker=False,
     )  # type: ignore[arg-type]
@@ -433,12 +458,12 @@ def test_redis_task_queue_falls_back_to_local_async_queue_when_redis_is_down() -
 def test_redis_task_queue_marks_tasks_subsystem_degraded_and_then_recovers() -> None:
     fake = FakeRedis()
     settings = make_settings(redis_url="redis://fake")
-    observability = ObservabilityState()
+    telemetry = make_telemetry()
     handle = RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0)
     queue = RedisTaskQueue(
         handle,
         TaskContext(None, None, None),
-        observability,
+        telemetry,
         worker_count=1,
         run_worker=False,
     )  # type: ignore[arg-type]
@@ -447,18 +472,17 @@ def test_redis_task_queue_marks_tasks_subsystem_degraded_and_then_recovers() -> 
 
     async def scenario() -> None:
         await queue.start()
+        assert telemetry.worker_started == 0
         fake.fail = True
         await queue.enqueue("demo", queue="thumbnails", value="fallback")
         await queue.join()
-        degraded = observability.subsystem_snapshot("tasks", configured=True, default_mode="redis")
-        assert degraded["degraded"] is True
+        assert telemetry.degraded == [("tasks", "enqueue task", "redis_unavailable")]
         assert calls == ["fallback"]
 
         fake.fail = False
         await queue.enqueue("demo", queue="thumbnails", value="redis")
         await queue.join()
-        recovered = observability.subsystem_snapshot("tasks", configured=True, default_mode="redis")
-        assert recovered["degraded"] is False
+        assert telemetry.recovered == [("tasks", "enqueue task")]
         assert calls == ["fallback"]
         assert fake.lists[handle.prefixed("queue:thumbnails")] == [
             '{"task_name":"demo","kwargs":{"value":"redis"}}'

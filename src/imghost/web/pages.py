@@ -3,7 +3,6 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ..telemetry.helpers import record_admin_page_viewed
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..public_origin import public_base_url
 from .auth_context import (
@@ -25,7 +24,7 @@ router = APIRouter()
 
 async def _audit_admin_page_view(request: Request, user, page_name: str, *, object_id: str | None = None) -> None:
     state = get_state(request)
-    await record_admin_page_viewed(state.telemetry, request, user=user, page_name=page_name, object_id=object_id)
+    await state.telemetry.record_admin_page_viewed(request, user=user, page_name=page_name, object_id=object_id)
 
 
 @router.get("/", response_class=HTMLResponse)

@@ -7,16 +7,6 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from ..telemetry import actions
-from ..telemetry.context import (
-    anonymous_actor,
-    build_request_context,
-    build_runtime_process_context,
-    hash_client_ip,
-    user_actor,
-)
-from ..telemetry.helpers import emit_request_action
-from ..telemetry.models import TelemetryObject
 from ..oauth import OAuthStatePayload, build_code_challenge, generate_code_verifier
 from ..public_origin import public_base_url
 from ..sessions import SessionBackendUnavailable
@@ -41,18 +31,7 @@ def _callback_url(request: Request) -> str:
 
 async def _audit_oauth_denied(request: Request, *, reason: str, object_id: str | None = None) -> None:
     state = get_state(request)
-    await emit_request_action(
-        state.telemetry,
-        request,
-        event_type=actions.OAUTH_DENIED,
-        action="oauth.denied",
-        result="denied",
-        actor=anonymous_actor(),
-        object=TelemetryObject(type="oauth", id=object_id or "google"),
-        metadata={"provider": "google", "source": "web", "correlation_id": correlation_id(request)},
-        reason=reason,
-        auth_method="oauth",
-    )
+    await state.telemetry.record_oauth_denied(request, reason=reason, object_id=object_id)
 
 
 @router.get("/auth/google/start")
@@ -174,42 +153,23 @@ async def google_oauth_callback(
             source="web",
         )
     except HTTPException as exc:
-        actor = user_actor(current_user) if current_user is not None else anonymous_actor()
-        await emit_request_action(
-            app_state.telemetry,
+        await app_state.telemetry.record_oauth_denied(
             request,
-            event_type=actions.OAUTH_DENIED,
-            action="oauth.denied",
-            result="denied",
-            actor=actor,
-            object=TelemetryObject(type="oauth", id="google"),
-            metadata={"provider": "google", "source": "web", "correlation_id": correlation_id(request)},
             reason=str(exc.detail),
-            auth_method="oauth",
+            actor=current_user,
+            object_id="google",
         )
         target = "/settings" if oauth_state.mode == "link" else "/login"
         key = "oauth_status" if oauth_state.mode == "link" else "oauth_error"
         tone = {"oauth_tone": "error"} if oauth_state.mode == "link" else {}
         return _query_redirect(target, next=next_path if target == "/login" else None, **{key: str(exc.detail)}, **tone)
 
-    event_type = actions.OAUTH_LINKED if outcome == "linked" else actions.OAUTH_LOGIN
-    action = "oauth.linked" if outcome == "linked" else "oauth.login.success"
-    await emit_request_action(
-        app_state.telemetry,
+    await app_state.telemetry.record_oauth_succeeded(
         request,
-        event_type=event_type,
-        action=action,
-        result="success",
-        actor=user_actor(user),
-        object=TelemetryObject(type="user", id=user.id),
-        metadata={
-            "provider": "google",
-            "provider_uid": identity.provider_uid,
-            "outcome": outcome,
-            "source": "web",
-            "correlation_id": correlation_id(request),
-        },
-        auth_method="oauth",
+        user=user,
+        provider="google",
+        provider_uid=identity.provider_uid,
+        outcome=outcome,
     )
 
     if oauth_state.mode == "link":
@@ -218,17 +178,11 @@ async def google_oauth_callback(
     try:
         token, expires_at = await app_state.session_backend.create_session(user, remember_me=True)
     except SessionBackendUnavailable:
-        await emit_request_action(
-            app_state.telemetry,
+        await app_state.telemetry.record_oauth_denied(
             request,
-            event_type=actions.OAUTH_DENIED,
-            action="oauth.denied",
-            result="denied",
-            actor=user_actor(user),
-            object=TelemetryObject(type="oauth", id="google"),
-            metadata={"provider": "google", "source": "web", "correlation_id": correlation_id(request)},
             reason="session_unavailable",
-            auth_method="oauth",
+            actor=user,
+            object_id="google",
         )
         return _query_redirect("/login", oauth_error="Google sign-in is temporarily unavailable.")
     response = _query_redirect(next_path)

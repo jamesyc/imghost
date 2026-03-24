@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import monotonic
 
-from .telemetry.state import ObservabilityState
+from .telemetry import Telemetry
 from .processors import ProcessorRegistry
 from .redis_support import RedisHandle, RedisUnavailable
 from .repositories import PostgresRepository
@@ -126,14 +126,14 @@ class RedisTaskQueue(TaskQueue):
         self,
         redis: RedisHandle,
         context: TaskContext,
-        observability: ObservabilityState,
+        telemetry: Telemetry,
         *,
         worker_count: int = 1,
         run_worker: bool = True,
     ) -> None:
         self.redis = redis
         self.context = context
-        self.observability = observability
+        self.telemetry = telemetry
         self.worker_count = max(1, worker_count)
         self.run_worker = run_worker
         self._handlers: dict[str, TaskHandler] = {}
@@ -150,7 +150,7 @@ class RedisTaskQueue(TaskQueue):
         await self._fallback.start()
         if not self.run_worker or self._workers:
             return
-        self.observability.mark_worker_started()
+        self.telemetry.mark_worker_started()
         self._workers = [asyncio.create_task(self._run_worker(index)) for index in range(self.worker_count)]
 
     async def stop(self) -> None:
@@ -159,7 +159,7 @@ class RedisTaskQueue(TaskQueue):
         if self._workers:
             await asyncio.gather(*self._workers, return_exceptions=True)
             self._workers = []
-            self.observability.mark_worker_stopped()
+            self.telemetry.mark_worker_stopped()
         await self._fallback.stop()
 
     async def enqueue(self, task_name: str, queue: str = "default", **kwargs) -> None:
@@ -173,14 +173,14 @@ class RedisTaskQueue(TaskQueue):
                 lambda client: client.rpush(self.redis.prefixed(f"queue:{queue}"), message),
             )
         except RedisUnavailable:
-            self.observability.mark_subsystem_degraded(
+            self.telemetry.mark_subsystem_degraded(
                 "tasks",
                 operation="enqueue task",
                 reason="redis_unavailable",
             )
             await self._fallback.enqueue(task_name, queue=queue, **kwargs)
             return
-        self.observability.mark_subsystem_recovered("tasks", operation="enqueue task")
+        self.telemetry.mark_subsystem_recovered("tasks", operation="enqueue task")
 
     async def join(self) -> None:
         await self._fallback.join()
@@ -217,7 +217,7 @@ class RedisTaskQueue(TaskQueue):
                     lambda client: client.blpop(queue_keys, timeout=1),
                 )
             except RedisUnavailable:
-                self.observability.mark_subsystem_degraded(
+                self.telemetry.mark_subsystem_degraded(
                     "tasks",
                     operation="dequeue task",
                     reason="redis_unavailable",
@@ -226,7 +226,7 @@ class RedisTaskQueue(TaskQueue):
                 continue
             except asyncio.CancelledError:
                 raise
-            self.observability.mark_subsystem_recovered("tasks", operation="dequeue task")
+            self.telemetry.mark_subsystem_recovered("tasks", operation="dequeue task")
             if item is None:
                 continue
             _, raw_payload = item
@@ -247,7 +247,7 @@ class RedisTaskQueue(TaskQueue):
                     kwargs = payload.get("kwargs")
                     if isinstance(kwargs, dict):
                         details.update({key: kwargs.get(key) for key in ("media_id", "correlation_id")})
-                self.observability.record_task_failure(task_name=task_name, details=details)
+                self.telemetry.record_task_failure(task_name=task_name, details=details)
                 logger.exception("redis_task_worker_failed", extra={"worker_index": worker_index})
             finally:
                 if self._active_jobs > 0:
@@ -272,13 +272,13 @@ class RedisTaskQueue(TaskQueue):
                 lambda client: self._read_named_queue_lengths(client),
             )
         except RedisUnavailable:
-            self.observability.mark_subsystem_degraded(
+            self.telemetry.mark_subsystem_degraded(
                 "tasks",
                 operation="check queue lengths",
                 reason="redis_unavailable",
             )
             return {}
-        self.observability.mark_subsystem_recovered("tasks", operation="check queue lengths")
+        self.telemetry.mark_subsystem_recovered("tasks", operation="check queue lengths")
         return lengths
 
     async def _read_named_queue_lengths(self, client: object) -> dict[str, int]:

@@ -6,9 +6,6 @@ import sys
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from .telemetry.helpers import record_cli_command_executed
-from .telemetry.context import build_cli_process_context
-from .telemetry.models import TelemetryObject
 from .app_state import AppState
 from .config import load_settings
 from .models import User, utcnow
@@ -96,7 +93,6 @@ async def run_cli(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     command_argv = argv or []
     command_correlation_id = f"cli-{uuid4()}"
-    process_context = build_cli_process_context(command_argv)
     settings = load_settings()
     if not _confirm_risky_cli_target(
         settings.database_url,
@@ -111,10 +107,10 @@ async def run_cli(argv: list[str] | None = None) -> int:
     try:
         if args.command == "prune":
             result = await state.uploads.prune_expired_albums(dry_run=args.dry_run)
-            await record_cli_command_executed(
-                state.telemetry,
+            await state.telemetry.record_cli_command(
                 action="cli.prune",
-                object=TelemetryObject(type="cli_command", id="prune"),
+                object_type="cli_command",
+                object_id="prune",
                 metadata={
                     "command": "prune",
                     "dry_run": args.dry_run,
@@ -123,7 +119,7 @@ async def run_cli(argv: list[str] | None = None) -> int:
                     "bytes_freed": result.bytes_freed,
                     "correlation_id": command_correlation_id,
                 },
-                process=process_context,
+                argv=command_argv,
             )
             mode = "dry-run" if args.dry_run else "deleted"
             print(
@@ -140,35 +136,35 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 await state.tasks.join()
             finally:
                 await state.tasks.stop()
-            await record_cli_command_executed(
-                state.telemetry,
+            await state.telemetry.record_cli_command(
                 action="cli.retry_thumbnails",
-                object=TelemetryObject(type="cli_command", id="retry-thumbnails"),
+                object_type="cli_command",
+                object_id="retry-thumbnails",
                 metadata={"command": "retry-thumbnails", "enqueued": enqueued, "correlation_id": command_correlation_id},
-                process=process_context,
+                argv=command_argv,
             )
             print(f"re-enqueued thumbnails: {enqueued}")
             return 0
 
         if args.command == "init-storage":
             await state.storage.init_storage()
-            await record_cli_command_executed(
-                state.telemetry,
+            await state.telemetry.record_cli_command(
                 action="cli.init_storage",
-                object=TelemetryObject(type="cli_command", id="init-storage"),
+                object_type="cli_command",
+                object_id="init-storage",
                 metadata={"command": "init-storage", "correlation_id": command_correlation_id},
-                process=process_context,
+                argv=command_argv,
             )
             print("storage initialized")
             return 0
 
         if args.command == "run-worker":
-            await record_cli_command_executed(
-                state.telemetry,
+            await state.telemetry.record_cli_command(
                 action="cli.run_worker.start",
-                object=TelemetryObject(type="cli_command", id="run-worker"),
+                object_type="cli_command",
+                object_id="run-worker",
                 metadata={"command": "run-worker", "correlation_id": command_correlation_id},
-                process=process_context,
+                argv=command_argv,
             )
             await state.redis.ensure_startup_ready()
             await state.tasks.start()
@@ -193,10 +189,10 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 updated_at=utcnow(),
             )
             await state.repository.create_user(user)
-            await record_cli_command_executed(
-                state.telemetry,
+            await state.telemetry.record_cli_command(
                 action="cli.create_user",
-                object=TelemetryObject(type="user", id=user.id),
+                object_type="user",
+                object_id=user.id,
                 metadata={
                     "command": "create-user",
                     "username": user.username,
@@ -205,7 +201,7 @@ async def run_cli(argv: list[str] | None = None) -> int:
                     "quota_bytes": user.quota_bytes,
                     "correlation_id": command_correlation_id,
                 },
-                process=process_context,
+                argv=command_argv,
             )
             print(f"created user: {user.id}")
             return 0
@@ -216,17 +212,17 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 print("user not found")
                 return 1
             issued = await state.uploads.issue_api_key(user)
-            await record_cli_command_executed(
-                state.telemetry,
+            await state.telemetry.record_cli_command(
                 action="cli.issue_api_key",
-                object=TelemetryObject(type="user", id=user.id),
+                object_type="user",
+                object_id=user.id,
                 metadata={
                     "command": "issue-api-key",
                     "user_id": user.id,
                     "api_key_id": issued.api_key.id,
                     "correlation_id": command_correlation_id,
                 },
-                process=process_context,
+                argv=command_argv,
             )
             print(f"user_id: {user.id}")
             print(f"api_key: {issued.raw_key}")

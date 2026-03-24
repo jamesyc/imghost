@@ -7,7 +7,6 @@ from urllib.parse import urlsplit
 from fastapi import Request
 
 from .config import Settings
-from .telemetry.state import ObservabilityState
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +113,12 @@ def trusted_forwarded_proto(request: Request, settings: Settings) -> str | None:
 def public_base_url(request: Request, settings: Settings) -> str:
     trusted = _trusted_origin_set(settings)
     fallback = _normalize_origin(settings.base_url) or settings.base_url
-    observability: ObservabilityState | None = getattr(getattr(request.app.state, "imghost", None), "observability", None)
+    telemetry = getattr(getattr(request.app.state, "imghost", None), "telemetry", None)
 
     forwarded = trusted_forwarded_origin(request, settings)
     if forwarded is None and _forwarded_origin(request) is not None and settings.trusted_proxy_cidrs_enabled:
         peer_host = _request_peer_host(request) or "unknown"
-        if observability is None or observability.should_log_untrusted_origin("proxy_peer", peer_host):
+        if telemetry is None or telemetry.should_log_untrusted_origin("proxy_peer", peer_host):
             logger.warning(
                 "forwarded_headers_ignored_untrusted_proxy",
                 extra={"peer_host": peer_host, "path": request.url.path},
@@ -135,7 +134,7 @@ def public_base_url(request: Request, settings: Settings) -> str:
     if forwarded is not None:
         if forwarded in trusted:
             return forwarded
-        if observability is None or observability.should_log_untrusted_origin("forwarded", forwarded):
+        if telemetry is None or telemetry.should_log_untrusted_origin("forwarded", forwarded):
             logger.warning(
                 "untrusted_public_origin",
                 extra={"source": "forwarded", "candidate_origin": forwarded, "fallback_origin": fallback, "path": request.url.path},
@@ -146,7 +145,7 @@ def public_base_url(request: Request, settings: Settings) -> str:
     if request_origin is not None and request_origin in trusted:
         return request_origin
     if request_origin is not None:
-        if observability is None or observability.should_log_untrusted_origin("request", request_origin):
+        if telemetry is None or telemetry.should_log_untrusted_origin("request", request_origin):
             logger.warning(
                 "untrusted_public_origin",
                 extra={"source": "request", "candidate_origin": request_origin, "fallback_origin": fallback, "path": request.url.path},

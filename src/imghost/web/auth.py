@@ -4,10 +4,6 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from ..telemetry import actions
-from ..telemetry.context import anonymous_actor, build_request_context, build_runtime_process_context, hash_client_ip, user_actor
-from ..telemetry.helpers import emit_request_action
-from ..telemetry.models import TelemetryObject
 from ..events import AdminLoggedIn
 from ..service import LocalLoginInput, UserCreateInput
 from ..sessions import SessionBackendUnavailable
@@ -49,40 +45,9 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
             reason = "missing_credentials"
         elif exc.status_code == 403:
             reason = "suspended"
-        await emit_request_action(
-            state.telemetry,
-            request,
-            event_type=actions.LOGIN_FAILED,
-            action="auth.login.failed",
-            result="denied",
-            actor=anonymous_actor(),
-            object=TelemetryObject(type="auth", id=normalized_login),
-            metadata={
-                "login_identifier": normalized_login,
-                "reason": reason,
-                "source": "web",
-                "correlation_id": cid,
-            },
-            reason=reason,
-            auth_method="password",
-        )
+        await state.telemetry.record_login_failed(request, login_identifier=normalized_login, reason=reason)
         raise
-    await emit_request_action(
-        state.telemetry,
-        request,
-        event_type=actions.USER_LOGIN,
-        action="auth.login.success",
-        result="success",
-        actor=user_actor(user),
-        object=TelemetryObject(type="user", id=user.id),
-        metadata={
-            "target_user_id": user.id,
-            "remember_me": payload.remember_me,
-            "source": "web",
-            "correlation_id": cid,
-        },
-        auth_method="password",
-    )
+    await state.telemetry.record_login_succeeded(request, user=user, remember_me=payload.remember_me)
     if user.is_admin:
         await state.event_bus.emit(
             AdminLoggedIn(
@@ -106,22 +71,10 @@ async def register(request: Request, payload: RegistrationRequest) -> JSONRespon
     state = get_state(request)
     cid = correlation_id(request)
     if not await state.runtime_config.get_value("allow_registration"):
-        await emit_request_action(
-            state.telemetry,
+        await state.telemetry.record_registration_denied(
             request,
-            event_type=actions.REGISTRATION_DENIED,
-            action="auth.registration.denied",
-            result="denied",
-            actor=anonymous_actor(),
-            object=TelemetryObject(type="registration", id=payload.username.strip() or None),
-            metadata={
-                "username": payload.username.strip(),
-                "email": payload.email.strip().lower(),
-                "source": "web",
-                "correlation_id": cid,
-            },
-            reason="registration_disabled",
-            auth_method="anonymous",
+            username=payload.username.strip(),
+            email=payload.email.strip().lower(),
         )
         raise HTTPException(status_code=403, detail="Registration is disabled.")
     created = await state.uploads.create_user(
@@ -157,17 +110,7 @@ async def logout(request: Request) -> JSONResponse:
         user = None
     await state.session_backend.clear_session(request.cookies.get(state.settings.session_cookie_name))
     if user is not None:
-        await emit_request_action(
-            state.telemetry,
-            request,
-            event_type=actions.LOGOUT,
-            action="auth.logout",
-            result="success",
-            actor=user_actor(user),
-            object=TelemetryObject(type="user", id=user.id),
-            metadata={"target_user_id": user.id, "source": "web", "correlation_id": cid},
-            auth_method="session",
-        )
+        await state.telemetry.record_logout_succeeded(request, user=user)
     response = JSONResponse({"authenticated": False}, headers={"X-Correlation-ID": cid})
     clear_session_cookie(response, state.settings)
     return response

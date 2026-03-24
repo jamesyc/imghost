@@ -11,7 +11,6 @@ from fastapi import HTTPException
 from imghost.config import Settings
 from imghost.events import ApiKeyIssued, UserAdminStatusChanged, UserLimitsChanged, UserPasswordChanged
 from imghost.models import Album, ApiKey, Media, User, UserSsoLink, utcnow
-from imghost.telemetry.state import ObservabilityState
 from imghost.processors import MediaMetadata, ThumbnailResult
 from imghost.storage import StorageStream
 from imghost.payloads import album_to_payload
@@ -193,10 +192,35 @@ class DummyEventBus:
         self.events.append(event)
 
 
-def make_service(user: User | None = None, *, storage=None, processors=None) -> tuple[UploadService, DummyRepository, DummyEventBus, ObservabilityState]:
+class DummyTelemetryService:
+    async def emit_event(self, **kwargs) -> None:
+        return None
+
+    async def query_audit_log(self, **kwargs):
+        return []
+
+
+class RecordingTelemetry:
+    def __init__(self) -> None:
+        self.last_task_failure_at: float | None = None
+        self.last_task_failure: dict[str, object] | None = None
+
+    def record_thumbnail_failure(self, *, media: Media, correlation_id: str, reason: str, error: Exception) -> None:
+        self.last_task_failure = {
+            "task_name": "generate_thumbnail",
+            "reason": reason,
+            "media_id": media.id,
+            "correlation_id": correlation_id,
+            "storage_key": media.storage_key,
+            "format": media.format,
+            "error_type": type(error).__name__,
+        }
+
+
+def make_service(user: User | None = None, *, storage=None, processors=None) -> tuple[UploadService, DummyRepository, DummyEventBus, RecordingTelemetry]:
     repository = DummyRepository(user)
     event_bus = DummyEventBus()
-    observability = ObservabilityState()
+    telemetry = RecordingTelemetry()
     settings = Settings(
         base_url="http://testserver",
         public_origin_enabled=True,
@@ -238,9 +262,9 @@ def make_service(user: User | None = None, *, storage=None, processors=None) -> 
         processors=processors,  # type: ignore[arg-type]
         runtime_config=None,  # type: ignore[arg-type]
         rate_limiter=None,  # type: ignore[arg-type]
-        observability=observability,
+        telemetry=telemetry,
     )
-    return service, repository, event_bus, observability
+    return service, repository, event_bus, telemetry
 
 
 def make_media(*, media_type: str = "video", format: str = "mp4", storage_key: str = "originals/u/media.mp4") -> Media:
@@ -701,56 +725,54 @@ def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -
 
 def test_generate_thumbnail_records_processor_missing_failure(caplog) -> None:
     storage = DummyStorage({"originals/u/media.mp4": b"video"})
-    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(None))
+    service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(None))
     repository.media = make_media()
 
-    with caplog.at_level("WARNING"):
-        asyncio.run(service.generate_thumbnail("media-1", "thumb-cid"))
+    asyncio.run(service.generate_thumbnail("media-1", "thumb-cid"))
 
     assert repository.media is not None
     assert repository.media.thumb_status == "failed"
-    assert observability.last_task_failure is not None
-    assert observability.last_task_failure["reason"] == "processor_missing"
-    assert observability.last_task_failure["media_id"] == "media-1"
-    assert observability.last_task_failure["correlation_id"] == "thumb-cid"
-    assert any(record.message == "thumbnail_generation_failed" for record in caplog.records)
+    assert telemetry.last_task_failure is not None
+    assert telemetry.last_task_failure["reason"] == "processor_missing"
+    assert telemetry.last_task_failure["media_id"] == "media-1"
+    assert telemetry.last_task_failure["correlation_id"] == "thumb-cid"
 
 
 def test_generate_thumbnail_records_storage_read_failure() -> None:
     storage = DummyStorage({"originals/u/media.mp4": b"video"})
     storage.fail_get_bytes = True
     processor = DummyProcessor()
-    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(processor))
     repository.media = make_media()
 
     asyncio.run(service.generate_thumbnail("media-1", "thumb-read-fail"))
 
     assert repository.media is not None
     assert repository.media.thumb_status == "failed"
-    assert observability.last_task_failure is not None
-    assert observability.last_task_failure["reason"] == "storage_read_failed"
+    assert telemetry.last_task_failure is not None
+    assert telemetry.last_task_failure["reason"] == "storage_read_failed"
 
 
 def test_generate_thumbnail_records_metadata_extract_failure() -> None:
     storage = DummyStorage({"originals/u/media.mp4": b"video"})
     processor = DummyProcessor()
     processor.extract_error = RuntimeError("metadata extract failed")
-    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(processor))
     repository.media = make_media()
 
     asyncio.run(service.generate_thumbnail("media-1", "thumb-metadata-fail"))
 
     assert repository.media is not None
     assert repository.media.thumb_status == "failed"
-    assert observability.last_task_failure is not None
-    assert observability.last_task_failure["reason"] == "metadata_extract_failed"
+    assert telemetry.last_task_failure is not None
+    assert telemetry.last_task_failure["reason"] == "metadata_extract_failed"
 
 
 def test_generate_thumbnail_records_thumbnail_generation_failure_and_clears_fields() -> None:
     storage = DummyStorage({"originals/u/media.mp4": b"video"})
     processor = DummyProcessor()
     processor.generate_error = RuntimeError("thumbnail generate failed")
-    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(processor))
     repository.media = make_media()
 
     asyncio.run(service.generate_thumbnail("media-1", "thumb-generate-fail"))
@@ -760,14 +782,14 @@ def test_generate_thumbnail_records_thumbnail_generation_failure_and_clears_fiel
     assert repository.media.thumb_key is None
     assert repository.media.thumb_size is None
     assert repository.media.thumb_is_orig is False
-    assert observability.last_task_failure is not None
-    assert observability.last_task_failure["reason"] == "thumbnail_generate_failed"
+    assert telemetry.last_task_failure is not None
+    assert telemetry.last_task_failure["reason"] == "thumbnail_generate_failed"
 
 
 def test_generate_thumbnail_cleans_up_written_thumbnail_on_repository_update_failure() -> None:
     storage = DummyStorage({"originals/u/media.mp4": b"video"})
     processor = DummyProcessor()
-    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(processor))
     repository.media = make_media()
     repository.fail_update_media_on_call = 2
 
@@ -778,15 +800,15 @@ def test_generate_thumbnail_cleans_up_written_thumbnail_on_repository_update_fai
     assert repository.media.thumb_key is None
     assert "thumbnails/media-1.jpg" in storage.delete_calls
     assert "thumbnails/media-1.jpg" not in storage.payloads
-    assert observability.last_task_failure is not None
-    assert observability.last_task_failure["reason"] == "repository_update_failed"
+    assert telemetry.last_task_failure is not None
+    assert telemetry.last_task_failure["reason"] == "repository_update_failed"
 
 
 def test_generate_thumbnail_records_cleanup_failure_but_keeps_failed_state() -> None:
     storage = DummyStorage({"originals/u/media.mp4": b"video"})
     storage.fail_delete = True
     processor = DummyProcessor()
-    service, repository, _, observability = make_service(storage=storage, processors=DummyProcessors(processor))
+    service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(processor))
     repository.media = make_media()
     repository.fail_update_media_on_call = 2
 
@@ -796,5 +818,5 @@ def test_generate_thumbnail_records_cleanup_failure_but_keeps_failed_state() -> 
     assert repository.media.thumb_status == "failed"
     assert repository.media.thumb_key is None
     assert "thumbnails/media-1.jpg" in storage.delete_calls
-    assert observability.last_task_failure is not None
-    assert observability.last_task_failure["reason"] == "thumbnail_cleanup_failed"
+    assert telemetry.last_task_failure is not None
+    assert telemetry.last_task_failure["reason"] == "thumbnail_cleanup_failed"

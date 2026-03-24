@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from ..telemetry.helpers import record_admin_api_read
 from ..events import ConfigChanged
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..payloads import album_to_payload
@@ -29,8 +28,7 @@ async def _audit_admin_read(
     metadata: dict[str, object] | None = None,
 ) -> None:
     state = get_state(request)
-    await record_admin_api_read(
-        state.telemetry,
+    await state.telemetry.record_admin_api_read(
         request,
         admin=admin,
         resource=resource,

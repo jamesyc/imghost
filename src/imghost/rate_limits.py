@@ -9,7 +9,7 @@ from time import monotonic, time
 from fastapi import HTTPException
 
 from .models import User
-from .telemetry.state import ObservabilityState
+from .telemetry import Telemetry
 from .redis_support import RedisHandle, RedisUnavailable
 from .runtime_config import PostgresRuntimeConfig
 
@@ -114,12 +114,12 @@ class RedisRateLimiter(RateLimiter):
         runtime_config: PostgresRuntimeConfig,
         redis: RedisHandle,
         fallback: InMemoryRateLimiter,
-        observability: ObservabilityState,
+        telemetry: Telemetry,
     ) -> None:
         self.runtime_config = runtime_config
         self.redis = redis
         self.fallback = fallback
-        self.observability = observability
+        self.telemetry = telemetry
 
     async def enforce_upload_limits(
         self,
@@ -139,14 +139,14 @@ class RedisRateLimiter(RateLimiter):
                 ),
             )
         except RedisUnavailable:
-            self.observability.mark_subsystem_degraded(
+            self.telemetry.mark_subsystem_degraded(
                 "rate_limits",
                 operation="rate limit check",
                 reason="redis_unavailable",
             )
             await self.fallback.enforce_upload_limits(actor_key=actor_key, byte_count=byte_count, user=user)
             return
-        self.observability.mark_subsystem_recovered("rate_limits", operation="rate limit check")
+        self.telemetry.mark_subsystem_recovered("rate_limits", operation="rate limit check")
 
     async def _enforce_with_redis(
         self,
@@ -216,11 +216,11 @@ class RedisRateLimiter(RateLimiter):
 def build_rate_limiter(
     runtime_config: PostgresRuntimeConfig,
     redis: RedisHandle,
-    observability: ObservabilityState,
+    telemetry: Telemetry,
 ) -> RateLimiter:
     fallback = InMemoryRateLimiter(runtime_config)
     if redis.enabled:
-        return RedisRateLimiter(runtime_config, redis, fallback, observability)
+        return RedisRateLimiter(runtime_config, redis, fallback, telemetry)
     return fallback
 
 

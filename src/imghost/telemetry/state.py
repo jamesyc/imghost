@@ -7,7 +7,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-class ObservabilityState:
+class TelemetryState:
     def __init__(self, *, origin_warning_cooldown_seconds: float = 300.0) -> None:
         self.origin_warning_cooldown_seconds = origin_warning_cooldown_seconds
         self._subsystems: dict[str, dict[str, Any]] = {}

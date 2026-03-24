@@ -7,14 +7,6 @@ from hashlib import sha256
 from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from ..telemetry import actions
-from ..telemetry.context import anonymous_actor, user_actor
-from ..telemetry.helpers import (
-    record_admin_access_denied,
-    record_api_key_auth_failed,
-    record_api_key_authenticated,
-)
-from ..telemetry.models import TelemetryObject
 from ..config import Settings
 from ..models import User, utcnow
 from .page_context import login_redirect
@@ -58,28 +50,28 @@ async def authenticated_principal(request: Request, *, required: bool = False) -
         request.state.telemetry_auth_method = "api_key"
         api_key = await state.repository.get_api_key_by_hash(sha256(token.encode("utf-8")).hexdigest())
         if api_key is None:
-            await record_api_key_auth_failed(
-                state.telemetry,
+            await state.telemetry.record_api_key_auth_failed(
                 request,
-                actor=anonymous_actor(),
-                object=TelemetryObject(type="auth", id="api_key"),
+                actor=None,
+                object_type="auth",
+                object_id="api_key",
                 reason="invalid_api_key",
             )
             raise HTTPException(status_code=401, detail="Invalid API key.")
         user = await state.repository.get_user(api_key.user_id)
         if user is None or user.suspended:
-            await record_api_key_auth_failed(
-                state.telemetry,
+            await state.telemetry.record_api_key_auth_failed(
                 request,
-                actor=user_actor(user) if user is not None else anonymous_actor(),
-                object=TelemetryObject(type="user", id=api_key.user_id),
+                actor=user,
+                object_type="user",
+                object_id=api_key.user_id,
                 reason="suspended" if user is not None and user.suspended else "missing_user",
-                event_type=actions.ADMIN_ACCESS_DENIED if user is not None and user.is_admin else actions.API_KEY_INVALID,
+                admin_denial=bool(user is not None and user.is_admin),
             )
             raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
         api_key.last_used_at = utcnow()
         await state.repository.update_api_key(api_key)
-        await record_api_key_authenticated(state.telemetry, request, user=user, api_key_id=api_key.id)
+        await state.telemetry.record_api_key_authenticated(request, user=user, api_key_id=api_key.id)
         return ResolvedPrincipal(user=user, raw_api_key=token)
 
     session_token = request.cookies.get(state.settings.session_cookie_name)
@@ -115,20 +107,18 @@ async def require_admin_user(request: Request) -> User:
         user = await authenticated_user(request, required=True)
     except HTTPException as exc:
         if exc.status_code in {401, 403}:
-            await record_admin_access_denied(
-                state.telemetry,
+            await state.telemetry.record_admin_access_denied(
                 request,
-                actor=anonymous_actor(),
+                actor=None,
                 object_type="admin",
                 reason="authentication_required" if exc.status_code == 401 else "forbidden",
                 source="api",
             )
         raise
     if user is None or not user.is_admin:
-        await record_admin_access_denied(
-            state.telemetry,
+        await state.telemetry.record_admin_access_denied(
             request,
-            actor=user_actor(user) if user is not None else anonymous_actor(),
+            actor=user,
             object_type="admin",
             reason="admin_required",
             source="api",
@@ -148,20 +138,18 @@ async def require_page_admin(request: Request) -> User | RedirectResponse:
     state = get_state(request)
     user = await authenticated_user(request, required=False)
     if user is None:
-        await record_admin_access_denied(
-            state.telemetry,
+        await state.telemetry.record_admin_access_denied(
             request,
-            actor=anonymous_actor(),
+            actor=None,
             object_type="admin_page",
             reason="authentication_required",
             source="web",
         )
         return login_redirect(str(request.url.path))
     if not user.is_admin:
-        await record_admin_access_denied(
-            state.telemetry,
+        await state.telemetry.record_admin_access_denied(
             request,
-            actor=user_actor(user),
+            actor=user,
             object_type="admin_page",
             reason="admin_required",
             source="web",

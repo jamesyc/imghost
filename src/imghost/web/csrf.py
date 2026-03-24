@@ -5,7 +5,6 @@ from urllib.parse import urlsplit
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from ..telemetry.helpers import record_csrf_blocked
 from ..config import Settings
 from ..public_origin import (
     _normalize_origin,
@@ -62,6 +61,6 @@ async def enforce_session_csrf(request: Request, call_next):
     if not request.cookies.get(state.settings.session_cookie_name):
         return await call_next(request)
     if not _has_trusted_csrf_source(request, state.settings):
-        await record_csrf_blocked(state.telemetry, request)
+        await state.telemetry.record_csrf_blocked(request)
         return JSONResponse({"detail": "CSRF protection blocked the request."}, status_code=403)
     return await call_next(request)

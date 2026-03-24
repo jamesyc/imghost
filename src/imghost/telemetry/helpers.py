@@ -6,7 +6,15 @@ from typing import TYPE_CHECKING, Any, Mapping
 from fastapi import Request
 
 from . import actions
-from .context import anonymous_actor, build_request_context, build_runtime_process_context, cli_actor, hash_client_ip, user_actor
+from .context import (
+    anonymous_actor,
+    build_cli_process_context,
+    build_request_context,
+    build_runtime_process_context,
+    cli_actor,
+    hash_client_ip,
+    user_actor,
+)
 from .models import TelemetryActor, TelemetryObject
 
 if TYPE_CHECKING:
@@ -14,7 +22,7 @@ if TYPE_CHECKING:
     from ..models import User
     from .models import TelemetryProcessContext
     from .service import TelemetryService
-    from .state import ObservabilityState
+    from .state import TelemetryState
 
 logger = logging.getLogger(__name__)
 
@@ -55,22 +63,109 @@ async def record_api_key_auth_failed(
     telemetry: "TelemetryService",
     request: Request,
     *,
-    actor: TelemetryActor,
-    object: TelemetryObject,
+    actor: "User | None",
+    object_type: str,
+    object_id: str | None,
     reason: str,
-    event_type: str = actions.API_KEY_INVALID,
+    admin_denial: bool = False,
 ) -> None:
     await emit_request_action(
         telemetry,
         request,
-        event_type=event_type,
+        event_type=actions.ADMIN_ACCESS_DENIED if admin_denial else actions.API_KEY_INVALID,
         action="apikey.auth.failed",
         result="denied",
-        actor=actor,
-        object=object,
+        actor=user_actor(actor) if actor is not None else anonymous_actor(),
+        object=TelemetryObject(type=object_type, id=object_id),
         reason=reason,
         auth_method="api_key",
         source="api",
+    )
+
+
+async def record_login_failed(
+    telemetry: "TelemetryService",
+    request: Request,
+    *,
+    login_identifier: str,
+    reason: str,
+) -> None:
+    await emit_request_action(
+        telemetry,
+        request,
+        event_type=actions.LOGIN_FAILED,
+        action="auth.login.failed",
+        result="denied",
+        actor=anonymous_actor(),
+        object=TelemetryObject(type="auth", id=login_identifier),
+        metadata={"login_identifier": login_identifier, "reason": reason},
+        reason=reason,
+        auth_method="password",
+        source="web",
+    )
+
+
+async def record_login_succeeded(
+    telemetry: "TelemetryService",
+    request: Request,
+    *,
+    user: "User",
+    remember_me: bool,
+) -> None:
+    await emit_request_action(
+        telemetry,
+        request,
+        event_type=actions.USER_LOGIN,
+        action="auth.login.success",
+        result="success",
+        actor=user_actor(user),
+        object=TelemetryObject(type="user", id=user.id),
+        metadata={"target_user_id": user.id, "remember_me": remember_me},
+        auth_method="password",
+        source="web",
+    )
+
+
+async def record_registration_denied(
+    telemetry: "TelemetryService",
+    request: Request,
+    *,
+    username: str,
+    email: str,
+    reason: str = "registration_disabled",
+) -> None:
+    await emit_request_action(
+        telemetry,
+        request,
+        event_type=actions.REGISTRATION_DENIED,
+        action="auth.registration.denied",
+        result="denied",
+        actor=anonymous_actor(),
+        object=TelemetryObject(type="registration", id=username or None),
+        metadata={"username": username, "email": email},
+        reason=reason,
+        auth_method="anonymous",
+        source="web",
+    )
+
+
+async def record_logout_succeeded(
+    telemetry: "TelemetryService",
+    request: Request,
+    *,
+    user: "User",
+) -> None:
+    await emit_request_action(
+        telemetry,
+        request,
+        event_type=actions.LOGOUT,
+        action="auth.logout",
+        result="success",
+        actor=user_actor(user),
+        object=TelemetryObject(type="user", id=user.id),
+        metadata={"target_user_id": user.id},
+        auth_method="session",
+        source="web",
     )
 
 
@@ -99,7 +194,7 @@ async def record_admin_access_denied(
     telemetry: "TelemetryService",
     request: Request,
     *,
-    actor: TelemetryActor,
+    actor: "User | None",
     object_type: str,
     reason: str,
     source: str,
@@ -110,7 +205,7 @@ async def record_admin_access_denied(
         event_type=actions.ADMIN_ACCESS_DENIED,
         action="auth.admin.denied",
         result="denied",
-        actor=actor,
+        actor=user_actor(actor) if actor is not None else anonymous_actor(),
         object=TelemetryObject(type=object_type, id=request.url.path),
         reason=reason,
         source=source,
@@ -200,7 +295,55 @@ async def record_oauth_disconnected(
     )
 
 
-async def record_system_action(
+async def record_oauth_denied(
+    telemetry: "TelemetryService",
+    request: Request,
+    *,
+    reason: str,
+    actor: "User | None" = None,
+    object_id: str | None = None,
+) -> None:
+    await emit_request_action(
+        telemetry,
+        request,
+        event_type=actions.OAUTH_DENIED,
+        action="oauth.denied",
+        result="denied",
+        actor=user_actor(actor) if actor is not None else anonymous_actor(),
+        object=TelemetryObject(type="oauth", id=object_id or "google"),
+        metadata={"provider": "google"},
+        reason=reason,
+        auth_method="oauth",
+        source="web",
+    )
+
+
+async def record_oauth_succeeded(
+    telemetry: "TelemetryService",
+    request: Request,
+    *,
+    user: "User",
+    provider: str,
+    provider_uid: str,
+    outcome: str,
+) -> None:
+    event_type = actions.OAUTH_LINKED if outcome == "linked" else actions.OAUTH_LOGIN
+    action = "oauth.linked" if outcome == "linked" else "oauth.login.success"
+    await emit_request_action(
+        telemetry,
+        request,
+        event_type=event_type,
+        action=action,
+        result="success",
+        actor=user_actor(user),
+        object=TelemetryObject(type="user", id=user.id),
+        metadata={"provider": provider, "provider_uid": provider_uid, "outcome": outcome},
+        auth_method="oauth",
+        source="web",
+    )
+
+
+async def record_system_event(
     telemetry: "TelemetryService",
     *,
     event_type: str,
@@ -221,28 +364,29 @@ async def record_system_action(
     )
 
 
-async def record_cli_command_executed(
+async def record_cli_command(
     telemetry: "TelemetryService",
     *,
     action: str,
-    object: TelemetryObject,
+    object_type: str,
+    object_id: str,
     metadata: Mapping[str, Any] | None = None,
-    process: "TelemetryProcessContext",
+    argv: list[str],
 ) -> None:
     await telemetry.emit_event(
         event_type=actions.CLI_COMMAND_EXECUTED,
         action=action,
         result="success",
         actor=cli_actor(),
-        object=object,
+        object=TelemetryObject(type=object_type, id=object_id),
         metadata={**dict(metadata or {}), "source": "cli"},
-        process=process,
+        process=build_cli_process_context(argv),
     )
 
 
 def record_thumbnail_failure(
     *,
-    observability: "ObservabilityState | None",
+    telemetry_state: "TelemetryState | None",
     media: "Media",
     correlation_id: str,
     reason: str,
@@ -260,5 +404,5 @@ def record_thumbnail_failure(
         extra={**details, "error_type": type(error).__name__},
         exc_info=error,
     )
-    if observability is not None:
-        observability.record_task_failure(task_name="generate_thumbnail", details=details)
+    if telemetry_state is not None:
+        telemetry_state.record_task_failure(task_name="generate_thumbnail", details=details)

@@ -36,8 +36,7 @@ from .events import (
 from .ids import generate_album_id, generate_media_id
 from .models import Album, Media, User, utcnow
 from .oauth import OAuthIdentity
-from .telemetry.helpers import record_thumbnail_failure
-from .telemetry.state import ObservabilityState
+from .telemetry import Telemetry
 from .processors import ProcessorRegistry, VideoProcessingError
 from .rate_limits import RateLimiter
 from .repositories import PostgresRepository
@@ -95,7 +94,7 @@ class UploadService:
         processors: ProcessorRegistry,
         runtime_config: PostgresRuntimeConfig,
         rate_limiter: RateLimiter,
-        observability: ObservabilityState | None = None,
+        telemetry: Telemetry | None = None,
     ) -> None:
         self.settings = settings
         self.repository = repository
@@ -104,7 +103,7 @@ class UploadService:
         self.processors = processors
         self.runtime_config = runtime_config
         self.rate_limiter = rate_limiter
-        self.observability = observability
+        self.telemetry = telemetry
         self.accounts = AccountService(settings, repository, storage, event_bus)
 
     def _require_password_value(self, password: str, *, label: str) -> str:
@@ -390,8 +389,9 @@ class UploadService:
         correlation_id: str,
         error: Exception,
     ) -> None:
-        record_thumbnail_failure(
-            observability=self.observability,
+        if self.telemetry is None:
+            return
+        self.telemetry.record_thumbnail_failure(
             media=media,
             correlation_id=correlation_id,
             reason=reason,

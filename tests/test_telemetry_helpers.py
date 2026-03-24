@@ -14,12 +14,12 @@ from imghost.telemetry.context import anonymous_actor
 from imghost.telemetry.helpers import (
     emit_request_action,
     record_admin_api_read,
-    record_cli_command_executed,
-    record_system_action,
+    record_cli_command,
+    record_system_event,
     record_thumbnail_failure,
 )
 from imghost.telemetry.models import TelemetryObject
-from imghost.telemetry.state import ObservabilityState
+from imghost.telemetry.state import TelemetryState
 
 
 class DummyTelemetry:
@@ -152,7 +152,7 @@ async def test_record_admin_api_read_uses_semantic_defaults() -> None:
 async def test_record_system_action_emits_runtime_event_without_request() -> None:
     telemetry = DummyTelemetry()
 
-    await record_system_action(
+    await record_system_event(
         telemetry,
         event_type="system_startup",
         action="system.startup",
@@ -175,12 +175,13 @@ async def test_record_system_action_emits_runtime_event_without_request() -> Non
 async def test_record_cli_command_executed_uses_cli_actor() -> None:
     telemetry = DummyTelemetry()
 
-    await record_cli_command_executed(
+    await record_cli_command(
         telemetry,
         action="cli.init_storage",
-        object=TelemetryObject(type="cli_command", id="init-storage"),
+        object_type="cli_command",
+        object_id="init-storage",
         metadata={"command": "init-storage"},
-        process=SimpleNamespace(source="cli"),
+        argv=["init-storage"],
     )
 
     call = telemetry.calls[0]
@@ -192,7 +193,7 @@ async def test_record_cli_command_executed_uses_cli_actor() -> None:
 
 
 def test_record_thumbnail_failure_logs_and_updates_observability(caplog) -> None:
-    observability = ObservabilityState()
+    telemetry_state = TelemetryState()
     media = Media(
         id="media-1",
         album_id="album-1",
@@ -218,7 +219,7 @@ def test_record_thumbnail_failure_logs_and_updates_observability(caplog) -> None
 
     with caplog.at_level(logging.WARNING):
         record_thumbnail_failure(
-            observability=observability,
+            telemetry_state=telemetry_state,
             media=media,
             correlation_id="corr-1",
             reason="thumbnail_generate_failed",
@@ -226,7 +227,7 @@ def test_record_thumbnail_failure_logs_and_updates_observability(caplog) -> None
         )
 
     assert any(record.message == "thumbnail_generation_failed" for record in caplog.records)
-    assert observability.last_task_failure is not None
-    assert observability.last_task_failure["task_name"] == "generate_thumbnail"
-    assert observability.last_task_failure["reason"] == "thumbnail_generate_failed"
-    assert observability.last_task_failure["media_id"] == "media-1"
+    assert telemetry_state.last_task_failure is not None
+    assert telemetry_state.last_task_failure["task_name"] == "generate_thumbnail"
+    assert telemetry_state.last_task_failure["reason"] == "thumbnail_generate_failed"
+    assert telemetry_state.last_task_failure["media_id"] == "media-1"
