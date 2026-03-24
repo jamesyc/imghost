@@ -1035,10 +1035,9 @@ Set at deploy time. Requires restart to change. Used to lock runtime options.
 ```env
 # Core
 SECRET_KEY=
-DATABASE_URL=postgresql+asyncpg://imghost:imghost@pgbouncer:5432/imghost?prepared_statement_cache_size=0
-# ↑ prepared_statement_cache_size=0 is required — PgBouncer in transaction mode
-#   does not support asyncpg's default prepared statement cache and will throw
-#   "prepared statement already exists" errors under concurrent load without it.
+DATABASE_URL=postgresql://imghost:imghost@pgbouncer:5432/imghost
+DATABASE_USE_PGBOUNCER=true
+# ↑ When PgBouncer is enabled, the app disables asyncpg's statement cache in code.
 REDIS_URL=redis://redis:6379/0        # empty or unset = Redis-free mode
 BASE_URL=https://img.example.com
 PORT=8000
@@ -1914,6 +1913,8 @@ The current implementation already exposes `/metrics` from FastAPI. Prometheus c
 
 ### Docker Compose (Default — No Nginx in Container)
 
+The deployment ships a Compose file with PgBouncer in front of PostgreSQL for the full stack, and a separate simpler beginner Compose shape without it.
+
 ```yaml
 services:
   app:
@@ -1921,7 +1922,8 @@ services:
     ports:
       - "${PORT:-8000}:8000"
     environment: &app-env
-      DATABASE_URL: postgresql+asyncpg://imghost:${POSTGRES_PASSWORD:-imghost}@pgbouncer:5432/imghost?prepared_statement_cache_size=0
+      DATABASE_URL: postgresql://imghost:${POSTGRES_PASSWORD:-imghost}@pgbouncer:5432/imghost
+      DATABASE_USE_PGBOUNCER: "true"
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://garage:3900
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
@@ -1933,14 +1935,14 @@ services:
       PORT: "8000"
       METRICS_BACKEND: ${METRICS_BACKEND:-log}
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
-      garage:
-        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 15s
@@ -1954,12 +1956,14 @@ services:
     command: python -m imghost run-worker-thumbnails
     environment: *app-env
     depends_on:
+      postgres:
+        condition: service_healthy
       pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
-      garage:
-        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   worker-cleanup:
@@ -1967,12 +1971,14 @@ services:
     command: python -m imghost run-worker-cleanup
     environment: *app-env
     depends_on:
+      postgres:
+        condition: service_healthy
       pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
-      garage:
-        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   worker-default:
@@ -1980,12 +1986,14 @@ services:
     command: python -m imghost run-worker-default
     environment: *app-env
     depends_on:
+      postgres:
+        condition: service_healthy
       pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
-      garage:
-        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   scheduler:
@@ -1993,15 +2001,17 @@ services:
     command: python -m imghost run-scheduler
     environment: *app-env
     depends_on:
+      postgres:
+        condition: service_healthy
       pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
-      garage:
-        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
-  db:
+  postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: imghost
@@ -2017,19 +2027,18 @@ services:
     restart: unless-stopped
 
   pgbouncer:
-    image: bitnami/pgbouncer:latest
+    image: edoburu/pgbouncer:v1.25.1-p0
     environment:
-      POSTGRESQL_HOST: db
-      POSTGRESQL_USERNAME: imghost
-      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-imghost}
-      POSTGRESQL_DATABASE: imghost
-      PGBOUNCER_POOL_MODE: transaction
-      PGBOUNCER_DEFAULT_POOL_SIZE: 10
+      DATABASE_URL: postgresql://imghost:${POSTGRES_PASSWORD:-imghost}@postgres:5432/imghost
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      DEFAULT_POOL_SIZE: 25
+      DATABASE_USE_PGBOUNCER: "true"
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U imghost"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -d postgres://imghost:${POSTGRES_PASSWORD:-imghost}@127.0.0.1:5432/imghost"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -2045,14 +2054,13 @@ services:
     restart: unless-stopped
 
   garage:
-    image: dxflrs/garage:v1.0.0
+    image: dxflrs/garage:v2.2.0
     volumes:
       - garage_meta:/var/lib/garage/meta
       - garage_data:/var/lib/garage/data
       - ./garage.toml:/etc/garage.toml:ro
-    # Port 3900 intentionally NOT exposed to host — internal Docker network only
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3900/health || exit 1"]
+      test: ["CMD", "/garage", "-c", "/etc/garage.toml", "status"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -2141,6 +2149,8 @@ python -m imghost init-storage
 # Internally runs: garage layout assign, garage key create, garage bucket create/allow
 ```
 
+In the current Docker stack, services wait on a one-shot `garage-init` container before app and worker startup because the app entrypoint also runs `init-storage` in Garage mode.
+
 ### Host Nginx Config
 
 Shipped as `docs/nginx-site.conf`. Drop into `/etc/nginx/sites-enabled/`:
@@ -2180,18 +2190,16 @@ server {
 }
 ```
 
-Garage is never referenced in nginx config. It is Docker-internal only.
+Garage is never referenced in nginx config. Whether Garage is exposed to the host is an operator choice.
 
 ### Optional: `docker-compose.with-nginx.yml`
 
-An override compose file adding a bundled nginx + Certbot container for users who want a fully self-contained stack. Documented and shipped separately; not the default.
+An override compose file adding a bundled nginx container for users who want a more self-contained stack. Documented and shipped separately; not the default.
 
 ### Dockerfile Notes
 
 - Base image: `python:3.12-slim`
-- System packages: `ffmpeg`, `libvips42`, `libavif-dev`, `curl` (for healthcheck)
-- Runs as non-root user (`imghost:imghost`)
-- Entrypoint: `alembic upgrade head && uvicorn ...` (migrations run at startup automatically)
+- System packages: `ffmpeg`, `libvips42`, `curl` (for healthcheck)
 - Same image used for `app`, `worker-thumbnails`, `worker-cleanup`, `worker-default`, and `scheduler` services; service role set by `command`
 
 ### CLI Commands
