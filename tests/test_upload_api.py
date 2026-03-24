@@ -4,17 +4,33 @@ from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 from PIL import Image
+from pillow_heif import register_heif_opener
 
 from imghost.main import app
 from imghost.processors import MediaMetadata, SanitizedFile, ValidationResult, VideoProcessingError
 
 from .helpers import PNG_1X1, create_user_and_api_key, wait_for_thumbnail
 
+register_heif_opener(thumbnails=False)
+
 
 def jpeg_bytes(color: str = "red", size: tuple[int, int] = (8, 8)) -> bytes:
     image = Image.new("RGB", size, color)
     output = BytesIO()
     image.save(output, format="JPEG")
+    return output.getvalue()
+
+
+def modern_image_bytes(
+    *,
+    mode: str = "RGB",
+    size: tuple[int, int] = (8, 8),
+    color: str | tuple[int, int, int] | tuple[int, int, int, int] = "red",
+    format_name: str = "HEIF",
+) -> bytes:
+    image = Image.new(mode, size, color)
+    output = BytesIO()
+    image.save(output, format=format_name)
     return output.getvalue()
 
 
@@ -480,6 +496,72 @@ def test_mislabeled_png_upload_is_stored_as_sanitized_jpeg_output(tmp_path, monk
         media_response = client.get(f"/i/{media_id}.jpg")
         assert media_response.status_code == 200
         assert media_response.headers["content-type"] == "image/jpeg"
+
+
+def test_heic_upload_is_normalized_to_browser_safe_jpeg_output(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.heic", BytesIO(modern_image_bytes(format_name="HEIF")), "image/heic"))],
+            data={"title": "HEIC"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        item = payload["items"][0]
+        media_id = item["media_id"]
+        assert item["media_url"].endswith(".jpg")
+
+        state = client.app.state.imghost
+        media = client.portal.call(state.repository.get_media, media_id)
+        assert media is not None
+        assert media.format == "jpeg"
+        assert media.mime_type == "image/jpeg"
+
+        media_response = client.get(f"/i/{media_id}.jpg")
+        assert media_response.status_code == 200
+        assert media_response.headers["content-type"] == "image/jpeg"
+
+        thumb_response = client.get(f"/t/{media_id}.jpg")
+        assert thumb_response.status_code == 200
+        assert thumb_response.headers["content-type"] == "image/jpeg"
+
+
+def test_avif_upload_with_alpha_is_normalized_to_png_output(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.avif", BytesIO(modern_image_bytes(mode="RGBA", color=(255, 0, 0, 96), format_name="AVIF")), "image/avif"))],
+            data={"title": "AVIF"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        item = payload["items"][0]
+        media_id = item["media_id"]
+        assert item["media_url"].endswith(".png")
+
+        state = client.app.state.imghost
+        media = client.portal.call(state.repository.get_media, media_id)
+        assert media is not None
+        assert media.format == "png"
+        assert media.mime_type == "image/png"
+
+        media_response = client.get(f"/i/{media_id}.png")
+        assert media_response.status_code == 200
+        assert media_response.headers["content-type"] == "image/png"
+
+        thumb_response = client.get(f"/t/{media_id}.jpg")
+        assert thumb_response.status_code == 200
+        assert thumb_response.headers["content-type"] == "image/jpeg"
 
 
 def test_album_payload_and_page_show_video_compatibility_warning(tmp_path, monkeypatch) -> None:

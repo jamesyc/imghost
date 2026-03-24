@@ -3,9 +3,20 @@ from __future__ import annotations
 from io import BytesIO
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 
 from .. import processors as processor_module
 from ..processors import MediaMetadata, MediaProcessor, SanitizedFile, ThumbnailResult, ValidationResult
+
+register_heif_opener(thumbnails=False)
+
+
+def _has_alpha(image: Image.Image) -> bool:
+    if image.mode in ("RGBA", "LA", "PA"):
+        return True
+    if image.mode == "P":
+        return "transparency" in image.info
+    return "A" in image.getbands()
 
 
 class PillowProcessor(MediaProcessor):
@@ -99,6 +110,47 @@ class BmpProcessor(StaticPillowProcessor):
     @staticmethod
     def supported_formats() -> list[str]:
         return ["bmp"]
+
+
+class BrowserNormalizedPillowProcessor(PillowProcessor):
+    async def sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
+        with self._open_image(payload) as image:
+            image = ImageOps.exif_transpose(image)
+            save_format = "PNG" if _has_alpha(image) else "JPEG"
+            converted = image.convert("RGBA" if save_format == "PNG" else "RGB")
+            output = BytesIO()
+            save_kwargs: dict[str, object] = {}
+            if save_format == "JPEG":
+                save_kwargs["quality"] = 95
+            converted.save(output, format=save_format, **save_kwargs)
+        normalized_format = "png" if save_format == "PNG" else "jpeg"
+        mime_type = "image/png" if save_format == "PNG" else "image/jpeg"
+        return SanitizedFile(data=output.getvalue(), mime_type=mime_type, format=normalized_format)
+
+    async def generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
+        with self._open_image(payload) as image:
+            image = ImageOps.exif_transpose(image)
+            image = image.convert("RGB")
+            image.thumbnail(
+                (processor_module.THUMB_WIDTH, processor_module.THUMB_WIDTH * 100),
+                Image.Resampling.LANCZOS,
+            )
+            output = BytesIO()
+            image.save(output, format="JPEG", quality=85, optimize=True)
+        data = output.getvalue()
+        return ThumbnailResult(data=data, thumb_is_orig=False, format="jpg", size=len(data))
+
+
+class HeifProcessor(BrowserNormalizedPillowProcessor):
+    @staticmethod
+    def supported_formats() -> list[str]:
+        return ["heic", "heif"]
+
+
+class AvifProcessor(BrowserNormalizedPillowProcessor):
+    @staticmethod
+    def supported_formats() -> list[str]:
+        return ["avif"]
 
 
 class AnimatedPillowProcessor(PillowProcessor):

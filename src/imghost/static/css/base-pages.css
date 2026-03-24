@@ -684,14 +684,20 @@ body.upload-modal-open {
 
 .public-album-preview {
   position: relative;
+  display: grid;
+  place-items: center;
   width: 100%;
+  padding: 12px;
   border-radius: var(--radius-panel);
   overflow: hidden;
   background: rgba(255, 255, 255, 0.12);
 }
 
 .public-album-preview img {
+  width: auto;
+  max-width: 100%;
   height: auto;
+  max-height: min(80vh, 960px);
   min-height: 0;
   object-fit: contain;
 }

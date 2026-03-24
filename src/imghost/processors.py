@@ -109,8 +109,10 @@ class ProcessorRegistry:
 
 from .media_processors.image import (
     AnimatedPillowProcessor,
+    AvifProcessor,
     BmpProcessor,
     GifProcessor,
+    HeifProcessor,
     JpegProcessor,
     PillowProcessor,
     PngProcessor,
@@ -128,6 +130,8 @@ def build_processor_registry(max_pixels: int, video_thumb_frames: int = 10) -> P
     registry.register(GifProcessor(max_pixels))
     registry.register(WebpProcessor(max_pixels))
     registry.register(BmpProcessor(max_pixels))
+    registry.register(HeifProcessor(max_pixels))
+    registry.register(AvifProcessor(max_pixels))
     registry.register(SvgProcessor(max_pixels))
     registry.register(Mp4Processor(max_pixels, video_thumb_frames))
     registry.register(MovProcessor(max_pixels, video_thumb_frames))

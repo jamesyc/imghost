@@ -9,6 +9,7 @@ from time import monotonic, sleep
 
 from fastapi.testclient import TestClient
 from PIL import Image
+from pillow_heif import register_heif_opener
 from starlette.datastructures import Headers, UploadFile
 
 from imghost.app_state import AppState
@@ -30,6 +31,8 @@ from imghost.processors import (
 )
 from imghost.service import CurrentActor
 from imghost.processors import GifProcessor, MovProcessor, Mp4Processor
+
+register_heif_opener(thumbnails=False)
 
 SVG_SAMPLE = b"""<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24" onload="alert(1)">
 <script>alert(1)</script>
@@ -132,6 +135,19 @@ def make_upload_file(name: str = "sample.mp4", payload: bytes = b"fake-video") -
     return UploadFile(file=BytesIO(payload), filename=name, headers=Headers({"content-type": "video/mp4"}))
 
 
+def modern_image_bytes(
+    *,
+    mode: str = "RGB",
+    size: tuple[int, int] = (8, 8),
+    color: str | tuple[int, int, int] | tuple[int, int, int, int] = "red",
+    format_name: str = "HEIF",
+) -> bytes:
+    image = Image.new(mode, size, color)
+    output = BytesIO()
+    image.save(output, format=format_name)
+    return output.getvalue()
+
+
 def animated_gif_bytes(size: tuple[int, int] = (24, 24), frame_count: int = 2) -> bytes:
     colors = ["red", "blue", "green", "yellow", "purple", "orange"]
     frames = [Image.new("RGBA", size, colors[index % len(colors)]) for index in range(frame_count)]
@@ -177,6 +193,14 @@ def test_svg_upload_sanitizes_original_and_generates_thumbnail(tmp_path, monkeyp
         assert thumb.status_code == 200
         assert thumb.headers["content-type"] == "image/jpeg"
         assert thumb.content.startswith(b"\xff\xd8")
+
+
+def test_registry_registers_heif_and_avif_processors() -> None:
+    registry = build_processor_registry(50_000_000, video_thumb_frames=6)
+
+    assert registry.get_processor("heic") is not None
+    assert registry.get_processor("heif") is not None
+    assert registry.get_processor("avif") is not None
 
 
 def test_svg_upload_strips_foreign_object_style_and_non_fragment_references(tmp_path, monkeypatch) -> None:
