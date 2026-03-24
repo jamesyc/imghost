@@ -21,10 +21,17 @@ from .tasks import AsyncTaskQueue, RedisTaskQueue, SyncTaskQueue, TaskContext, T
 
 
 class AppState:
-    def __init__(self, settings: Settings, *, run_task_worker: bool | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        run_task_worker: bool | None = None,
+        task_worker_queues: tuple[str, ...] | None = None,
+    ) -> None:
         self.settings = settings
         self.run_task_worker = settings.task_worker_enabled if run_task_worker is None else run_task_worker
-        self.task_worker_queues = settings.task_worker_queues if self.run_task_worker else ()
+        selected_worker_queues = settings.task_worker_queues if task_worker_queues is None else task_worker_queues
+        self.task_worker_queues = selected_worker_queues if self.run_task_worker else ()
         self.database = Database(settings.database_url)
         self.event_bus = EventBus()
         self.repository = PostgresRepository(self.database)

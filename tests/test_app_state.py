@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 from imghost.app_state import AppState
+from imghost.config import load_settings
 from imghost.models import Media, utcnow
 
 
@@ -75,3 +76,14 @@ def test_recover_thumbnails_deduplicates_ids_and_resets_failed_items_to_pending(
     assert repository.updated == [
         ("media-2", "pending"),
     ]
+
+
+def test_app_state_allows_cli_worker_queue_override(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_WORKER_QUEUES", "default,cleanup")
+
+    state = AppState(load_settings(), run_task_worker=True, task_worker_queues=("thumbnails",))
+
+    assert state.run_task_worker is True
+    assert state.task_worker_queues == ("thumbnails",)

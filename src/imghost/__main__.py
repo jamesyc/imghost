@@ -10,6 +10,14 @@ from .app_state import AppState
 from .config import load_settings
 from .models import User, utcnow
 
+WORKER_COMMAND_QUEUES: dict[str, tuple[str, ...] | None] = {
+    "retry-thumbnails": ("thumbnails",),
+    "run-worker": None,
+    "run-worker-thumbnails": ("thumbnails",),
+    "run-worker-cleanup": ("cleanup",),
+    "run-worker-default": ("default",),
+}
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m imghost")
@@ -21,6 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("retry-thumbnails")
     subparsers.add_parser("init-storage")
     subparsers.add_parser("run-worker")
+    subparsers.add_parser("run-worker-thumbnails")
+    subparsers.add_parser("run-worker-cleanup")
+    subparsers.add_parser("run-worker-default")
 
     create_user = subparsers.add_parser("create-user")
     create_user.add_argument("--username", required=True)
@@ -55,7 +66,25 @@ def _is_test_database(dsn: str) -> bool:
 def _requires_cli_confirmation(command: str, *, dry_run: bool = False) -> bool:
     if command == "prune" and dry_run:
         return False
-    return command in {"create-user", "issue-api-key", "prune", "init-storage", "run-worker", "retry-thumbnails"}
+    return command in {
+        "create-user",
+        "issue-api-key",
+        "prune",
+        "init-storage",
+        "retry-thumbnails",
+        *WORKER_COMMAND_QUEUES.keys(),
+    }
+
+
+def _worker_queues_for_command(command: str, *, configured_queues: tuple[str, ...]) -> tuple[str, ...]:
+    configured = WORKER_COMMAND_QUEUES.get(command)
+    if configured is None:
+        return configured_queues
+    return configured
+
+
+def _runs_worker_for_command(command: str) -> bool:
+    return command in WORKER_COMMAND_QUEUES
 
 
 def _confirm_risky_cli_target(
@@ -101,7 +130,11 @@ async def run_cli(argv: list[str] | None = None) -> int:
     ):
         return 1
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    state = AppState(settings, run_task_worker=args.command in {"retry-thumbnails", "run-worker"})
+    state = AppState(
+        settings,
+        run_task_worker=_runs_worker_for_command(args.command),
+        task_worker_queues=_worker_queues_for_command(args.command, configured_queues=settings.task_worker_queues),
+    )
     await state.database.connect()
 
     try:
@@ -158,12 +191,16 @@ async def run_cli(argv: list[str] | None = None) -> int:
             print("storage initialized")
             return 0
 
-        if args.command == "run-worker":
+        if args.command in WORKER_COMMAND_QUEUES and args.command != "retry-thumbnails":
             await state.telemetry.record_cli_command(
                 action="cli.run_worker.start",
                 object_type="cli_command",
-                object_id="run-worker",
-                metadata={"command": "run-worker", "correlation_id": command_correlation_id},
+                object_id=args.command,
+                metadata={
+                    "command": args.command,
+                    "task_worker_queues": list(state.task_worker_queues),
+                    "correlation_id": command_correlation_id,
+                },
                 argv=command_argv,
             )
             await state.redis.ensure_startup_ready()

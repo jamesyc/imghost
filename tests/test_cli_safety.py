@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from imghost.__main__ import _confirm_risky_cli_target
+from imghost.__main__ import (
+    _confirm_risky_cli_target,
+    _requires_cli_confirmation,
+    _runs_worker_for_command,
+    _worker_queues_for_command,
+    build_parser,
+)
 
 
 def test_cli_confirmation_bypasses_local_database() -> None:
@@ -26,6 +32,36 @@ def test_cli_confirmation_skips_prune_dry_run() -> None:
         dry_run=True,
         stdin_isatty=False,
     )
+
+
+def test_worker_parser_accepts_split_worker_commands() -> None:
+    parser = build_parser()
+
+    assert parser.parse_args(["run-worker-thumbnails"]).command == "run-worker-thumbnails"
+    assert parser.parse_args(["run-worker-cleanup"]).command == "run-worker-cleanup"
+    assert parser.parse_args(["run-worker-default"]).command == "run-worker-default"
+
+
+def test_worker_command_queue_selection_uses_split_commands_and_default_config() -> None:
+    configured = ("cleanup", "thumbnails")
+
+    assert _worker_queues_for_command("run-worker", configured_queues=configured) == configured
+    assert _worker_queues_for_command("run-worker-thumbnails", configured_queues=configured) == ("thumbnails",)
+    assert _worker_queues_for_command("run-worker-cleanup", configured_queues=configured) == ("cleanup",)
+    assert _worker_queues_for_command("run-worker-default", configured_queues=configured) == ("default",)
+    assert _worker_queues_for_command("retry-thumbnails", configured_queues=configured) == ("thumbnails",)
+
+
+def test_worker_command_detection_and_confirmation_cover_split_commands() -> None:
+    assert _runs_worker_for_command("run-worker") is True
+    assert _runs_worker_for_command("run-worker-thumbnails") is True
+    assert _runs_worker_for_command("run-worker-cleanup") is True
+    assert _runs_worker_for_command("run-worker-default") is True
+    assert _runs_worker_for_command("prune") is False
+
+    assert _requires_cli_confirmation("run-worker-thumbnails") is True
+    assert _requires_cli_confirmation("run-worker-cleanup") is True
+    assert _requires_cli_confirmation("run-worker-default") is True
 
 
 def test_cli_confirmation_refuses_noninteractive_nonlocal_nontest_target(capsys) -> None:
