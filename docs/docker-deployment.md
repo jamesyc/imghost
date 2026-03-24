@@ -1,9 +1,10 @@
 # Docker Deployment
 
-There are two Docker stacks:
+There are two main Docker stacks plus one optional companion override:
 
-- beginner: [`docker/docker-compose-beginner.yml`](/home/james/imghost/docker/docker-compose-beginner.yml)
+- beginner: [`docker/docker-compose.beginner.yml`](/home/james/imghost/docker/docker-compose.beginner.yml)
 - advanced: [`docker/docker-compose.yml`](/home/james/imghost/docker/docker-compose.yml)
+- optional nginx companion: [`docker/docker-compose.with-nginx.yml`](/home/james/imghost/docker/docker-compose.with-nginx.yml)
 
 ## Services
 
@@ -30,6 +31,11 @@ Advanced stack adds:
   Runs `python -m imghost run-scheduler`.
 - `redis`
   Redis for optional sessions, rate limits, task queues, and scheduler leases.
+
+Optional nginx companion adds:
+
+- `nginx`
+  Reverse proxy container that terminates HTTPS and proxies to `app:8000` using [`docker/nginx-site.conf`](/home/james/imghost/docker/nginx-site.conf).
 
 ## Startup flow
 
@@ -87,7 +93,7 @@ Advanced stack only:
 
 ## Compose env behavior
 
-The advanced stack uses [`docker/.env.example`](/home/james/imghost/docker/.env.example). The beginner stack uses [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner).
+The advanced stack uses [`docker/.env.example`](/home/james/imghost/docker/.env.example) copied to `docker/.env`. The beginner stack uses [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner) copied to `docker/.env.beginner`.
 
 The advanced stack injects additional derived values like `DATABASE_URL` into app, worker, and scheduler services.
 
@@ -102,6 +108,27 @@ The beginner stack forces:
 - `REDIS_MODE=disabled`
 - `TASK_QUEUE_MODE=async`
 - no separate worker or scheduler container
+
+## Optional Compose nginx
+
+The nginx companion is an override file, not a standalone stack. Start it with:
+
+```bash
+docker compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.with-nginx.yml \
+  --env-file docker/.env \
+  up --build -d
+```
+
+It mounts:
+
+- [`docker/nginx-site.conf`](/home/james/imghost/docker/nginx-site.conf)
+  Container-facing nginx config with `proxy_pass http://app:8000;`
+- `../certs`
+  Expected to contain `fullchain.pem` and `privkey.pem`
+
+For host-installed nginx instead, use [`docs/nginx-site.conf`](/home/james/imghost/docs/nginx-site.conf), which proxies to `127.0.0.1:8000` rather than the Compose service name.
 
 ## Advanced Redis behavior in Docker
 

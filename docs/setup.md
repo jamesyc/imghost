@@ -4,7 +4,7 @@ This is the practical deployment guide for running `imghost` on one machine with
 
 It is intentionally opinionated and focuses on the current implementation, not every theoretical deployment shape.
 
-For a simpler local or LAN setup, use the beginner stack described in [docker-deployment.md](/home/james/imghost/docs/docker-deployment.md) with [`docker/docker-compose-beginner.yml`](/home/james/imghost/docker/docker-compose-beginner.yml).
+For a simpler local or LAN setup, use the beginner stack described in [docker-deployment.md](/home/james/imghost/docs/docker-deployment.md) with [`docker/docker-compose.beginner.yml`](/home/james/imghost/docker/docker-compose.beginner.yml) and [`docker/.env.beginner`](/home/james/imghost/docker/.env.beginner).
 
 ## What this guide assumes
 
@@ -34,6 +34,12 @@ Example:
 
 ```bash
 cp docker/.env.example docker/.env
+```
+
+For the beginner stack instead:
+
+```bash
+cp docker/.env.example.beginner docker/.env.beginner
 ```
 
 ## 2. Set the minimum required values
@@ -235,6 +241,20 @@ Proxy upstream:
 ```nginx
 proxy_pass http://127.0.0.1:8000;
 ```
+
+If you want nginx inside the Compose stack instead of on the host, use the optional companion file:
+
+```bash
+docker compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.with-nginx.yml \
+  --env-file docker/.env \
+  up --build -d
+```
+
+The bundled Compose nginx config lives at [`docker/nginx-site.conf`](/home/james/imghost/docker/nginx-site.conf) and proxies to `app:8000` on the Docker network. Mount your certificate pair at `./certs/fullchain.pem` and `./certs/privkey.pem` before enabling it.
+
+If nginx runs on the host instead, use [`docs/nginx-site.conf`](/home/james/imghost/docs/nginx-site.conf), which proxies to `127.0.0.1:8000`.
 
 If nginx is on the same machine, start with:
 

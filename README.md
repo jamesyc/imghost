@@ -73,8 +73,9 @@ The Docker setup lives under [`docker/`](/home/james/imghost/docker).
 
 Main files:
 
-- [`docker/docker-compose-beginner.yml`](/home/james/imghost/docker/docker-compose-beginner.yml)
+- [`docker/docker-compose.beginner.yml`](/home/james/imghost/docker/docker-compose.beginner.yml)
 - [`docker/docker-compose.yml`](/home/james/imghost/docker/docker-compose.yml)
+- [`docker/docker-compose.with-nginx.yml`](/home/james/imghost/docker/docker-compose.with-nginx.yml)
 - [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner)
 - [`docker/.env.example`](/home/james/imghost/docker/.env.example)
 - [`docker/.env`](/home/james/imghost/docker/.env)
@@ -82,8 +83,8 @@ Main files:
 For beginners or simple LAN installs, use the beginner stack:
 
 ```bash
-cp docker/.env.example.beginner docker/.env
-docker compose -f docker/docker-compose-beginner.yml --env-file docker/.env up --build -d
+cp docker/.env.example.beginner docker/.env.beginner
+docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner up --build -d
 ```
 
 That stack is intentionally simple:
@@ -106,6 +107,18 @@ For the full split-worker deployment, use the main stack:
 cp docker/.env.example docker/.env
 docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d
 ```
+
+If you want nginx inside the Compose stack instead of on the host, add the optional companion file:
+
+```bash
+docker compose \
+  -f docker/docker-compose.yml \
+  -f docker/docker-compose.with-nginx.yml \
+  --env-file docker/.env \
+  up --build -d
+```
+
+That nginx service uses [`docker/nginx-site.conf`](/home/james/imghost/docker/nginx-site.conf), proxies to `app:8000`, and expects TLS certs at `./certs/fullchain.pem` and `./certs/privkey.pem`.
 
 The main Compose project name is `imghost`, so containers come up as:
 
@@ -251,7 +264,7 @@ Important behavior:
 
 ## Queue And Rate-Limit Notes
 
-- The beginner Docker stack uses `docker/docker-compose-beginner.yml` with `TASK_QUEUE_MODE=async` and `REDIS_MODE=disabled`, so background jobs run in-process inside the app container.
+- The beginner Docker stack uses `docker/docker-compose.beginner.yml` with `TASK_QUEUE_MODE=async` and `REDIS_MODE=disabled`, so background jobs run in-process inside the app container.
 - The beginner no-Redis stack does not run a separate worker or scheduler service.
 - `TASK_QUEUE_MODE=redis` enables Redis-backed task dispatch.
 - `TASK_WORKER_ENABLED=false` is intended for the web app container.
