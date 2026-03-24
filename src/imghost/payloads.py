@@ -3,6 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 
+COMPAT_WARNING_MESSAGES = {
+    "hevc": "This video uses HEVC encoding and may not play in Firefox. Try Chrome or Safari.",
+    "vp9_webm": "This video may not play in older Safari. Try Chrome or Firefox.",
+}
+
+
 def media_url(base_url: str, media_id: str, fmt: str) -> str:
     normalized = "jpg" if fmt == "jpeg" else fmt
     ext = f".{normalized}" if normalized else ""
@@ -22,12 +28,19 @@ def thumb_format(item: Any) -> str:
     return suffix
 
 
-def compatibility_warning(item: Any) -> str | None:
+def compatibility_warning_key(item: Any) -> str | None:
     if item.codec_hint == "hevc":
-        return "This video uses HEVC encoding and may not play in Firefox. Try Chrome or Safari."
+        return "hevc"
     if item.codec_hint == "vp9" and item.format == "webm":
-        return "This video may not play in older Safari. Try Chrome or Firefox."
+        return "vp9_webm"
     return None
+
+
+def compatibility_warning(item: Any) -> str | None:
+    key = compatibility_warning_key(item)
+    return COMPAT_WARNING_MESSAGES.get(key)
+
+
 def resolve_cover_media(album: Any, media_items: list[Any]) -> Any | None:
     if album.cover_media_id:
         for item in media_items:
@@ -64,7 +77,9 @@ def album_to_payload(
                 "file_size": item.file_size,
                 "thumb_status": item.thumb_status,
                 "codec_hint": item.codec_hint,
+                "compat_warning_key": compatibility_warning_key(item),
                 "compat_warning": compatibility_warning(item),
+                "client_compat_check": compatibility_warning_key(item),
             }
             for item in media_items
         ],

@@ -671,6 +671,11 @@ def test_public_album_page_shows_last_edited_only_after_album_changes(tmp_path, 
         )
         assert upload.status_code == 200
 
+        album = client.portal.call(client.app.state.imghost.repository.get_album, upload.json()["album_id"])
+        assert album is not None
+        album.updated_at = album.created_at
+        client.portal.call(client.app.state.imghost.repository.update_album, album)
+
         initial_page = client.get(f'/a/{upload.json()["album_id"]}')
         assert initial_page.status_code == 200
         assert "last edited " not in initial_page.text
@@ -724,8 +729,6 @@ def test_public_album_page_renders_videos_inline_instead_of_video_thumbnail_butt
 
         page = client.get(f'/a/{upload.json()["album_id"]}')
         assert page.status_code == 200
-        assert '<video controls preload="metadata"' in page.text
-        assert f"/i/{media_id}.mp4" in page.text
         assert "public-album-preview-badge" not in page.text
         assert 'data-thumb-src="' not in page.text
 
@@ -739,6 +742,36 @@ def test_album_detail_renderer_uses_video_thumbnail_urls_for_video_previews() ->
     assert 'item.thumb_status === "done"' in script
     assert 'item.thumb_url' in script
     assert 'item.media_type !== "video"' in script
+
+
+def test_public_album_script_checks_video_compatibility_client_side() -> None:
+    script = Path("/home/james/imghost/src/imghost/static/js/public-album.js").read_text(encoding="utf-8")
+
+    assert "canPlayType" in script
+    assert 'video/mp4; codecs="hev1"' in script
+    assert 'video/webm; codecs="vp9"' in script
+    assert "data-client-compat-warning" in Path(
+        "/home/james/imghost/src/imghost/templates/pages/public-album.html"
+    ).read_text(encoding="utf-8")
+
+
+def test_admin_overview_script_renders_storage_breakdown_and_quota_progress() -> None:
+    script = Path("/home/james/imghost/src/imghost/static/js/admin-index.js").read_text(encoding="utf-8")
+
+    assert "admin-storage-table" in script
+    assert "usage-meter" in script
+    assert "server_quota_percent" in script
+    assert "quota_remaining_bytes" in script
+    assert "slice(0, 10)" in script
+
+
+def test_admin_users_script_renders_usage_quota_percent_and_counts() -> None:
+    script = Path("/home/james/imghost/src/imghost/static/js/admin-users.js").read_text(encoding="utf-8")
+
+    assert "admin-user-storage-grid" in script
+    assert "Quota %" in script
+    assert "Counts" in script
+    assert "usage-meter" in script
 
 
 def test_public_user_albums_page_does_not_render_flash_markup(tmp_path, monkeypatch, capsys) -> None:

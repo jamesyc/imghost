@@ -799,7 +799,7 @@ The upload-size policy should stay deliberately simple unless separate image/vid
 
 ### User Management
 
-- **List all users:** username, email, joined date, storage used, quota, status (active / suspended)
+- **List all users:** username, email, joined date, storage used, quota, quota %, counts, status (active / suspended)
 - **Create user** directly (username + email + password)
 - **Reset user password** (admin sets new password; no email is sent — admin notifies out-of-band)
 - **Suspend / unsuspend** (blocks login, preserves all data)
@@ -817,7 +817,7 @@ The upload-size policy should stay deliberately simple unless separate image/vid
 ### Global Storage Dashboard
 
 - Total storage used vs. server quota with visual progress bar
-- Per-user breakdown table: username, file count, bytes used, % of their quota
+- Largest accounts summary: top 10 users by bytes used, with quota and quota %
 - Total storage attributed to anonymous uploads
 
 ### Configuration Panel

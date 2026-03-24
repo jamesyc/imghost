@@ -30,7 +30,7 @@
 
   <section class="stack" id="public-album-items">
     {% for item in album_payload["items"] %}
-    <article class="card public-album-item">
+    <article class="card public-album-item" data-media-id="{{ item.id }}">
       <div class="public-album-item-header">
         <h2>{{ item.filename or item.id }}</h2>
         <p class="hint">{{ item.file_size_display }}</p>
@@ -52,7 +52,15 @@
       </div>
       {% endif %}
       {% if item.compat_warning %}
-      <p class="public-album-inline-warning">{{ item.compat_warning }}</p>
+      <p class="public-album-inline-warning" data-warning-key="{{ item.compat_warning_key }}">{{ item.compat_warning }}</p>
+      {% endif %}
+      {% if item.client_compat_check %}
+      <p
+        class="public-album-inline-warning hidden"
+        data-client-compat-warning
+        data-media-id="{{ item.id }}"
+        data-warning-key="{{ item.client_compat_check }}"
+      ></p>
       {% endif %}
       <div class="public-album-item-actions">
         <div class="split-link-control">

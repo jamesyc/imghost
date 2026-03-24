@@ -3,6 +3,16 @@ const publicAlbumBootstrapNode = document.getElementById("public-album-bootstrap
 const publicAlbumHeroActions = document.getElementById("public-album-hero-actions");
 const publicAlbumBootstrap = publicAlbumBootstrapNode ? JSON.parse(publicAlbumBootstrapNode.textContent || "{}") : {};
 const publicAlbumId = publicAlbumBootstrap.id || null;
+const CLIENT_COMPAT_WARNING_RULES = {
+  hevc: {
+    canPlayType: 'video/mp4; codecs="hev1"',
+    message: "This video uses HEVC encoding and may not play in Firefox. Try Chrome or Safari.",
+  },
+  vp9_webm: {
+    canPlayType: 'video/webm; codecs="vp9"',
+    message: "This video may not play in older Safari. Try Chrome or Firefox.",
+  },
+};
 
 const ensurePublicAlbumLightbox = () => {
   let lightbox = document.getElementById("public-album-lightbox");
@@ -128,6 +138,42 @@ const injectManageButton = () => {
 };
 
 injectManageButton();
+
+const renderClientCompatibilityWarnings = () => {
+  if (!publicAlbumRoot) {
+    return;
+  }
+  const probeVideo = document.createElement("video");
+  for (const item of publicAlbumBootstrap.items || []) {
+    const warningKey = item.client_compat_check;
+    if (!warningKey) {
+      continue;
+    }
+    const warningRule = CLIENT_COMPAT_WARNING_RULES[warningKey];
+    if (!warningRule) {
+      continue;
+    }
+    const existingWarning = publicAlbumRoot.querySelector(
+      `[data-media-id="${item.id}"] [data-warning-key="${warningKey}"]:not([data-client-compat-warning])`,
+    );
+    if (existingWarning) {
+      continue;
+    }
+    if (probeVideo.canPlayType(warningRule.canPlayType) !== "") {
+      continue;
+    }
+    const placeholder = publicAlbumRoot.querySelector(
+      `[data-client-compat-warning][data-media-id="${item.id}"][data-warning-key="${warningKey}"]`,
+    );
+    if (!placeholder) {
+      continue;
+    }
+    placeholder.textContent = warningRule.message;
+    placeholder.classList.remove("hidden");
+  }
+};
+
+renderClientCompatibilityWarnings();
 
 document.addEventListener("click", (event) => {
   if (event.target.closest(".public-album-lightbox-backdrop, .public-album-lightbox-close")) {

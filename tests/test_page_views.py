@@ -127,6 +127,54 @@ def test_build_public_album_page_context_omits_last_edited_when_album_was_not_ed
     assert payload["album_payload"]["last_edited_display"] is None
 
 
+def test_build_public_album_page_context_includes_client_compatibility_check_for_hevc_video() -> None:
+    created = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    album = Album(
+        id="album123",
+        user_id="user123",
+        title="Compat Album",
+        cover_media_id=None,
+        delete_token="token123",
+        created_at=created,
+        updated_at=created,
+        expires_at=None,
+    )
+    item = Media(
+        id="media123",
+        album_id="album123",
+        user_id="user123",
+        filename_orig="clip.mov",
+        media_type="video",
+        format="mov",
+        mime_type="video/quicktime",
+        storage_key="media/clip.mov",
+        thumb_key=None,
+        thumb_is_orig=False,
+        thumb_status="done",
+        file_size=68,
+        thumb_size=None,
+        width=640,
+        height=360,
+        duration_secs=3.0,
+        is_animated=False,
+        codec_hint="hevc",
+        position=0,
+        created_at=created,
+    )
+
+    payload = build_public_album_page_context(
+        "https://testserver",
+        album,
+        [item],
+        viewer_user_id=None,
+    )
+
+    entry = payload["album_payload"]["items"][0]
+    assert entry["compat_warning_key"] == "hevc"
+    assert entry["client_compat_check"] == "hevc"
+    assert "HEVC encoding" in entry["compat_warning"]
+
+
 def test_build_public_user_album_list_context_adds_display_fields_without_mutating_input() -> None:
     source = [
         {

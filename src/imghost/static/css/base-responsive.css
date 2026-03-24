@@ -54,6 +54,14 @@
     text-align: left;
   }
 
+  .admin-storage-table-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-user-storage-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .upload-stage {
     min-height: 250px;
     padding: 18px 0 20px;

@@ -436,6 +436,13 @@ def test_admin_user_management_and_stats(tmp_path, monkeypatch, capsys) -> None:
         stats_payload = stats.json()
         assert stats_payload["user_count"] >= 2
         assert stats_payload["total_storage_used_bytes"] > 0
+        assert "server_quota_percent" in stats_payload
+        assert "server_quota_remaining_bytes" in stats_payload
+        assert "server_quota_unlimited" in stats_payload
+        assert isinstance(stats_payload["users"], list)
+        assert "quota_percent" in stats_payload["users"][0]
+        assert "quota_remaining_bytes" in stats_payload["users"][0]
+        assert "quota_unlimited" in stats_payload["users"][0]
 
         deleted = client.delete(
             f"/api/v1/admin/users/{created_user['id']}",

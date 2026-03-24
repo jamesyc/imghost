@@ -125,6 +125,21 @@ class AccountService:
                 total += media.thumb_size or 0
         return total
 
+    def _quota_metrics(self, used_bytes: int, quota_bytes: int | None) -> dict[str, object]:
+        if quota_bytes is None:
+            return {
+                "quota_unlimited": True,
+                "quota_percent": None,
+                "quota_remaining_bytes": None,
+            }
+        remaining = max(quota_bytes - used_bytes, 0)
+        quota_percent = (used_bytes / quota_bytes * 100) if quota_bytes > 0 else 100.0
+        return {
+            "quota_unlimited": False,
+            "quota_percent": quota_percent,
+            "quota_remaining_bytes": remaining,
+        }
+
     async def get_current_user_summary(self, user: User) -> dict[str, object]:
         items = await self.repository.list_user_media(user.id)
         albums = await self.repository.list_user_albums(user.id)
@@ -202,23 +217,28 @@ class AccountService:
                 usage_by_user[media.user_id] += media.thumb_size or 0
             count_by_user[media.user_id] = count_by_user.get(media.user_id, 0) + 1
 
-        return [
-            {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "is_admin": user.is_admin,
-                "suspended": user.suspended,
-                "quota_bytes": user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes,
-                "rate_limit_rpm": user.rate_limit_rpm,
-                "rate_limit_bph": user.rate_limit_bph,
-                "album_count": album_count_by_user.get(user.id, 0),
-                "storage_used_bytes": usage_by_user.get(user.id, 0),
-                "media_count": count_by_user.get(user.id, 0),
-                "created_at": user.created_at.isoformat(),
-            }
-            for user in users
-        ]
+        items: list[dict[str, object]] = []
+        for user in users:
+            effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+            storage_used_bytes = usage_by_user.get(user.id, 0)
+            items.append(
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                    "is_admin": user.is_admin,
+                    "suspended": user.suspended,
+                    "quota_bytes": effective_quota,
+                    "rate_limit_rpm": user.rate_limit_rpm,
+                    "rate_limit_bph": user.rate_limit_bph,
+                    "album_count": album_count_by_user.get(user.id, 0),
+                    "storage_used_bytes": storage_used_bytes,
+                    "media_count": count_by_user.get(user.id, 0),
+                    "created_at": user.created_at.isoformat(),
+                    **self._quota_metrics(storage_used_bytes, effective_quota),
+                }
+            )
+        return items
 
     async def list_users_with_usage_page(
         self,
@@ -240,6 +260,8 @@ class AccountService:
         items = []
         for user in users:
             summary = summaries.get(user.id, {})
+            effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+            storage_used_bytes = summary.get("storage_used_bytes", 0)
             items.append(
                 {
                     "id": user.id,
@@ -247,13 +269,14 @@ class AccountService:
                     "email": user.email,
                     "is_admin": user.is_admin,
                     "suspended": user.suspended,
-                    "quota_bytes": user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes,
+                    "quota_bytes": effective_quota,
                     "rate_limit_rpm": user.rate_limit_rpm,
                     "rate_limit_bph": user.rate_limit_bph,
                     "album_count": summary.get("album_count", 0),
-                    "storage_used_bytes": summary.get("storage_used_bytes", 0),
+                    "storage_used_bytes": storage_used_bytes,
                     "media_count": summary.get("media_count", 0),
                     "created_at": user.created_at.isoformat(),
+                    **self._quota_metrics(storage_used_bytes, effective_quota),
                 }
             )
         return {
@@ -272,6 +295,7 @@ class AccountService:
         media_items = await self.repository.list_user_media(user.id)
         albums = await self.repository.list_user_albums(user.id)
         effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        storage_used_bytes = self._storage_bytes_for_media(media_items)
         return {
             "id": user.id,
             "username": user.username,
@@ -282,9 +306,10 @@ class AccountService:
             "rate_limit_rpm": user.rate_limit_rpm,
             "rate_limit_bph": user.rate_limit_bph,
             "album_count": len(albums),
-            "storage_used_bytes": self._storage_bytes_for_media(media_items),
+            "storage_used_bytes": storage_used_bytes,
             "media_count": len(media_items),
             "created_at": user.created_at.isoformat(),
+            **self._quota_metrics(storage_used_bytes, effective_quota),
         }
 
     async def get_user_storage_stats_for_admin(self, user_id: str) -> dict[str, object]:
@@ -295,13 +320,15 @@ class AccountService:
         media_items = await self.repository.list_user_media(user.id)
         albums = await self.repository.list_user_albums(user.id)
         effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        storage_used_bytes = self._storage_bytes_for_media(media_items)
         return {
             "user_id": user.id,
             "username": user.username,
             "quota_bytes": effective_quota,
-            "storage_used_bytes": self._storage_bytes_for_media(media_items),
+            "storage_used_bytes": storage_used_bytes,
             "album_count": len(albums),
             "media_count": len(media_items),
+            **self._quota_metrics(storage_used_bytes, effective_quota),
         }
 
     async def create_user(
@@ -479,12 +506,18 @@ class AccountService:
         all_media = await self.repository.list_all_media()
         total_storage = self._storage_bytes_for_media(all_media)
         anonymous_storage = self._storage_bytes_for_media([item for item in all_media if item.user_id is None])
+        users = await self.list_users_with_usage()
+        users.sort(key=lambda user: int(user["storage_used_bytes"]), reverse=True)
+        quota_metrics = self._quota_metrics(total_storage, self.settings.server_quota_bytes)
         return {
             "server_quota_bytes": self.settings.server_quota_bytes,
             "total_storage_used_bytes": total_storage,
             "anonymous_storage_used_bytes": anonymous_storage,
             "user_count": len(await self.repository.list_users()),
-            "users": await self.list_users_with_usage(),
+            "users": users,
+            "server_quota_unlimited": quota_metrics["quota_unlimited"],
+            "server_quota_percent": quota_metrics["quota_percent"],
+            "server_quota_remaining_bytes": quota_metrics["quota_remaining_bytes"],
         }
 
     async def delete_user_account(self, user: User, correlation_id: str) -> dict[str, int]:

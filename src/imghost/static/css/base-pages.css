@@ -169,6 +169,10 @@
   background: rgba(255, 255, 255, 0.16);
 }
 
+.admin-storage-breakdown-card {
+  gap: 12px;
+}
+
 .admin-runtime-card h3 {
   min-height: 2.2em;
   margin: 0;
@@ -198,6 +202,41 @@
   gap: 4px;
   justify-items: end;
   text-align: right;
+}
+
+.admin-storage-table {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-storage-table-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.7fr) minmax(0, 0.8fr);
+  align-items: start;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.admin-storage-table-header {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.admin-storage-table-row .usage-meter {
+  margin-top: 8px;
+}
+
+.admin-user-storage-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.admin-user-storage-grid .eyebrow {
+  margin-bottom: 4px;
 }
 
 .admin-status-pill {

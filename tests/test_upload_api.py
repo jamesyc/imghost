@@ -593,8 +593,12 @@ def test_album_payload_and_page_show_video_compatibility_warning(tmp_path, monke
         assert album_response.status_code == 200
         item = album_response.json()["items"][0]
         assert item["codec_hint"] == "hevc"
+        assert item["compat_warning_key"] == "hevc"
+        assert item["client_compat_check"] == "hevc"
         assert "HEVC encoding" in item["compat_warning"]
 
         page_response = client.get(f"/a/{payload['album_id']}")
         assert page_response.status_code == 200
         assert "HEVC encoding" in page_response.text
+        assert 'data-client-compat-warning' in page_response.text
+        assert 'data-warning-key="hevc"' in page_response.text

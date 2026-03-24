@@ -14,6 +14,20 @@ if (adminUsersRoot) {
     total: 0,
   };
 
+  const formatPercent = (value) => {
+    if (value == null || !Number.isFinite(Number(value))) {
+      return "No limit";
+    }
+    return `${Math.round(Number(value))}%`;
+  };
+
+  const usageWidth = (value) => {
+    if (value == null || !Number.isFinite(Number(value))) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, Number(value)));
+  };
+
   const buildParams = () => {
     const params = new URLSearchParams();
     if (state.q) params.set("q", state.q);
@@ -33,7 +47,29 @@ if (adminUsersRoot) {
           <div class="admin-record-header">
             <div>
               <h3><a href="/admin/users/${user.id}">${window.escapeAdminHtml(user.username)}</a>${user.is_admin ? " (admin)" : ""}</h3>
-              <p class="hint">${window.escapeAdminHtml(user.email)} · suspended=${user.suspended} · storage=${user.storage_used_bytes} · media=${user.media_count}</p>
+              <p class="hint">${window.escapeAdminHtml(user.email)} · suspended=${user.suspended}</p>
+              <div class="admin-user-storage-grid">
+                <div>
+                  <p class="eyebrow">Usage</p>
+                  <strong>${window.adminFormatBytes(user.storage_used_bytes)}</strong>
+                </div>
+                <div>
+                  <p class="eyebrow">Quota</p>
+                  <strong>${user.quota_unlimited ? "No limit" : window.adminFormatBytes(user.quota_bytes)}</strong>
+                </div>
+                <div>
+                  <p class="eyebrow">Quota %</p>
+                  <strong>${formatPercent(user.quota_percent)}</strong>
+                </div>
+                <div>
+                  <p class="eyebrow">Counts</p>
+                  <strong>${window.adminFormatNumber(user.media_count)} files</strong>
+                  <p class="hint">${window.adminFormatNumber(user.album_count)} albums</p>
+                </div>
+              </div>
+              <div class="usage-meter" aria-hidden="true">
+                <span class="usage-meter-bar" style="width: ${usageWidth(user.quota_percent)}%;"></span>
+              </div>
             </div>
             <div class="row row-actions">
               <a class="button-link secondary-link" href="/admin/users/${user.id}">Open</a>
