@@ -24,6 +24,7 @@ class AppState:
     def __init__(self, settings: Settings, *, run_task_worker: bool | None = None) -> None:
         self.settings = settings
         self.run_task_worker = settings.task_worker_enabled if run_task_worker is None else run_task_worker
+        self.task_worker_queues = settings.task_worker_queues if self.run_task_worker else ()
         self.database = Database(settings.database_url)
         self.event_bus = EventBus()
         self.repository = PostgresRepository(self.database)
@@ -78,6 +79,7 @@ class AppState:
                 self.telemetry,
                 worker_count=self.settings.thumbnail_worker_count,
                 run_worker=self.run_task_worker,
+                worker_queues=self.task_worker_queues,
             )
         return AsyncTaskQueue(context, worker_count=self.settings.thumbnail_worker_count, telemetry=self.telemetry)
 
@@ -98,6 +100,7 @@ class AppState:
                 "task_queue_mode": self.settings.task_queue_mode,
                 "task_worker_enabled": self.settings.task_worker_enabled,
                 "run_task_worker": self.run_task_worker,
+                "task_worker_queues": list(self.task_worker_queues),
                 "thumbnail_worker_count": self.settings.thumbnail_worker_count,
                 "session_redis_fail_closed": self.settings.session_redis_fail_closed,
                 "recovered_thumbnail_count": recovered,
@@ -107,6 +110,7 @@ class AppState:
             await self.telemetry.record_worker_started_event(
                 metadata={
                     "task_queue_mode": self.settings.task_queue_mode,
+                    "task_worker_queues": list(self.task_worker_queues),
                     "thumbnail_worker_count": self.settings.thumbnail_worker_count,
                     "recovered_thumbnail_count": recovered,
                 },
@@ -118,6 +122,7 @@ class AppState:
             await self.telemetry.record_worker_stopped_event(
                 metadata={
                     "task_queue_mode": self.settings.task_queue_mode,
+                    "task_worker_queues": list(self.task_worker_queues),
                     "thumbnail_worker_count": self.settings.thumbnail_worker_count,
                 },
             )
@@ -125,6 +130,7 @@ class AppState:
             metadata={
                 "task_queue_mode": self.settings.task_queue_mode,
                 "run_task_worker": self.run_task_worker,
+                "task_worker_queues": list(self.task_worker_queues),
                 "last_worker_started_at": self.telemetry.last_worker_started_at,
                 "last_worker_stopped_at": self.telemetry.last_worker_stopped_at,
             },
@@ -214,6 +220,7 @@ class AppState:
             },
             "worker": {
                 "enabled_in_this_process": self.run_task_worker,
+                "queues": list(self.task_worker_queues),
                 "last_started_at": self.telemetry.last_worker_started_at,
                 "last_stopped_at": self.telemetry.last_worker_stopped_at,
                 "last_task_failure_at": self.telemetry.last_task_failure_at,

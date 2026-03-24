@@ -18,6 +18,20 @@ logger = logging.getLogger(__name__)
 KNOWN_QUEUES = ("default", "thumbnails")
 
 
+def normalize_task_queues(queues: tuple[str, ...] | list[str] | None) -> tuple[str, ...] | None:
+    if queues is None:
+        return None
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_queue in queues:
+        queue = str(raw_queue).strip().lower()
+        if not queue or queue in seen:
+            continue
+        seen.add(queue)
+        normalized.append(queue)
+    return tuple(normalized)
+
+
 @dataclass(slots=True)
 class TaskContext:
     repository: PostgresRepository
@@ -136,17 +150,21 @@ class RedisTaskQueue(TaskQueue):
         *,
         worker_count: int = 1,
         run_worker: bool = True,
+        worker_queues: tuple[str, ...] | list[str] | None = None,
     ) -> None:
         self.redis = redis
         self.context = context
         self.telemetry = telemetry
         self.worker_count = max(1, worker_count)
         self.run_worker = run_worker
+        self.worker_queues = normalize_task_queues(worker_queues)
         self._handlers: dict[str, TaskHandler] = {}
         self._fallback = AsyncTaskQueue(context, worker_count=worker_count, telemetry=telemetry)
         self._workers: list[asyncio.Task[None]] = []
         self._active_jobs = 0
         self._known_queues = set(KNOWN_QUEUES)
+        if self.worker_queues is not None:
+            self._known_queues.update(self.worker_queues)
 
     def register(self, task_name: str, handler: TaskHandler) -> None:
         self._handlers[task_name] = handler
@@ -155,6 +173,8 @@ class RedisTaskQueue(TaskQueue):
     async def start(self) -> None:
         await self._fallback.start()
         if not self.run_worker or self._workers:
+            return
+        if not self._dequeue_queue_names():
             return
         self.telemetry.mark_worker_started()
         self._workers = [asyncio.create_task(self._run_worker(index)) for index in range(self.worker_count)]
@@ -203,21 +223,24 @@ class RedisTaskQueue(TaskQueue):
         try:
             lengths = await self.redis.execute(
                 "check queue lengths",
-                lambda client: self._read_queue_lengths(client),
+                lambda client: self._read_queue_lengths(client, queue_names=self._join_queue_names()),
             )
         except RedisUnavailable:
             return True
         return all(length == 0 for length in lengths)
 
-    async def _read_queue_lengths(self, client: object) -> list[int]:
+    async def _read_queue_lengths(self, client: object, *, queue_names: tuple[str, ...]) -> list[int]:
         lengths: list[int] = []
-        for queue in self._known_queues:
+        for queue in queue_names:
             lengths.append(int(await client.llen(self.redis.prefixed(f"queue:{queue}"))))
         return lengths
 
     async def _run_worker(self, worker_index: int) -> None:
-        queue_keys = [self.redis.prefixed(f"queue:{queue}") for queue in sorted(self._known_queues)]
         while True:
+            queue_keys = [self.redis.prefixed(f"queue:{queue}") for queue in self._dequeue_queue_names()]
+            if not queue_keys:
+                await asyncio.sleep(0.25)
+                continue
             try:
                 item = await self.redis.execute(
                     "dequeue task",
@@ -266,6 +289,7 @@ class RedisTaskQueue(TaskQueue):
             "queue_backend": "redis",
             "worker_count": self.worker_count,
             "worker_enabled": self.run_worker,
+            "worker_queues": list(self._dequeue_queue_names()),
             "active_workers": len(self._workers),
             "active_jobs": self._active_jobs,
             "queue_depth": sum(queues.values()),
@@ -290,6 +314,16 @@ class RedisTaskQueue(TaskQueue):
 
     async def _read_named_queue_lengths(self, client: object) -> dict[str, int]:
         lengths: dict[str, int] = {}
-        for queue in self._known_queues:
+        for queue in sorted(self._known_queues):
             lengths[queue] = int(await client.llen(self.redis.prefixed(f"queue:{queue}")))
         return lengths
+
+    def _dequeue_queue_names(self) -> tuple[str, ...]:
+        if self.worker_queues is None:
+            return tuple(sorted(self._known_queues))
+        return self.worker_queues
+
+    def _join_queue_names(self) -> tuple[str, ...]:
+        if self.worker_queues is None:
+            return tuple(sorted(self._known_queues))
+        return tuple(queue for queue in self.worker_queues if queue in self._known_queues)

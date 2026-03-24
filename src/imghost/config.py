@@ -40,6 +40,7 @@ class Settings:
     task_queue_mode: str
     task_worker_enabled: bool
     thumbnail_worker_count: int
+    task_worker_queues: tuple[str, ...] = ("default", "thumbnails")
     promote_username_to_admin: str | None = None
     google_oauth_enabled: bool = False
     google_client_id: str | None = None
@@ -62,6 +63,18 @@ def _env_csv(name: str) -> tuple[str, ...]:
     raw = os.getenv(name, "")
     values = [item.strip() for item in raw.split(",")]
     return tuple(item for item in values if item)
+
+
+def _dedupe_strings(values: tuple[str, ...]) -> tuple[str, ...]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return tuple(deduped)
 
 
 def _resolve_redis_url(raw_url: str | None, raw_password: str | None) -> str | None:
@@ -139,6 +152,7 @@ def load_settings() -> Settings:
         video_thumb_frames=max(1, int(os.getenv("VIDEO_THUMB_FRAMES", "10"))),
         task_queue_mode=os.getenv("TASK_QUEUE_MODE", "async").strip().lower(),
         task_worker_enabled=_env_bool("TASK_WORKER_ENABLED") if _env_bool("TASK_WORKER_ENABLED") is not None else True,
+        task_worker_queues=_dedupe_strings(_env_csv("TASK_WORKER_QUEUES")) or ("default", "thumbnails"),
         thumbnail_worker_count=max(1, int(os.getenv("THUMBNAIL_WORKER_COUNT", "1"))),
         google_oauth_enabled=google_oauth_enabled,
         google_client_id=google_client_id,

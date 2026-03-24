@@ -63,6 +63,24 @@ def test_load_settings_parses_session_redis_fail_closed(monkeypatch, tmp_path) -
     assert settings.session_redis_fail_closed is True
 
 
+def test_load_settings_defaults_task_worker_queues(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.delenv("TASK_WORKER_QUEUES", raising=False)
+
+    settings = load_settings()
+    assert settings.task_worker_queues == ("default", "thumbnails")
+
+
+def test_load_settings_parses_task_worker_queues(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
+    monkeypatch.setenv("TASK_WORKER_QUEUES", " thumbnails,cleanup,thumbnails ,,default ")
+
+    settings = load_settings()
+    assert settings.task_worker_queues == ("thumbnails", "cleanup", "default")
+
+
 def test_runtime_config_allow_registration_defaults_from_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://fallback.example.com")

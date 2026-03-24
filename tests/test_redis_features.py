@@ -440,6 +440,36 @@ def test_redis_task_queue_processes_jobs_with_worker_enabled() -> None:
     assert calls == ["ok"]
 
 
+def test_redis_task_queue_worker_only_consumes_selected_queues() -> None:
+    fake = FakeRedis()
+    settings = make_settings(redis_url="redis://fake")
+    handle = RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0)
+    queue = RedisTaskQueue(
+        handle,
+        TaskContext(None, None, None),
+        make_telemetry(),
+        worker_count=1,
+        run_worker=True,
+        worker_queues=("thumbnails",),
+    )  # type: ignore[arg-type]
+    calls: list[str] = []
+    queue.register("demo", lambda value: _record_call(calls, value))
+
+    async def scenario() -> None:
+        await queue.start()
+        await queue.enqueue("demo", queue="default", value="ignored")
+        await queue.enqueue("demo", queue="thumbnails", value="processed")
+        await queue.join()
+        await queue.stop()
+
+    asyncio.run(scenario())
+
+    assert calls == ["processed"]
+    assert fake.lists[handle.prefixed("queue:default")] == [
+        '{"task_name":"demo","kwargs":{"value":"ignored"}}'
+    ]
+
+
 def test_redis_task_queue_falls_back_to_local_async_queue_when_redis_is_down() -> None:
     fake = FakeRedis()
     fake.fail = True
@@ -494,6 +524,33 @@ def test_redis_task_queue_marks_tasks_subsystem_degraded_and_then_recovers() -> 
         await queue.stop()
 
     asyncio.run(scenario())
+
+
+def test_redis_task_queue_runtime_status_reports_selected_worker_queues() -> None:
+    fake = FakeRedis()
+    settings = make_settings(redis_url="redis://fake")
+    handle = RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0)
+    queue = RedisTaskQueue(
+        handle,
+        TaskContext(None, None, None),
+        make_telemetry(),
+        worker_count=2,
+        run_worker=True,
+        worker_queues=("cleanup", "thumbnails"),
+    )  # type: ignore[arg-type]
+
+    async def scenario() -> dict[str, object]:
+        await queue.start()
+        try:
+            return await queue.runtime_status()
+        finally:
+            await queue.stop()
+
+    status = asyncio.run(scenario())
+
+    assert status["worker_queues"] == ["cleanup", "thumbnails"]
+    assert status["worker_count"] == 2
+    assert status["queues"] == {"cleanup": 0, "default": 0, "thumbnails": 0}
 
 
 def test_app_session_auth_gracefully_falls_back_when_redis_is_down(tmp_path, monkeypatch) -> None:
