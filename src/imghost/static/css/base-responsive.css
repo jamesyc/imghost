@@ -84,8 +84,23 @@
     grid-template-columns: 1fr;
   }
 
+  .admin-album-card {
+    grid-template-columns: minmax(0, 1fr) 172px;
+  }
+
   .dashboard-recent-album-thumb {
     min-height: 180px;
+  }
+
+  .admin-album-card .dashboard-recent-album-thumb {
+    width: 172px;
+    height: 100%;
+    min-height: 100%;
+  }
+
+  .admin-album-card .dashboard-recent-album-thumb img {
+    height: 100%;
+    min-height: 100%;
   }
 
   .hero-notes {

@@ -560,13 +560,44 @@ body.upload-modal-open {
 }
 
 .dashboard-recent-album-card {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) 160px;
-  align-items: center;
+  gap: 18px;
+  align-items: start;
   cursor: pointer;
+}
+
+.admin-album-card {
+  grid-template-columns: minmax(0, 1fr) 208px;
+  gap: 20px;
+  align-items: stretch;
 }
 
 .dashboard-recent-album-copy > div:first-child {
   padding-left: 18px;
+}
+
+.admin-album-card .dashboard-recent-album-copy,
+.admin-album-card .admin-album-patch-form {
+  min-width: 0;
+}
+
+.admin-album-card .admin-album-patch-form input[type="datetime-local"] {
+  width: min(100%, 18rem);
+}
+
+.admin-album-card .dashboard-recent-album-thumb {
+  width: 208px;
+  height: 100%;
+  min-height: 100%;
+  justify-self: end;
+  align-self: stretch;
+}
+
+.admin-album-card .dashboard-recent-album-thumb img {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
 }
 
 .dashboard-recent-album-card:focus-visible {

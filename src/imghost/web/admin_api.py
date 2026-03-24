@@ -158,6 +158,7 @@ async def admin_list_albums(
     admin = await require_admin_user(request)
     validate_pagination(limit, offset)
     payload = await state.uploads.list_albums_for_admin_page(
+        base_url=public_base_url(request, state.settings),
         q=(q or "").strip() or None,
         owner=(owner or "").strip() or None,
         anonymous=anonymous,

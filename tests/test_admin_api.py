@@ -766,6 +766,8 @@ def test_admin_album_management_lists_sets_expiry_and_deletes(tmp_path, monkeypa
         assert album["owner_username"] == "jules"
         assert album["user_id"] == user_id
         assert album["item_count"] == 1
+        assert album["cover_url"].endswith(f"/i/{payload['media_id']}.png")
+        assert f"/t/{payload['media_id']}." in album["items"][0]["thumb_url"]
 
         expiry = utcnow().replace(microsecond=0).isoformat()
         patched = client.patch(

@@ -951,6 +951,7 @@ class UploadService:
     async def list_albums_for_admin_page(
         self,
         *,
+        base_url: str,
         q: str | None = None,
         owner: str | None = None,
         anonymous: bool | None = None,
@@ -969,19 +970,11 @@ class UploadService:
         for album in albums:
             media_items = await self.repository.list_album_media(album.id)
             owner_user = users.get(album.user_id) if album.user_id else None
-            items.append(
-                {
-                    "id": album.id,
-                    "title": album.title,
-                    "user_id": album.user_id,
-                    "owner_username": owner_user.username if owner_user else None,
-                    "item_count": len(media_items),
-                    "total_size": self._storage_bytes_for_media(media_items),
-                    "created_at": album.created_at.isoformat(),
-                    "updated_at": album.updated_at.isoformat(),
-                    "expires_at": album.expires_at.isoformat() if album.expires_at else None,
-                }
-            )
+            album_payload = album_to_payload(base_url, album, media_items)
+            album_payload["user_id"] = album.user_id
+            album_payload["owner_username"] = owner_user.username if owner_user else None
+            album_payload["total_size"] = self._storage_bytes_for_media(media_items)
+            items.append(album_payload)
         return {
             "items": items,
             "total": total,

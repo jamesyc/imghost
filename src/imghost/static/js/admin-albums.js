@@ -14,6 +14,35 @@ if (adminAlbumsRoot) {
     total: 0,
   };
 
+  const publicAlbumUrl = (albumId) => `/a/${encodeURIComponent(albumId)}`;
+  const adminUserUrl = (userId) => `/admin/users/${encodeURIComponent(userId)}`;
+  const previewItem = (album) => {
+    if (!Array.isArray(album.items) || !album.items.length) {
+      return null;
+    }
+    if (album.cover_media_id) {
+      const coverItem = album.items.find((item) => item.id === album.cover_media_id);
+      if (coverItem) {
+        return coverItem;
+      }
+    }
+    return album.items[0];
+  };
+
+  const renderThumb = (album) => {
+    const item = previewItem(album);
+    if (!item) {
+      return '<span class="dashboard-recent-album-thumb-placeholder">No media</span>';
+    }
+    if (item.thumb_status === "failed") {
+      return '<span class="dashboard-recent-album-thumb-placeholder">Thumbnail failed</span>';
+    }
+    if (item.thumb_status === "pending" || item.thumb_status === "processing") {
+      return '<span class="dashboard-recent-album-thumb-placeholder">Thumbnail pending</span>';
+    }
+    return `<img src="${window.escapeAdminHtml(item.thumb_url)}" alt="${window.escapeAdminHtml(album.title || "Untitled album")}">`;
+  };
+
   const buildParams = () => {
     const params = new URLSearchParams();
     if (state.q) params.set("q", state.q);
@@ -30,21 +59,32 @@ if (adminAlbumsRoot) {
     adminAlbumsRoot.innerHTML = albums
       .map(
         (album) => `
-        <section class="admin-card" data-album-id="${album.id}">
-          <div class="admin-record-header">
+        <section class="admin-card admin-album-card dashboard-recent-album-card" data-album-id="${album.id}">
+          <div class="dashboard-recent-album-copy">
             <div>
               <h3>${window.escapeAdminHtml(album.title || "Untitled album")}</h3>
               <p class="hint">album=${album.id} · owner=${window.escapeAdminHtml(album.owner_username || "anonymous")} · items=${album.item_count}</p>
             </div>
-          </div>
-          <form class="admin-album-patch-form stack">
-            <input type="datetime-local" name="expires_at" value="${album.expires_at ? album.expires_at.slice(0, 16) : ""}">
             <div class="row row-actions">
-              <button type="submit">Set/Clear Expiry</button>
-              <button type="button" class="danger admin-album-delete">Delete Album</button>
+              <a class="button-link secondary-link" href="${publicAlbumUrl(album.id)}" target="_blank" rel="noreferrer">Open Album</a>
+              ${
+                album.user_id
+                  ? `<a class="button-link secondary-link" href="${adminUserUrl(album.user_id)}">Open Owner</a>`
+                  : ""
+              }
             </div>
-          </form>
-          <p class="inline-status hidden admin-item-status" aria-live="polite"></p>
+            <form class="admin-album-patch-form stack">
+              <input type="datetime-local" name="expires_at" value="${album.expires_at ? album.expires_at.slice(0, 16) : ""}">
+              <div class="row row-actions">
+                <button type="submit">Set/Clear Expiry</button>
+                <button type="button" class="danger admin-album-delete">Delete Album</button>
+              </div>
+            </form>
+            <p class="inline-status hidden admin-item-status" aria-live="polite"></p>
+          </div>
+          <a class="dashboard-recent-album-thumb" href="${publicAlbumUrl(album.id)}" target="_blank" rel="noreferrer" aria-label="Open album ${window.escapeAdminHtml(album.title || album.id)}">
+            ${renderThumb(album)}
+          </a>
         </section>
       `,
       )
