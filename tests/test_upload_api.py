@@ -9,7 +9,7 @@ from pillow_heif import register_heif_opener
 from imghost.main import app
 from imghost.processors import MediaMetadata, SanitizedFile, ValidationResult, VideoProcessingError
 
-from .helpers import PNG_1X1, create_user_and_api_key, wait_for_thumbnail
+from .helpers import PNG_1X1, create_admin_and_api_key, create_user_and_api_key, wait_for_thumbnail
 
 register_heif_opener(thumbnails=False)
 
@@ -146,6 +146,74 @@ def test_multi_file_upload_reuses_album_and_delete_removes_media(tmp_path, monke
         for item in payload["items"]:
             media_id = item["media_id"]
             assert client.get(f"/i/{media_id}.png").status_code == 404
+
+
+def test_upload_limit_respects_runtime_config_updates(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="limitadmin", email="limitadmin@example.com")
+
+    with TestClient(app) as client:
+        updated = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"max_upload_bytes": 8},
+        )
+        assert updated.status_code == 200
+
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 413
+        assert response.json()["detail"] == "Upload exceeds V1 size limit."
+
+
+def test_server_storage_quota_respects_runtime_config_updates(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="serverquotaadmin", email="serverquotaadmin@example.com")
+
+    with TestClient(app) as client:
+        updated = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"server_quota_bytes": 1},
+        )
+        assert updated.status_code == 200
+
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 507
+        assert response.json()["detail"] == "Server storage quota reached."
+
+
+def test_default_user_storage_quota_respects_runtime_config_updates(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="defaultquotaadmin", email="defaultquotaadmin@example.com")
+    _, user_key = create_user_and_api_key(capsys, username="defaultquotauser", email="defaultquotauser@example.com")
+
+    with TestClient(app) as client:
+        updated = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"default_user_quota_bytes": 1},
+        )
+        assert updated.status_code == 200
+
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {user_key}"},
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert response.status_code == 413
+        assert response.json()["detail"] == "User storage quota reached."
 
 
 def test_anonymous_manage_token_can_append_and_edit_album(tmp_path, monkeypatch) -> None:

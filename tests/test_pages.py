@@ -111,6 +111,25 @@ def test_home_page_reflects_runtime_config_disabled_states(tmp_path, monkeypatch
         assert 'id="upload-form"' not in response.text
 
 
+def test_home_page_uses_runtime_configured_upload_limit(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="uploadlimitadmin", email="uploadlimitadmin@example.com")
+
+    with TestClient(app) as client:
+        updated = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"max_upload_bytes": 8},
+        )
+        assert updated.status_code == 200
+
+        response = client.get("/")
+        assert response.status_code == 200
+        assert 'data-max-upload-bytes="8"' in response.text
+
+
 def test_home_page_shows_session_state_when_logged_in(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

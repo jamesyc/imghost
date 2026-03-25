@@ -69,6 +69,10 @@ class AdminConfigPatchRequest(BaseModel):
     allow_registration: bool | None = None
     anon_upload_enabled: bool | None = None
     anon_expiry_hours: int | None = None
+    max_upload_bytes: int | None = None
+    video_thumb_frames: int | None = None
+    default_user_quota_bytes: int | None = None
+    server_quota_bytes: int | None = None
     rate_limit_anon_rpm: int | None = None
     rate_limit_anon_bph: int | None = None
     rate_limit_global_anon_rpm: int | None = None
@@ -290,7 +294,9 @@ async def admin_create_user(request: Request, payload: AdminUserCreateRequest) -
             "email": created.email,
             "is_admin": created.is_admin,
             "suspended": created.suspended,
-            "quota_bytes": created.quota_bytes if created.quota_bytes is not None else state.settings.default_user_quota_bytes,
+            "quota_bytes": created.quota_bytes
+            if created.quota_bytes is not None
+            else int(await state.runtime_config.get_value("default_user_quota_bytes")),
             "rate_limit_rpm": created.rate_limit_rpm,
             "rate_limit_bph": created.rate_limit_bph,
         },
@@ -328,7 +334,9 @@ async def admin_patch_user(request: Request, user_id: str, payload: AdminUserPat
             "email": updated.email,
             "is_admin": updated.is_admin,
             "suspended": updated.suspended,
-            "quota_bytes": updated.quota_bytes if updated.quota_bytes is not None else state.settings.default_user_quota_bytes,
+            "quota_bytes": updated.quota_bytes
+            if updated.quota_bytes is not None
+            else int(await state.runtime_config.get_value("default_user_quota_bytes")),
             "rate_limit_rpm": updated.rate_limit_rpm,
             "rate_limit_bph": updated.rate_limit_bph,
         },

@@ -51,7 +51,7 @@ async def runtime_flags(request: Request) -> PageRuntimeFlags:
         allow_registration=bool(await state.runtime_config.get_value("allow_registration")),
         anon_upload_enabled=bool(await state.runtime_config.get_value("anon_upload_enabled")),
         anon_expiry_hours=int(await state.runtime_config.get_value("anon_expiry_hours")),
-        max_upload_bytes=state.settings.max_upload_bytes,
+        max_upload_bytes=int(await state.runtime_config.get_value("max_upload_bytes")),
         google_oauth_enabled=bool(state.oauth_providers.get("google")),
     )
 

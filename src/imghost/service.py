@@ -106,7 +106,7 @@ class UploadService:
         self.runtime_config = runtime_config
         self.rate_limiter = rate_limiter
         self.telemetry = telemetry
-        self.accounts = AccountService(settings, repository, storage, event_bus)
+        self.accounts = AccountService(settings, repository, storage, event_bus, runtime_config)
 
     def _require_password_value(self, password: str, *, label: str) -> str:
         return self.accounts._require_password_value(password, label=label)
@@ -211,12 +211,13 @@ class UploadService:
     async def _read_bounded_upload(self, file: UploadFile) -> bytes:
         chunks: list[bytes] = []
         total = 0
+        max_upload_bytes = int(await self.runtime_config.get_value("max_upload_bytes"))
         while True:
             chunk = await file.read(1024 * 1024)
             if not chunk:
                 break
             total += len(chunk)
-            if total > self.settings.max_upload_bytes:
+            if total > max_upload_bytes:
                 raise HTTPException(status_code=413, detail="Upload exceeds V1 size limit.")
             chunks.append(chunk)
         return b"".join(chunks)
@@ -360,6 +361,8 @@ class UploadService:
             processor = self.processors.get_processor(media.format)
             if processor is None:
                 raise ValueError("processor_missing")
+            if hasattr(processor, "thumb_frames"):
+                processor.thumb_frames = max(1, int(await self.runtime_config.get_value("video_thumb_frames")))
             payload = await self.storage.get_bytes(media.storage_key)
             metadata = await processor.extract_metadata(payload, media.format)
             thumbnail = await processor.generate_thumbnail(payload, metadata)
@@ -1107,14 +1110,16 @@ class UploadService:
     async def _enforce_storage_quotas(self, user: User | None, *, incoming_bytes: int) -> None:
         all_media = await self.repository.list_all_media()
         total_storage = self._storage_bytes_for_media(all_media)
-        if self.settings.server_quota_bytes > 0 and total_storage + incoming_bytes > self.settings.server_quota_bytes:
+        server_quota_bytes = int(await self.runtime_config.get_value("server_quota_bytes"))
+        if server_quota_bytes > 0 and total_storage + incoming_bytes > server_quota_bytes:
             raise HTTPException(status_code=507, detail="Server storage quota reached.")
         if user is None:
             return
 
         user_media = [media for media in all_media if media.user_id == user.id]
         user_storage = self._storage_bytes_for_media(user_media)
-        effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        default_user_quota_bytes = int(await self.runtime_config.get_value("default_user_quota_bytes"))
+        effective_quota = user.quota_bytes if user.quota_bytes is not None else default_user_quota_bytes
         if effective_quota > 0 and user_storage + incoming_bytes > effective_quota:
             raise HTTPException(status_code=413, detail="User storage quota reached.")
 

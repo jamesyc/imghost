@@ -9,7 +9,12 @@ if (adminConfigForm && adminConfigJson) {
     {
       title: "Access",
       copy: "Control whether people can sign up and whether anonymous uploads stay enabled.",
-      keys: ["allow_registration", "anon_upload_enabled", "anon_expiry_hours"],
+      keys: ["allow_registration", "anon_upload_enabled", "anon_expiry_hours", "max_upload_bytes", "video_thumb_frames"],
+    },
+    {
+      title: "Storage",
+      copy: "Adjust default per-user quota and the whole-server storage ceiling.",
+      keys: ["default_user_quota_bytes", "server_quota_bytes"],
     },
     {
       title: "Anonymous limits",
@@ -27,6 +32,10 @@ if (adminConfigForm && adminConfigJson) {
     allow_registration: "Allow registration",
     anon_upload_enabled: "Allow anonymous uploads",
     anon_expiry_hours: "Anonymous upload expiry hours",
+    max_upload_bytes: "Max upload bytes per file",
+    video_thumb_frames: "Video thumbnail frames",
+    default_user_quota_bytes: "Default user quota bytes",
+    server_quota_bytes: "Server quota bytes",
     rate_limit_anon_rpm: "Anonymous requests per minute",
     rate_limit_anon_bph: "Anonymous bytes per hour",
     rate_limit_global_anon_rpm: "Global anonymous requests per minute",
@@ -39,6 +48,10 @@ if (adminConfigForm && adminConfigJson) {
     allow_registration: "Lets new people create accounts from the public site.",
     anon_upload_enabled: "Keeps upload access available before someone signs in.",
     anon_expiry_hours: "How long anonymous uploads stay online before expiry.",
+    max_upload_bytes: "Per-file upload limit enforced for both anonymous and signed-in uploads.",
+    video_thumb_frames: "How many frames animated video thumbnails sample before the preview loops.",
+    default_user_quota_bytes: "Default storage quota applied when a user does not have an explicit override.",
+    server_quota_bytes: "Whole-server storage ceiling. Set to 0 for unlimited.",
     rate_limit_anon_rpm: "Per-client request rate limit for anonymous uploads.",
     rate_limit_anon_bph: "Per-client upload bandwidth budget for anonymous uploads.",
     rate_limit_global_anon_rpm: "Whole-site request cap for all anonymous upload traffic combined.",
@@ -51,7 +64,9 @@ if (adminConfigForm && adminConfigJson) {
     if (typeof entry.value === "boolean") {
       return entry.value ? "Enabled" : "Disabled";
     }
-    return entry.key.includes("_bph") ? window.adminFormatBytes(entry.value) : window.adminFormatNumber(entry.value);
+    return entry.key.includes("_bph") || entry.key.includes("_bytes")
+      ? window.adminFormatBytes(entry.value)
+      : window.adminFormatNumber(entry.value);
   };
 
   const renderField = (entry) => {

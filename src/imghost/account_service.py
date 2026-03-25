@@ -24,6 +24,7 @@ from .events import (
 from .models import ApiKey, Media, User, utcnow
 from .oauth import OAuthIdentity
 from .repositories import PostgresRepository
+from .runtime_config import PostgresRuntimeConfig
 from .storage import StorageBackend
 
 UNSET = object()
@@ -83,11 +84,13 @@ class AccountService:
         repository: PostgresRepository,
         storage: StorageBackend,
         event_bus: EventBus,
+        runtime_config: PostgresRuntimeConfig,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.storage = storage
         self.event_bus = event_bus
+        self.runtime_config = runtime_config
 
     def _provider_label(self, provider: str) -> str:
         normalized = provider.strip().lower()
@@ -140,13 +143,20 @@ class AccountService:
             "quota_remaining_bytes": remaining,
         }
 
+    async def _default_user_quota_bytes(self) -> int:
+        return int(await self.runtime_config.get_value("default_user_quota_bytes"))
+
+    async def _server_quota_bytes(self) -> int:
+        return int(await self.runtime_config.get_value("server_quota_bytes"))
+
     async def get_current_user_summary(self, user: User) -> dict[str, object]:
         items = await self.repository.list_user_media(user.id)
         albums = await self.repository.list_user_albums(user.id)
         usage = self._storage_bytes_for_media(items)
         api_key = await self.repository.get_api_key_for_user(user.id)
         sso_links = await self.repository.list_user_sso_links(user.id)
-        effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        default_user_quota_bytes = await self._default_user_quota_bytes()
+        effective_quota = user.quota_bytes if user.quota_bytes is not None else default_user_quota_bytes
         return {
             "id": user.id,
             "username": user.username,
@@ -219,7 +229,7 @@ class AccountService:
 
         items: list[dict[str, object]] = []
         for user in users:
-            effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+            effective_quota = user.quota_bytes if user.quota_bytes is not None else await self._default_user_quota_bytes()
             storage_used_bytes = usage_by_user.get(user.id, 0)
             items.append(
                 {
@@ -260,7 +270,7 @@ class AccountService:
         items = []
         for user in users:
             summary = summaries.get(user.id, {})
-            effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+            effective_quota = user.quota_bytes if user.quota_bytes is not None else await self._default_user_quota_bytes()
             storage_used_bytes = summary.get("storage_used_bytes", 0)
             items.append(
                 {
@@ -294,7 +304,7 @@ class AccountService:
 
         media_items = await self.repository.list_user_media(user.id)
         albums = await self.repository.list_user_albums(user.id)
-        effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        effective_quota = user.quota_bytes if user.quota_bytes is not None else await self._default_user_quota_bytes()
         storage_used_bytes = self._storage_bytes_for_media(media_items)
         return {
             "id": user.id,
@@ -319,7 +329,7 @@ class AccountService:
 
         media_items = await self.repository.list_user_media(user.id)
         albums = await self.repository.list_user_albums(user.id)
-        effective_quota = user.quota_bytes if user.quota_bytes is not None else self.settings.default_user_quota_bytes
+        effective_quota = user.quota_bytes if user.quota_bytes is not None else await self._default_user_quota_bytes()
         storage_used_bytes = self._storage_bytes_for_media(media_items)
         return {
             "user_id": user.id,
@@ -508,9 +518,10 @@ class AccountService:
         anonymous_storage = self._storage_bytes_for_media([item for item in all_media if item.user_id is None])
         users = await self.list_users_with_usage()
         users.sort(key=lambda user: int(user["storage_used_bytes"]), reverse=True)
-        quota_metrics = self._quota_metrics(total_storage, self.settings.server_quota_bytes)
+        server_quota_bytes = await self._server_quota_bytes()
+        quota_metrics = self._quota_metrics(total_storage, server_quota_bytes)
         return {
-            "server_quota_bytes": self.settings.server_quota_bytes,
+            "server_quota_bytes": server_quota_bytes,
             "total_storage_used_bytes": total_storage,
             "anonymous_storage_used_bytes": anonymous_storage,
             "user_count": len(await self.repository.list_users()),

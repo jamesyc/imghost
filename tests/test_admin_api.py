@@ -1257,6 +1257,10 @@ def test_admin_config_can_be_read_updated_and_audited(tmp_path, monkeypatch, cap
         assert initial_payload["allow_registration"]["value"] is True
         assert initial_payload["anon_upload_enabled"]["value"] is True
         assert initial_payload["anon_expiry_hours"]["value"] == 24
+        assert initial_payload["max_upload_bytes"]["value"] == 50 * 1024 * 1024
+        assert initial_payload["video_thumb_frames"]["value"] == 15
+        assert initial_payload["default_user_quota_bytes"]["value"] == 2 * 1024 * 1024 * 1024
+        assert initial_payload["server_quota_bytes"]["value"] == 0
 
         updated = client.patch(
             "/api/v1/admin/config",
@@ -1265,6 +1269,10 @@ def test_admin_config_can_be_read_updated_and_audited(tmp_path, monkeypatch, cap
                 "allow_registration": False,
                 "anon_upload_enabled": False,
                 "anon_expiry_hours": 72,
+                "max_upload_bytes": 8,
+                "video_thumb_frames": 17,
+                "default_user_quota_bytes": 4096,
+                "server_quota_bytes": 8192,
                 "rate_limit_user_rpm": 99,
             },
         )
@@ -1274,6 +1282,10 @@ def test_admin_config_can_be_read_updated_and_audited(tmp_path, monkeypatch, cap
         assert updated_payload["allow_registration"]["source"] == "runtime"
         assert updated_payload["anon_upload_enabled"]["value"] is False
         assert updated_payload["anon_expiry_hours"]["value"] == 72
+        assert updated_payload["max_upload_bytes"]["value"] == 8
+        assert updated_payload["video_thumb_frames"]["value"] == 17
+        assert updated_payload["default_user_quota_bytes"]["value"] == 4096
+        assert updated_payload["server_quota_bytes"]["value"] == 8192
         assert updated_payload["rate_limit_user_rpm"]["value"] == 99
 
         audit = client.get(
@@ -1284,4 +1296,13 @@ def test_admin_config_can_be_read_updated_and_audited(tmp_path, monkeypatch, cap
         assert audit.status_code == 200
         audit_payload = audit.json()
         changed_keys = {item["metadata"]["key"] for item in audit_payload}
-        assert {"allow_registration", "anon_upload_enabled", "anon_expiry_hours", "rate_limit_user_rpm"} <= changed_keys
+        assert {
+            "allow_registration",
+            "anon_upload_enabled",
+            "anon_expiry_hours",
+            "max_upload_bytes",
+            "video_thumb_frames",
+            "default_user_quota_bytes",
+            "server_quota_bytes",
+            "rate_limit_user_rpm",
+        } <= changed_keys

@@ -158,6 +158,22 @@ class DummyProcessors:
         return self.processor
 
 
+class DummyRuntimeConfig:
+    def __init__(self, values: dict[str, int | bool] | None = None) -> None:
+        self.values: dict[str, int | bool] = {
+            "max_upload_bytes": 50 * 1024 * 1024,
+            "anon_expiry_hours": 24,
+            "video_thumb_frames": 10,
+            "default_user_quota_bytes": 2 * 1024 * 1024 * 1024,
+            "server_quota_bytes": 0,
+        }
+        if values:
+            self.values.update(values)
+
+    async def get_value(self, key: str) -> int | bool:
+        return self.values[key]
+
+
 class DummyProcessor:
     def __init__(self) -> None:
         self.metadata = MediaMetadata(
@@ -235,10 +251,17 @@ class RecordingTelemetry:
         )
 
 
-def make_service(user: User | None = None, *, storage=None, processors=None) -> tuple[UploadService, DummyRepository, DummyEventBus, RecordingTelemetry]:
+def make_service(
+    user: User | None = None,
+    *,
+    storage=None,
+    processors=None,
+    runtime_values: dict[str, int | bool] | None = None,
+) -> tuple[UploadService, DummyRepository, DummyEventBus, RecordingTelemetry]:
     repository = DummyRepository(user)
     event_bus = DummyEventBus()
     telemetry = RecordingTelemetry()
+    runtime_config = DummyRuntimeConfig(runtime_values)
     settings = Settings(
         base_url="http://testserver",
         public_origin_enabled=True,
@@ -278,7 +301,7 @@ def make_service(user: User | None = None, *, storage=None, processors=None) -> 
         storage=storage,  # type: ignore[arg-type]
         event_bus=event_bus,  # type: ignore[arg-type]
         processors=processors,  # type: ignore[arg-type]
-        runtime_config=None,  # type: ignore[arg-type]
+        runtime_config=runtime_config,  # type: ignore[arg-type]
         rate_limiter=None,  # type: ignore[arg-type]
         telemetry=telemetry,
     )
@@ -802,6 +825,24 @@ def test_generate_thumbnail_records_thumbnail_generation_failure_and_clears_fiel
     assert repository.media.thumb_is_orig is False
     assert telemetry.last_task_failure is not None
     assert telemetry.last_task_failure["reason"] == "thumbnail_generate_failed"
+
+
+def test_generate_thumbnail_uses_runtime_configured_video_thumb_frames() -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    processor = DummyProcessor()
+    processor.thumb_frames = 1  # type: ignore[attr-defined]
+    service, repository, _, _ = make_service(
+        storage=storage,
+        processors=DummyProcessors(processor),
+        runtime_values={"video_thumb_frames": 17},
+    )
+    repository.media = make_media()
+
+    asyncio.run(service.generate_thumbnail("media-1", "thumb-runtime-frames"))
+
+    assert processor.thumb_frames == 17  # type: ignore[attr-defined]
+    assert repository.media is not None
+    assert repository.media.thumb_status == "done"
 
 
 def test_generate_thumbnail_cleans_up_written_thumbnail_on_repository_update_failure() -> None:
