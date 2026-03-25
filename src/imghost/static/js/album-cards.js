@@ -42,9 +42,52 @@ const albumCardThumbMarkup = (album) => {
     return '<span class="dashboard-recent-album-thumb-placeholder">Thumbnail failed</span>';
   }
   if (previewItem.thumb_status === "pending" || previewItem.thumb_status === "processing") {
-    return '<span class="dashboard-recent-album-thumb-placeholder">Thumbnail pending</span>';
+    return `
+      <span
+        class="dashboard-recent-album-thumb-placeholder"
+        data-album-card-thumb-status="${albumCardEscapeHtml(previewItem.thumb_status)}"
+        data-album-card-thumb-src="${albumCardEscapeHtml(previewItem.thumb_url || "")}"
+        data-album-card-thumb-alt="${albumCardEscapeHtml(album.title || "Untitled album")}"
+      >Thumbnail pending</span>
+    `;
   }
   return `<img src="${albumCardEscapeHtml(previewItem.thumb_url)}" alt="${albumCardEscapeHtml(album.title || "Untitled album")}">`;
+};
+
+const pollAlbumCardThumb = (placeholder) => {
+  const thumbSrc = placeholder.dataset.albumCardThumbSrc;
+  if (!thumbSrc || placeholder.dataset.albumCardThumbPolling === "true") {
+    return;
+  }
+  placeholder.dataset.albumCardThumbPolling = "true";
+
+  const poll = async () => {
+    if (!placeholder.isConnected) {
+      return;
+    }
+    try {
+      const response = await fetch(thumbSrc, { method: "GET", cache: "no-store" });
+      if (response.status === 200) {
+        const image = document.createElement("img");
+        image.src = thumbSrc;
+        image.alt = placeholder.dataset.albumCardThumbAlt || "Untitled album";
+        placeholder.replaceWith(image);
+        return;
+      }
+      if (response.status === 202) {
+        window.setTimeout(poll, 1000);
+        return;
+      }
+      placeholder.textContent = "Thumbnail failed";
+      delete placeholder.dataset.albumCardThumbSrc;
+      delete placeholder.dataset.albumCardThumbPolling;
+      return;
+    } catch {
+      window.setTimeout(poll, 1500);
+    }
+  };
+
+  poll();
 };
 
 const albumCardPublicLinkControl = (album) => {
@@ -148,6 +191,15 @@ window.attachAlbumCardNavigation = (root) => {
       event.preventDefault();
       window.location.assign(card.dataset.albumOpenUrl);
     }
+  });
+};
+
+window.attachAlbumCardThumbPolling = (root) => {
+  if (!root) {
+    return;
+  }
+  root.querySelectorAll("[data-album-card-thumb-status]").forEach((placeholder) => {
+    pollAlbumCardThumb(placeholder);
   });
 };
 

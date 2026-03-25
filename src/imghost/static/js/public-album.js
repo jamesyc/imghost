@@ -94,39 +94,6 @@ const openPublicAlbumLightbox = ({ mediaUrl, mediaType, filename, previewElement
   document.body.classList.add("lightbox-open");
 };
 
-const pollThumb = (button) => {
-  const thumbSrc = button.dataset.thumbSrc;
-  const placeholder = button.querySelector("[data-thumb-status]");
-  if (!thumbSrc || !placeholder) {
-    return;
-  }
-  const poll = async () => {
-    try {
-      const response = await fetch(thumbSrc, { method: "GET", cache: "no-store" });
-      if (response.status === 200) {
-        const image = document.createElement("img");
-        image.src = thumbSrc;
-        image.alt = button.dataset.filename || "Album media";
-        placeholder.replaceWith(image);
-        return;
-      }
-      if (response.status === 202) {
-        window.setTimeout(poll, 1000);
-        return;
-      }
-      placeholder.textContent = "Thumbnail failed";
-      placeholder.removeAttribute("data-thumb-status");
-    } catch {
-      window.setTimeout(poll, 1500);
-    }
-  };
-  poll();
-};
-
-publicAlbumRoot?.querySelectorAll(".public-album-preview[data-thumb-status]").forEach((button) => {
-  pollThumb(button);
-});
-
 publicAlbumRoot?.addEventListener("click", (event) => {
   const previewButton = event.target.closest(".public-album-preview");
   if (!previewButton) {

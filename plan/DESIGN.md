@@ -416,7 +416,7 @@ Constraints:
 | BMP | BMP | |
 | AVIF | AVIF | pyvips + libavif required in Docker image |
 | SVG | SVG | Sanitized before storage (strip scripts, external references) |
-| TIFF | ❌ | Rejected — security surface area |
+| TIFF | JPEG | Accepted, then browser-normalized to a safe JPEG output |
 | Other | ❌ | Client-side JS modal: "This file type is not supported." |
 
 ### Accepted Video Formats
@@ -788,6 +788,12 @@ The upload-size policy should stay deliberately simple unless separate image/vid
 - **Storage usage:** Used / quota displayed as a progress bar with byte values
 - **Delete account:** Confirmation flow requiring the current password for accounts with a local password; SSO-only accounts must complete a fresh provider re-auth, which returns a short-lived deletion token consumed by the delete request
 
+### Public User Pages
+
+- Public user album listing pages are supported for users who have public albums
+- Public user album cards use album-cover thumbnails when available
+- If a cover thumbnail is still being generated, the page shows a compact pending placeholder instead of blocking the page on thumbnail readiness
+
 ### Account Deletion
 
 - Deletes user row, all album rows, all media rows
@@ -834,6 +840,12 @@ The upload-size policy should stay deliberately simple unless separate image/vid
 - Configure `anon_expiry_hours` (grayed out + padlock icon if env-locked)
 - Configure rate limits (grayed out + padlock icon if env-locked)
 - All runtime config values displayed; locked values show tooltip: *"Locked by environment config."*
+
+### Operations / Runtime
+
+- Admin ops pages expose runtime and deployment diagnostics for operators
+- The runtime status surface includes process role, Redis subsystem state, task queue status, worker/scheduler status, and network/public-origin trust diagnostics
+- This operational detail belongs in admin/internal tooling, not in anonymous public health endpoints
 
 ### Audit Log
 
@@ -936,7 +948,7 @@ When ShareX config is downloaded from a browser session, the server must auto-is
 }
 ```
 
-ShareX sends a `GET` request to `DeletionURL`, so `delete_url` points to a dedicated `GET /api/v1/album/{albumId}/delete` endpoint that requires the same API key auth and deletes the album. This is separate from `DELETE /api/v1/album/{albumId}` (which uses the `DELETE` method for browser/programmatic clients).
+ShareX sends a `GET` request to `DeletionURL`, so `delete_url` points to a dedicated `GET /api/v1/album/{albumId}/delete` endpoint. Instead of reusing API key auth on that GET request, imghost signs a deletion token into the URL query string and validates that token server-side before deleting the album. This keeps ShareX compatibility while avoiding a raw API key in the delete URL. It remains separate from `DELETE /api/v1/album/{albumId}` (which is used by browser/programmatic clients).
 
 ### Upload Behavior via API Key
 
@@ -985,7 +997,7 @@ POST /api/v1/upload
 
 ```
 GET    /api/v1/album/{albumId}            album metadata + ordered item list
-GET    /api/v1/album/{albumId}/delete     delete album via GET (ShareX DeletionURL — requires API key auth)
+GET    /api/v1/album/{albumId}/delete     delete album via GET (ShareX DeletionURL — signed query token)
 DELETE /api/v1/album/{albumId}            delete album (owner or admin)
 PATCH  /api/v1/album/{albumId}            edit title, cover_media_id
 GET    /api/v1/album/{albumId}/zip        stream ZIP download (public — no auth required)
@@ -2117,7 +2129,6 @@ Two endpoints, distinct purposes. Never conflate them — they serve different o
   - high-level degraded state
   - compact per-subsystem summary when needed for operators
 - Public health responses do **not** expose detailed dependency latencies, error strings, or internal topology.
-- Detailed per-check status, latency, and skip reasons belong in authenticated admin or internal diagnostics, not anonymous public health endpoints.
 - Internal diagnostics are provided through the existing admin operations surface and runtime status endpoint, which expose operational state for Redis subsystems, task queues, worker/scheduler state, and network-trust configuration without turning the public health endpoints into a reconnaissance surface.
 - Redis failure does **not** fail readiness if `REDIS_URL` is unset (Redis-free mode)
 - Used by: Load balancer health checks, Kubernetes `readinessProbe`. When readiness fails, the load balancer stops routing traffic to this instance but doesn't kill it. When the dependency recovers, readiness passes again and traffic resumes.

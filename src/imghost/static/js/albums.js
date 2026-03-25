@@ -44,6 +44,7 @@ const refreshAlbums = async () => {
     `,
     actionsClass: "album-card-actions-stack",
   })).join("") : "";
+  window.attachAlbumCardThumbPolling?.(albumsRoot);
   emptyState?.classList.toggle("hidden", albums.length > 0);
   const start = payload.total === 0 ? 0 : payload.offset + 1;
   const end = payload.offset + albums.length;

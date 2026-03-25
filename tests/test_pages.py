@@ -769,9 +769,29 @@ def test_public_album_script_checks_video_compatibility_client_side() -> None:
     assert "inlineVideo.pause();" in script
     assert "activeInlineVideoState.video.play().catch(() => {});" in script
     assert 'event.key !== "Enter" && event.key !== " "' in script
+    assert "pollThumb" not in script
+    assert "data-thumb-status" not in script
     assert "data-client-compat-warning" in Path(
         "/home/james/imghost/src/imghost/templates/pages/public-album.html"
     ).read_text(encoding="utf-8")
+
+
+def test_album_cards_script_polls_pending_thumbnail_placeholders() -> None:
+    script = Path("/home/james/imghost/src/imghost/static/js/album-cards.js").read_text(encoding="utf-8")
+
+    assert "data-album-card-thumb-status" in script
+    assert "data-album-card-thumb-src" in script
+    assert 'fetch(thumbSrc, { method: "GET", cache: "no-store" })' in script
+    assert 'response.status === 202' in script
+    assert "window.attachAlbumCardThumbPolling" in script
+
+
+def test_dashboard_and_albums_scripts_attach_album_card_thumb_polling_after_render() -> None:
+    dashboard_script = Path("/home/james/imghost/src/imghost/static/js/dashboard.js").read_text(encoding="utf-8")
+    albums_script = Path("/home/james/imghost/src/imghost/static/js/albums.js").read_text(encoding="utf-8")
+
+    assert "window.attachAlbumCardThumbPolling?.(recentAlbumsRoot);" in dashboard_script
+    assert "window.attachAlbumCardThumbPolling?.(albumsRoot);" in albums_script
 
 
 def test_upload_box_script_rejects_unsupported_files_before_upload() -> None:
