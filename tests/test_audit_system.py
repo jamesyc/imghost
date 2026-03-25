@@ -147,6 +147,37 @@ def test_cli_create_user_and_issue_api_key_are_audited(tmp_path, monkeypatch, ca
         assert "api_key" not in issue_key_event["metadata"]
 
 
+def test_cli_promote_user_is_audited(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    admin_id, admin_key = create_admin_and_api_key(capsys, username="clipromoteadmin", email="clipromoteadmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="clipromotetarget", email="clipromotetarget@example.com")
+    from imghost.__main__ import main as cli_main
+
+    assert cli_main(["promote-user", "--user-id", user_id]) == 0
+    capsys.readouterr()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "cli_command_executed", "user_id": user_id},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        promote_event = next(item for item in payload if item["metadata"]["command"] == "promote-user")
+        assert promote_event["target_id"] == user_id
+        assert promote_event["metadata"]["already_admin"] is False
+
+        status = client.get(
+            f"/api/v1/admin/users/{user_id}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        assert status.status_code == 200
+        assert status.json()["is_admin"] is True
+
+
 def test_invalid_api_key_is_audited_with_request_context(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

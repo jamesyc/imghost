@@ -710,6 +710,45 @@ def test_update_user_skips_admin_and_limits_events_when_values_do_not_change() -
     assert not any(isinstance(event, UserLimitsChanged) for event in event_bus.events)
 
 
+def test_set_user_admin_status_emits_event_with_requested_source() -> None:
+    user = make_user(password_hash=bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8"))
+    service, repository, event_bus, _ = make_service(user)
+
+    updated = asyncio.run(
+        service.set_user_admin_status(
+            user.id,
+            is_admin=True,
+            correlation_id="cli-promote",
+            source="cli",
+        )
+    )
+
+    assert updated.is_admin is True
+    assert repository.updated_user is not None
+    admin_event = next(event for event in event_bus.events if isinstance(event, UserAdminStatusChanged))
+    assert admin_event.source == "cli"
+    assert admin_event.new_is_admin is True
+
+
+def test_set_user_admin_status_is_idempotent_when_already_matching() -> None:
+    user = make_user(password_hash=bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8"))
+    user.is_admin = True
+    service, repository, event_bus, _ = make_service(user)
+
+    updated = asyncio.run(
+        service.set_user_admin_status(
+            user.id,
+            is_admin=True,
+            correlation_id="cli-promote",
+            source="cli",
+        )
+    )
+
+    assert updated.is_admin is True
+    assert repository.updated_user is None
+    assert not any(isinstance(event, UserAdminStatusChanged) for event in event_bus.events)
+
+
 def test_require_album_access_allows_owner_admin_or_valid_token() -> None:
     service, _, _, _ = make_service()
     owner = make_user(password_hash=bcrypt.hashpw(b"x", bcrypt.gensalt()).decode("utf-8"))

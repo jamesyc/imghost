@@ -1,10 +1,11 @@
 from io import BytesIO
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
 from imghost.account_delete_reauth import AccountDeleteReauthPayload, AccountDeleteReauthTokenManager
 from imghost.main import app
-from imghost.models import UserSsoLink, utcnow
+from imghost.models import User, UserSsoLink, utcnow
 
 from .helpers import (
     PNG_1X1,
@@ -780,9 +781,25 @@ def test_delete_current_user_rejects_password_confirmation_when_account_has_no_p
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
 
-    _, api_key = create_user_and_api_key(capsys, username="nopassworddelete", email="nopassworddelete@example.com")
-
     with TestClient(app) as client:
+        now = utcnow()
+        user = User(
+            id=str(uuid4()),
+            username="nopassworddelete",
+            email="nopassworddelete@example.com",
+            password_hash=None,
+            is_admin=False,
+            suspended=False,
+            quota_bytes=None,
+            rate_limit_rpm=None,
+            rate_limit_bph=None,
+            created_at=now,
+            updated_at=now,
+        )
+        client.portal.call(client.app.state.imghost.repository.create_user, user)
+        issued = client.portal.call(client.app.state.imghost.uploads.issue_api_key, user)
+        api_key = issued.raw_key
+
         response = client.request(
             "DELETE",
             "/api/v1/user/me",

@@ -7,8 +7,8 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from .app_state import AppState
+from .account_service import UserCreateInput
 from .config import load_settings
-from .models import User, utcnow
 
 WORKER_COMMAND_QUEUES: dict[str, tuple[str, ...] | None] = {
     "retry-thumbnails": ("thumbnails",),
@@ -38,8 +38,16 @@ def build_parser() -> argparse.ArgumentParser:
     create_user = subparsers.add_parser("create-user")
     create_user.add_argument("--username", required=True)
     create_user.add_argument("--email", required=True)
+    create_user_password = create_user.add_mutually_exclusive_group(required=True)
+    create_user_password.add_argument("--password")
+    create_user_password.add_argument("--password-stdin", action="store_true")
     create_user.add_argument("--admin", action="store_true")
     create_user.add_argument("--quota-bytes", type=int, default=None)
+
+    promote_user = subparsers.add_parser("promote-user")
+    promote_user_target = promote_user.add_mutually_exclusive_group(required=True)
+    promote_user_target.add_argument("--user-id")
+    promote_user_target.add_argument("--username")
 
     issue_key = subparsers.add_parser("issue-api-key")
     issue_key.add_argument("--user-id", required=True)
@@ -70,6 +78,7 @@ def _requires_cli_confirmation(command: str, *, dry_run: bool = False) -> bool:
         return False
     return command in {
         "create-user",
+        "promote-user",
         "issue-api-key",
         "prune",
         "init-storage",
@@ -126,6 +135,12 @@ def _confirm_risky_cli_target(
         print("Aborted.")
         return False
     return True
+
+
+def _resolve_cli_password(args: argparse.Namespace) -> str:
+    if getattr(args, "password_stdin", False):
+        return sys.stdin.read().rstrip("\r\n")
+    return args.password
 
 
 async def run_cli(argv: list[str] | None = None) -> int:
@@ -249,20 +264,18 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 await state.stop()
 
         if args.command == "create-user":
-            user = User(
-                id=str(uuid4()),
-                username=args.username,
-                email=args.email,
-                password_hash=None,
-                is_admin=args.admin,
-                suspended=False,
-                quota_bytes=args.quota_bytes,
-                rate_limit_rpm=None,
-                rate_limit_bph=None,
-                created_at=utcnow(),
-                updated_at=utcnow(),
+            user = await state.uploads.create_user(
+                UserCreateInput(
+                    username=args.username,
+                    email=args.email,
+                    password=_resolve_cli_password(args),
+                    is_admin=args.admin,
+                    quota_bytes=args.quota_bytes,
+                ),
+                method="cli",
+                correlation_id=command_correlation_id,
+                source="cli",
             )
-            await state.repository.create_user(user)
             await state.telemetry.record_cli_command(
                 action="cli.create_user",
                 object_type="user",
@@ -278,6 +291,41 @@ async def run_cli(argv: list[str] | None = None) -> int:
                 argv=command_argv,
             )
             print(f"created user: {user.id}")
+            return 0
+
+        if args.command == "promote-user":
+            user = await (
+                state.repository.get_user(args.user_id)
+                if args.user_id
+                else state.repository.get_user_by_username(args.username)
+            )
+            if user is None:
+                print("user not found")
+                return 1
+            already_admin = user.is_admin
+            promoted = await state.uploads.set_user_admin_status(
+                user.id,
+                is_admin=True,
+                correlation_id=command_correlation_id,
+                source="cli",
+            )
+            await state.telemetry.record_cli_command(
+                action="cli.promote_user",
+                object_type="user",
+                object_id=promoted.id,
+                metadata={
+                    "command": "promote-user",
+                    "user_id": promoted.id,
+                    "username": promoted.username,
+                    "already_admin": already_admin,
+                    "correlation_id": command_correlation_id,
+                },
+                argv=command_argv,
+            )
+            if already_admin:
+                print(f"user already admin: {promoted.id}")
+            else:
+                print(f"promoted user to admin: {promoted.id}")
             return 0
 
         if args.command == "issue-api-key":

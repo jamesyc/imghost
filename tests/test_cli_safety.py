@@ -3,6 +3,7 @@ from __future__ import annotations
 from imghost.__main__ import (
     _confirm_risky_cli_target,
     _process_role_for_command,
+    _resolve_cli_password,
     _requires_cli_confirmation,
     _runs_worker_for_command,
     _worker_queues_for_command,
@@ -47,6 +48,8 @@ def test_worker_parser_accepts_split_worker_commands() -> None:
     assert parser.parse_args(["run-worker-cleanup"]).command == "run-worker-cleanup"
     assert parser.parse_args(["run-worker-default"]).command == "run-worker-default"
     assert parser.parse_args(["run-scheduler"]).command == "run-scheduler"
+    assert parser.parse_args(["create-user", "--username", "alice", "--email", "alice@example.com", "--password", "secret-pass"]).password == "secret-pass"
+    assert parser.parse_args(["promote-user", "--user-id", "user-1"]).command == "promote-user"
 
 
 def test_worker_command_queue_selection_uses_split_commands_and_default_config() -> None:
@@ -70,6 +73,7 @@ def test_worker_command_detection_and_confirmation_cover_split_commands() -> Non
     assert _requires_cli_confirmation("run-worker-cleanup") is True
     assert _requires_cli_confirmation("run-worker-default") is True
     assert _requires_cli_confirmation("run-scheduler") is True
+    assert _requires_cli_confirmation("promote-user") is True
 
 
 def test_process_role_selection_matches_command_type() -> None:
@@ -120,3 +124,13 @@ def test_cli_confirmation_rejects_interactive_non_yes(capsys) -> None:
 
     assert allowed is False
     assert "Aborted." in capsys.readouterr().out
+
+
+def test_resolve_cli_password_prefers_explicit_flag() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        ["create-user", "--username", "alice", "--email", "alice@example.com", "--password", "secret-pass"]
+    )
+
+    assert _resolve_cli_password(args) == "secret-pass"

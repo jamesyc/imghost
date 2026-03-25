@@ -453,6 +453,37 @@ class AccountService:
         await self.repository.update_user(user)
         return user
 
+    async def set_user_admin_status(
+        self,
+        user_id: str,
+        *,
+        is_admin: bool,
+        correlation_id: str,
+        actor_id: str | None = None,
+        source: str = "api",
+    ) -> User:
+        user = await self.repository.get_user(user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if user.is_admin == is_admin:
+            return user
+
+        old_is_admin = user.is_admin
+        user.is_admin = is_admin
+        user.updated_at = utcnow()
+        await self.repository.update_user(user)
+        await self.event_bus.emit(
+            UserAdminStatusChanged(
+                user_id=user.id,
+                actor_id=actor_id,
+                old_is_admin=old_is_admin,
+                new_is_admin=is_admin,
+                source=source,
+                correlation_id=correlation_id,
+            )
+        )
+        return user
+
     async def reset_user_password(self, user_id: str, new_password: str, correlation_id: str, *, actor_id: str | None = None) -> User:
         user = await self.repository.get_user(user_id)
         if user is None:

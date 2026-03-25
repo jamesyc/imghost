@@ -919,6 +919,23 @@ class UploadService:
     async def update_user(self, user_id: str, payload: UserUpdateInput, correlation_id: str, *, actor_id: str | None = None) -> User:
         return await self.accounts.update_user(user_id, payload, correlation_id, actor_id=actor_id)
 
+    async def set_user_admin_status(
+        self,
+        user_id: str,
+        *,
+        is_admin: bool,
+        correlation_id: str,
+        actor_id: str | None = None,
+        source: str = "api",
+    ) -> User:
+        return await self.accounts.set_user_admin_status(
+            user_id,
+            is_admin=is_admin,
+            correlation_id=correlation_id,
+            actor_id=actor_id,
+            source=source,
+        )
+
     async def reset_user_password(self, user_id: str, new_password: str, correlation_id: str, *, actor_id: str | None = None) -> User:
         return await self.accounts.reset_user_password(user_id, new_password, correlation_id, actor_id=actor_id)
 
