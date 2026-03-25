@@ -22,6 +22,12 @@ class _RecordingService:
     async def emit_event(self, **kwargs) -> None:
         return None
 
+    async def count_audit_events_older_than(self, before):
+        return 0
+
+    async def delete_audit_events_older_than(self, before):
+        return 0
+
     async def query_audit_log(self, **kwargs):
         return []
 

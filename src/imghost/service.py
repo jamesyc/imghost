@@ -73,6 +73,7 @@ class PruneResult:
     album_ids: list[str]
     item_count: int
     bytes_freed: int
+    audit_event_count: int
 
 
 @dataclass
@@ -740,11 +741,20 @@ class UploadService:
                 )
             )
 
+        audit_event_count = 0
+        if self.telemetry is not None:
+            audit_before = utcnow() - timedelta(days=self.settings.audit_retention_days)
+            if dry_run:
+                audit_event_count = await self.telemetry.count_audit_events_older_than(audit_before)
+            else:
+                audit_event_count = await self.telemetry.delete_audit_events_older_than(audit_before)
+
         return PruneResult(
             dry_run=dry_run,
             album_ids=album_ids,
             item_count=item_count,
             bytes_freed=bytes_freed,
+            audit_event_count=audit_event_count,
         )
 
     def _archive_name(self, media: Media, index: int, seen_names: set[str]) -> str:

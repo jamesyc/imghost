@@ -301,6 +301,12 @@ class Telemetry:
             offset=offset,
         )
 
+    async def count_audit_events_older_than(self, before: datetime) -> int:
+        return await self._service.count_audit_events_older_than(before)
+
+    async def delete_audit_events_older_than(self, before: datetime) -> int:
+        return await self._service.delete_audit_events_older_than(before)
+
     def mark_subsystem_degraded(self, subsystem: str, *, operation: str, reason: str) -> None:
         self._state.mark_subsystem_degraded(subsystem, operation=operation, reason=reason)
         if self._metrics is not None:

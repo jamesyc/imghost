@@ -47,6 +47,7 @@ class Settings:
     scheduler_poll_seconds: int = 30
     scheduler_lease_seconds: int = 900
     cleanup_interval_seconds: int = 900
+    audit_retention_days: int = 90
     promote_username_to_admin: str | None = None
     google_oauth_enabled: bool = False
     google_client_id: str | None = None
@@ -166,6 +167,7 @@ def load_settings() -> Settings:
         scheduler_poll_seconds=max(1, int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))),
         scheduler_lease_seconds=max(1, int(os.getenv("SCHEDULER_LEASE_SECONDS", "900"))),
         cleanup_interval_seconds=max(1, int(os.getenv("CLEANUP_INTERVAL_SECONDS", "900"))),
+        audit_retention_days=max(1, int(os.getenv("AUDIT_RETENTION_DAYS", "90"))),
         google_oauth_enabled=google_oauth_enabled,
         google_client_id=google_client_id,
         google_client_secret=google_client_secret,

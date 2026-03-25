@@ -116,6 +116,7 @@ def test_load_settings_defaults_scheduler_settings(monkeypatch, tmp_path) -> Non
     monkeypatch.delenv("SCHEDULER_POLL_SECONDS", raising=False)
     monkeypatch.delenv("SCHEDULER_LEASE_SECONDS", raising=False)
     monkeypatch.delenv("CLEANUP_INTERVAL_SECONDS", raising=False)
+    monkeypatch.delenv("AUDIT_RETENTION_DAYS", raising=False)
 
     settings = load_settings()
     assert settings.scheduler_enabled is False
@@ -123,6 +124,7 @@ def test_load_settings_defaults_scheduler_settings(monkeypatch, tmp_path) -> Non
     assert settings.scheduler_poll_seconds == 30
     assert settings.scheduler_lease_seconds == 900
     assert settings.cleanup_interval_seconds == 900
+    assert settings.audit_retention_days == 90
 
 
 def test_load_settings_parses_scheduler_settings(monkeypatch, tmp_path) -> None:
@@ -133,6 +135,7 @@ def test_load_settings_parses_scheduler_settings(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("SCHEDULER_POLL_SECONDS", "15")
     monkeypatch.setenv("SCHEDULER_LEASE_SECONDS", "120")
     monkeypatch.setenv("CLEANUP_INTERVAL_SECONDS", "600")
+    monkeypatch.setenv("AUDIT_RETENTION_DAYS", "45")
 
     settings = load_settings()
     assert settings.scheduler_enabled is True
@@ -140,6 +143,7 @@ def test_load_settings_parses_scheduler_settings(monkeypatch, tmp_path) -> None:
     assert settings.scheduler_poll_seconds == 15
     assert settings.scheduler_lease_seconds == 120
     assert settings.cleanup_interval_seconds == 600
+    assert settings.audit_retention_days == 45
 
 
 def test_runtime_config_allow_registration_defaults_from_env(monkeypatch, tmp_path) -> None:

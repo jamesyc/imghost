@@ -154,3 +154,18 @@ class PostgresTelemetrySink:
             )
             for row in rows
         ]
+
+    async def count_audit_events_older_than(self, before: datetime) -> int:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            value = await conn.fetchval("SELECT COUNT(*) FROM audit_log WHERE created_at < $1", before)
+        return int(value or 0)
+
+    async def delete_audit_events_older_than(self, before: datetime) -> int:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            value = await conn.fetchval(
+                "WITH deleted AS (DELETE FROM audit_log WHERE created_at < $1 RETURNING 1) SELECT COUNT(*) FROM deleted",
+                before,
+            )
+        return int(value or 0)

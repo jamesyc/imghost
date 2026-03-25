@@ -16,9 +16,19 @@ class _RecordingService:
     def __init__(self) -> None:
         self.emitted: list[dict[str, object]] = []
         self.queries: list[dict[str, object]] = []
+        self.audit_counts: list[object] = []
+        self.audit_deletes: list[object] = []
 
     async def emit_event(self, **kwargs) -> None:
         self.emitted.append(kwargs)
+
+    async def count_audit_events_older_than(self, before):
+        self.audit_counts.append(before)
+        return 7
+
+    async def delete_audit_events_older_than(self, before):
+        self.audit_deletes.append(before)
+        return 5
 
     async def query_audit_log(self, **kwargs):
         self.queries.append(kwargs)
@@ -71,6 +81,24 @@ def test_telemetry_facade_delegates_emit_and_query() -> None:
             "offset": 0,
         }
     ]
+
+
+def test_telemetry_facade_delegates_audit_retention_helpers() -> None:
+    service = _RecordingService()
+    telemetry = Telemetry(service, TelemetryState())
+
+    async def run() -> None:
+        import datetime as dt
+
+        before = dt.datetime.now(dt.UTC)
+        counted = await telemetry.count_audit_events_older_than(before)
+        deleted = await telemetry.delete_audit_events_older_than(before)
+        assert counted == 7
+        assert deleted == 5
+        assert service.audit_counts == [before]
+        assert service.audit_deletes == [before]
+
+    asyncio.run(run())
 
 
 def test_telemetry_facade_delegates_state_helpers() -> None:

@@ -212,6 +212,12 @@ class DummyTelemetryService:
     async def emit_event(self, **kwargs) -> None:
         return None
 
+    async def count_audit_events_older_than(self, before):
+        return 0
+
+    async def delete_audit_events_older_than(self, before):
+        return 0
+
     async def query_audit_log(self, **kwargs):
         return []
 
@@ -221,6 +227,10 @@ class RecordingTelemetry:
         self.last_task_failure_at: float | None = None
         self.last_task_failure: dict[str, object] | None = None
         self.thumbnail_jobs: list[dict[str, object]] = []
+        self.audit_count_before = None
+        self.audit_delete_before = None
+        self.audit_count_result = 0
+        self.audit_delete_result = 0
 
     def record_thumbnail_failure(self, *, media: Media, correlation_id: str, reason: str, error: Exception) -> None:
         self.last_task_failure = {
@@ -249,6 +259,14 @@ class RecordingTelemetry:
                 "duration_seconds": duration_seconds,
             }
         )
+
+    async def count_audit_events_older_than(self, before) -> int:
+        self.audit_count_before = before
+        return self.audit_count_result
+
+    async def delete_audit_events_older_than(self, before) -> int:
+        self.audit_delete_before = before
+        return self.audit_delete_result
 
 
 def make_service(
@@ -294,6 +312,7 @@ def make_service(
         task_queue_mode="async",
         task_worker_enabled=True,
         thumbnail_worker_count=1,
+        app_scheduler_enabled=False,
     )
     service = UploadService(
         settings=settings,
@@ -348,6 +367,82 @@ def make_user(*, password_hash: str) -> User:
         created_at=now,
         updated_at=now,
     )
+
+
+def test_prune_expired_albums_dry_run_counts_stale_audit_events_without_deleting() -> None:
+    service, repository, _, telemetry = make_service()
+    expired_at = utcnow()
+    album = Album(
+        id="album-1",
+        title=None,
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=expired_at,
+        updated_at=expired_at,
+        expires_at=expired_at,
+    )
+    async def _list_expired_albums(now):
+        return [album]
+
+    media_items = [
+        Media(
+            id="media-1",
+            album_id="album-1",
+            user_id=None,
+            filename_orig="sample.png",
+            media_type="image",
+            format="png",
+            mime_type="image/png",
+            storage_key="originals/anon/media-1.png",
+            thumb_key="thumbnails/media-1.jpg",
+            thumb_is_orig=False,
+            thumb_status="done",
+            file_size=100,
+            thumb_size=20,
+            width=1,
+            height=1,
+            duration_secs=None,
+            is_animated=False,
+            codec_hint=None,
+            position=1000,
+            created_at=expired_at,
+        )
+    ]
+    async def _list_album_media(album_id):
+        return list(media_items) if album_id == "album-1" else []
+
+    repository.list_expired_albums = _list_expired_albums  # type: ignore[method-assign]
+    repository.list_album_media = _list_album_media  # type: ignore[method-assign]
+    telemetry.audit_count_result = 4
+
+    result = asyncio.run(service.prune_expired_albums(dry_run=True))
+
+    assert result.dry_run is True
+    assert result.album_ids == ["album-1"]
+    assert result.item_count == 1
+    assert result.bytes_freed == 120
+    assert result.audit_event_count == 4
+    assert telemetry.audit_count_before is not None
+    assert telemetry.audit_delete_before is None
+
+
+def test_prune_expired_albums_deletes_stale_audit_events_even_without_expired_albums() -> None:
+    service, repository, _, telemetry = make_service()
+    async def _list_expired_albums(now):
+        return []
+
+    repository.list_expired_albums = _list_expired_albums  # type: ignore[method-assign]
+    telemetry.audit_delete_result = 9
+
+    result = asyncio.run(service.prune_expired_albums(dry_run=False))
+
+    assert result.dry_run is False
+    assert result.album_ids == []
+    assert result.item_count == 0
+    assert result.bytes_freed == 0
+    assert result.audit_event_count == 9
+    assert telemetry.audit_delete_before is not None
 
 
 def test_hash_password_uses_bcrypt_and_is_not_deterministic() -> None:

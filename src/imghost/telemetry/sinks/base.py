@@ -12,6 +12,10 @@ class TelemetrySink(Protocol):
 
 
 class TelemetryQueryBackend(Protocol):
+    async def count_audit_events_older_than(self, before: datetime) -> int: ...
+
+    async def delete_audit_events_older_than(self, before: datetime) -> int: ...
+
     async def query_audit_log(
         self,
         *,

@@ -13,6 +13,7 @@ from imghost.telemetry.context import anonymous_actor
 from imghost.telemetry.models import TelemetryObject
 from imghost.telemetry.service import TelemetryService
 from imghost.telemetry.sinks.jsonlog import JsonLogTelemetrySink
+from imghost.telemetry.sinks.postgres import PostgresTelemetrySink
 from imghost.config import load_settings
 from imghost.main import app
 
@@ -37,9 +38,89 @@ class _QueryBackend:
         self.rows = rows
         self.calls = []
 
+    async def count_audit_events_older_than(self, before):
+        return 0
+
+    async def delete_audit_events_older_than(self, before):
+        return 0
+
     async def query_audit_log(self, **kwargs):
         self.calls.append(kwargs)
         return list(self.rows)
+
+
+def test_postgres_telemetry_sink_counts_and_deletes_old_audit_rows(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    create_admin_and_api_key(capsys, username="retentionadmin", email="retentionadmin@example.com")
+
+    async def run_retention() -> tuple[int, int, int]:
+        settings = load_settings()
+        state = AppState(settings, process_role="app")
+        await state.database.connect()
+        try:
+            sink = PostgresTelemetrySink(state.database)
+            pool = state.database.require_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO audit_log (
+                      id, event_type, action, result, source, actor_type, actor_id, actor_ip_hash, request_id, route, method, reason,
+                      target_type, target_id, correlation_id, metadata, created_at
+                    ) VALUES
+                    (
+                      '11111111-1111-1111-1111-111111111111'::uuid,
+                      'old_event',
+                      'old.action',
+                      'success',
+                      'system',
+                      'system',
+                      NULL,
+                      NULL,
+                      NULL,
+                      NULL,
+                      NULL,
+                      NULL,
+                      'audit',
+                      'old-1',
+                      'corr-old',
+                      '{}'::jsonb,
+                      now() - interval '100 days'
+                    ),
+                    (
+                      '22222222-2222-2222-2222-222222222222'::uuid,
+                      'new_event',
+                      'new.action',
+                      'success',
+                      'system',
+                      'system',
+                      NULL,
+                      NULL,
+                      NULL,
+                      NULL,
+                      NULL,
+                      NULL,
+                      'audit',
+                      'new-1',
+                      'corr-new',
+                      '{}'::jsonb,
+                      now() - interval '5 days'
+                    )
+                    """
+                )
+                cutoff = await conn.fetchval("SELECT now() - interval '90 days'")
+            counted = await sink.count_audit_events_older_than(cutoff)
+            deleted = await sink.delete_audit_events_older_than(cutoff)
+            remaining = await sink.count_audit_events_older_than(cutoff)
+            return counted, deleted, remaining
+        finally:
+            await state.database.close()
+
+    counted, deleted, remaining = asyncio.run(run_retention())
+    assert counted == 1
+    assert deleted == 1
+    assert remaining == 0
 
 
 def test_cli_create_user_and_issue_api_key_are_audited(tmp_path, monkeypatch, capsys) -> None:

@@ -166,13 +166,15 @@ async def run_cli(argv: list[str] | None = None) -> int:
                     "album_ids": result.album_ids,
                     "item_count": result.item_count,
                     "bytes_freed": result.bytes_freed,
+                    "audit_event_count": result.audit_event_count,
+                    "audit_retention_days": state.settings.audit_retention_days,
                     "correlation_id": command_correlation_id,
                 },
                 argv=command_argv,
             )
             mode = "dry-run" if args.dry_run else "deleted"
             print(
-                f"prune {mode}: albums={len(result.album_ids)} items={result.item_count} bytes={result.bytes_freed}"
+                f"prune {mode}: albums={len(result.album_ids)} items={result.item_count} bytes={result.bytes_freed} audit_events={result.audit_event_count}"
             )
             if result.album_ids:
                 print("\n".join(result.album_ids))

@@ -88,3 +88,13 @@ class TelemetryService:
             limit=limit,
             offset=offset,
         )
+
+    async def count_audit_events_older_than(self, before: datetime) -> int:
+        if self._query_backend is None:
+            raise RuntimeError("Audit query backend is not configured.")
+        return await self._query_backend.count_audit_events_older_than(before)
+
+    async def delete_audit_events_older_than(self, before: datetime) -> int:
+        if self._query_backend is None:
+            raise RuntimeError("Audit query backend is not configured.")
+        return await self._query_backend.delete_audit_events_older_than(before)
