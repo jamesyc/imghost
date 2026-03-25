@@ -4,6 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ page_title }}</title>
+    {% if open_graph is defined %}
+    <meta property="og:title" content="{{ open_graph.title }}">
+    <meta property="og:description" content="{{ open_graph.description }}">
+    <meta property="og:type" content="{{ open_graph.type }}">
+    <meta property="og:url" content="{{ open_graph.url }}">
+    {% if open_graph.image is defined %}<meta property="og:image" content="{{ open_graph.image }}">{% endif %}
+    <meta name="twitter:card" content="{{ open_graph.twitter_card }}">
+    <meta name="twitter:title" content="{{ open_graph.twitter_title }}">
+    <meta name="twitter:description" content="{{ open_graph.twitter_description }}">
+    {% if open_graph.twitter_image is defined %}<meta name="twitter:image" content="{{ open_graph.twitter_image }}">{% endif %}
+    {% endif %}
     <script src="/static/js/theme-init.js"></script>
     <link rel="stylesheet" href="/static/css/base.css">
   </head>

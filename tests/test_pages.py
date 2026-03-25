@@ -87,6 +87,10 @@ def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> 
         assert 'data-upload-progress-bar' in response.text
         assert 'id="flash"' not in response.text
         assert "Anonymous uploads currently expire after 24 hour(s)." in response.text
+        assert '<meta property="og:title" content="imghost">' in response.text
+        assert '<meta property="og:description" content="Upload your photos and videos. Share them in seconds.">' in response.text
+        assert '<meta property="og:url" content="http://testserver">' in response.text
+        assert '<meta name="twitter:card" content="summary">' in response.text
 
 
 def test_home_page_reflects_runtime_config_disabled_states(tmp_path, monkeypatch, capsys) -> None:
@@ -1023,6 +1027,11 @@ def test_public_user_album_list_page_uses_template_shell(tmp_path, monkeypatch, 
         assert f'/a/{upload.json()["album_id"]}' in page.text
         assert '<script src="/static/js/album-cards.js" defer></script>' in page.text
         assert '<script src="/static/js/public-user-albums.js" defer></script>' in page.text
+        assert '<meta property="og:title" content="showcase2 albums">' in page.text
+        assert '<meta property="og:description" content="1 public album(s), sorted by most recently modified.">' in page.text
+        assert '<meta property="og:url" content="https://testserver/u/showcase2">' in page.text
+        assert f'<meta property="og:image" content="https://testserver/t/{upload.json()["media_id"]}.jpg">' in page.text
+        assert '<meta name="twitter:card" content="summary_large_image">' in page.text
 
 
 def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path, monkeypatch, capsys) -> None:
@@ -1412,6 +1421,10 @@ def test_public_album_page_escapes_hostile_title_filename_and_bootstrap_json(tmp
         assert "\\u003c/script\\u003e\\u003cimg src=x onerror=alert(1)\\u003e" in page.text
         assert "&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;" in page.text
         assert "&lt;svg onload=alert(1)&gt;.png" in page.text
+        assert "&lt;/script&gt;&lt;img src=x onerror=alert(1)&gt;" in page.text
+        assert '<meta property="og:url" content="http://testserver/a/' in page.text
+        assert f'<meta property="og:image" content="http://testserver/i/{upload.json()["media_id"]}.png">' in page.text
+        assert '<meta name="twitter:card" content="summary_large_image">' in page.text
 
 
 def test_public_user_album_list_page_escapes_hostile_album_title(tmp_path, monkeypatch, capsys) -> None:

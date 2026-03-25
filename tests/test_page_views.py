@@ -183,12 +183,26 @@ def test_build_public_user_album_list_context_adds_display_fields_without_mutati
             "item_count": 1,
             "total_size": 68,
             "created_at": "2026-01-02T03:04:05+00:00",
+            "cover_media_id": "media123",
+            "cover_thumb_format": "jpg",
+            "cover_thumb_status": "done",
         }
     ]
 
-    payload = build_public_user_album_list_context(source)
+    payload = build_public_user_album_list_context("https://testserver", "gallery", source)
 
     assert payload["public_albums"][0]["total_size_display"] == "68 B"
     assert payload["public_albums"][0]["created_at_display"]
+    assert payload["open_graph"] == {
+        "title": "gallery albums",
+        "description": "1 public album(s), sorted by most recently modified.",
+        "type": "website",
+        "url": "https://testserver/u/gallery",
+        "image": "https://testserver/t/media123.jpg",
+        "twitter_card": "summary_large_image",
+        "twitter_title": "gallery albums",
+        "twitter_description": "1 public album(s), sorted by most recently modified.",
+        "twitter_image": "https://testserver/t/media123.jpg",
+    }
     assert "total_size_display" not in source[0]
     assert "created_at_display" not in source[0]

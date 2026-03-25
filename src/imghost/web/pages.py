@@ -13,6 +13,7 @@ from .auth_context import (
 from .display_helpers import is_expired
 from .page_context import normalize_next_path, render_template_page, runtime_flags
 from .page_views import (
+    build_open_graph,
     build_public_album_page_context,
     build_public_user_album_list_context,
     build_workspace_bootstrap,
@@ -31,12 +32,18 @@ async def _audit_admin_page_view(request: Request, user, page_name: str, *, obje
 async def index(request: Request) -> str:
     user = await authenticated_user(request, required=False)
     flags = await runtime_flags(request)
+    base_url = public_base_url(request, get_state(request).settings)
     return await render_template_page(
         request,
         "pages/home.html",
         "imghost",
         user=user,
         extra_context={
+            "open_graph": build_open_graph(
+                title="imghost",
+                description="Upload your photos and videos. Share them in seconds.",
+                url=base_url,
+            ),
             "upload_enabled": user is not None or flags.anon_upload_enabled,
         },
         script_paths=["js/upload-box.js", "js/home.js"],
@@ -325,13 +332,14 @@ async def album_page(request: Request, album_id: str) -> HTMLResponse:
     if album is None or is_expired(album.expires_at):
         raise HTTPException(status_code=404)
     items = await state.repository.list_album_media(album_id)
+    base_url = public_base_url(request, state.settings)
     return await render_template_page(
         request,
         "pages/public-album.html",
         album.title or "Untitled album",
         user=user,
         extra_context=build_public_album_page_context(
-            public_base_url(request, state.settings),
+            base_url,
             album,
             items,
             viewer_user_id=user.id if user is not None else None,
@@ -345,6 +353,7 @@ async def user_album_list_page(request: Request, username: str) -> HTMLResponse:
     state = get_state(request)
     viewer = await authenticated_user(request, required=False)
     user, albums = await state.uploads.list_public_albums_for_username(username)
+    base_url = public_base_url(request, state.settings)
     return await render_template_page(
         request,
         "pages/public-user-albums.html",
@@ -352,7 +361,7 @@ async def user_album_list_page(request: Request, username: str) -> HTMLResponse:
         user=viewer,
         extra_context={
             "public_user": user,
-            **build_public_user_album_list_context(albums),
+            **build_public_user_album_list_context(base_url, user.username, albums),
         },
         script_paths=["js/album-cards.js", "js/public-user-albums.js"],
     )
