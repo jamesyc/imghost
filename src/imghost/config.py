@@ -43,6 +43,7 @@ class Settings:
     task_worker_queues: tuple[str, ...] = ("default", "thumbnails")
     database_use_pgbouncer: bool = False
     scheduler_enabled: bool = False
+    app_scheduler_enabled: bool = False
     scheduler_poll_seconds: int = 30
     scheduler_lease_seconds: int = 900
     cleanup_interval_seconds: int = 900
@@ -161,6 +162,7 @@ def load_settings() -> Settings:
         thumbnail_worker_count=max(1, int(os.getenv("THUMBNAIL_WORKER_COUNT", "1"))),
         database_use_pgbouncer=_env_bool("DATABASE_USE_PGBOUNCER") or False,
         scheduler_enabled=_env_bool("SCHEDULER_ENABLED") or False,
+        app_scheduler_enabled=_env_bool("APP_SCHEDULER_ENABLED") or False,
         scheduler_poll_seconds=max(1, int(os.getenv("SCHEDULER_POLL_SECONDS", "30"))),
         scheduler_lease_seconds=max(1, int(os.getenv("SCHEDULER_LEASE_SECONDS", "900"))),
         cleanup_interval_seconds=max(1, int(os.getenv("CLEANUP_INTERVAL_SECONDS", "900"))),

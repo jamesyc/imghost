@@ -21,6 +21,8 @@ services:
       REDIS_MODE: disabled
       TASK_QUEUE_MODE: async
       TASK_WORKER_ENABLED: "false"
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      APP_SCHEDULER_ENABLED: ${APP_SCHEDULER_ENABLED:-true}
     depends_on:
       postgres:
         condition: service_healthy

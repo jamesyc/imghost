@@ -198,7 +198,9 @@ class AppState:
         return self.process_role == "worker"
 
     def _should_run_scheduler_loop(self) -> bool:
-        return self.process_role == "scheduler"
+        return self.process_role == "scheduler" or (
+            self.process_role == "app" and self.settings.app_scheduler_enabled
+        )
 
     async def _enqueue_thumbnail(self, event: MediaUploaded) -> None:
         await self.tasks.enqueue(
@@ -292,7 +294,8 @@ class AppState:
                     "last_task_failure": self.telemetry.last_task_failure,
                 },
                 "scheduler": {
-                    "enabled_in_this_process": self.process_role == "scheduler",
+                    "enabled_in_this_process": self._should_run_scheduler_loop(),
+                    "hosted_by": "scheduler" if self.process_role == "scheduler" else "app" if self.settings.app_scheduler_enabled else None,
                     "configured": self.settings.scheduler_enabled,
                     **self.scheduler.runtime_status(),
                 },

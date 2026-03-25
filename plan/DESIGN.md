@@ -458,7 +458,13 @@ The upload handler doesn't know how to process a JPEG vs. an SVG vs. an MP4 — 
 
 ### Thumbnail Generation — Async
 
-Thumbnails are generated **asynchronously** after upload via the task queue (see [§17](#17-background-jobs--pruning)). The upload endpoint returns immediately once the file is stored to the storage backend and the DB row exists. The album page shows a loading placeholder for items with `thumb_status = pending` and polls until thumbnails are ready.
+Thumbnails are generated **asynchronously** after upload via the task queue (see [§17](#17-background-jobs--pruning)). The upload endpoint returns immediately once the original file is stored to the storage backend and the DB row exists.
+
+Current UI behavior:
+
+- full album pages render the original media directly
+- compact list/card views such as dashboard cards and public user album lists use thumbnails when available
+- thumbnail-based list/card views may show a loading placeholder for items with `thumb_status = pending` and poll until thumbnails are ready
 
 **Without Redis (Pi mode):** Thumbnails are generated synchronously in-process during the upload request. The user waits slightly longer, but no worker process is needed. See [§23](#23-graceful-degradation).
 
@@ -535,7 +541,7 @@ This means drag-to-reorder is a single `UPDATE media SET position = {new_pos} WH
 
 - Album title
 - Created datetime + last edited datetime (shown only if the album has been edited after creation)
-- All items rendered in position order as preview cards; images open in a lightbox and videos play in a lightbox with `<video controls>`
+- All items rendered in position order using the original media; images open in a lightbox and videos play in a lightbox with `<video controls>`
 - Right-clicking an image gives the browser's native "Copy image address" — resolves to `https://yourdomain.com/i/{mediaId}.jpg` (clean, permanent URL with correct extension; storage backend is completely invisible)
 - Per-item **direct URL text box** at the bottom of each image for non-technical users to copy
 - **Expiry banner** if `expires_at` is set: *"This album expires in X hours / X days"* — shown to all viewers including anonymous
@@ -563,6 +569,7 @@ Logged-in owners can:
 
 - All albums belonging to the user, sorted by **most recently modified** first
 - Shows: cover thumbnail, title, item count, created date, total album size
+- If the cover thumbnail is still pending, the list may show a placeholder until the thumbnail is ready
 - Publicly accessible (no private albums)
 
 -----

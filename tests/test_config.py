@@ -112,12 +112,14 @@ def test_load_settings_defaults_scheduler_settings(monkeypatch, tmp_path) -> Non
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
     monkeypatch.delenv("SCHEDULER_ENABLED", raising=False)
+    monkeypatch.delenv("APP_SCHEDULER_ENABLED", raising=False)
     monkeypatch.delenv("SCHEDULER_POLL_SECONDS", raising=False)
     monkeypatch.delenv("SCHEDULER_LEASE_SECONDS", raising=False)
     monkeypatch.delenv("CLEANUP_INTERVAL_SECONDS", raising=False)
 
     settings = load_settings()
     assert settings.scheduler_enabled is False
+    assert settings.app_scheduler_enabled is False
     assert settings.scheduler_poll_seconds == 30
     assert settings.scheduler_lease_seconds == 900
     assert settings.cleanup_interval_seconds == 900
@@ -127,12 +129,14 @@ def test_load_settings_parses_scheduler_settings(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://fallback.example.com")
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("APP_SCHEDULER_ENABLED", "true")
     monkeypatch.setenv("SCHEDULER_POLL_SECONDS", "15")
     monkeypatch.setenv("SCHEDULER_LEASE_SECONDS", "120")
     monkeypatch.setenv("CLEANUP_INTERVAL_SECONDS", "600")
 
     settings = load_settings()
     assert settings.scheduler_enabled is True
+    assert settings.app_scheduler_enabled is True
     assert settings.scheduler_poll_seconds == 15
     assert settings.scheduler_lease_seconds == 120
     assert settings.cleanup_interval_seconds == 600
