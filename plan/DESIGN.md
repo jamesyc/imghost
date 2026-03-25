@@ -2365,8 +2365,8 @@ When Redis is disabled, the application starts in Redis-free mode. This is a **f
 |---|---|---|
 | **Sessions** | Signed token stored in Redis; server-side revocation on logout | Signed cookie via `itsdangerous`; no server-side revocation. Logout clears the cookie but a stolen token remains valid until expiry. |
 | **Rate limiting** | Redis counters per IP+UA / per user | Disabled entirely. No rate limiting on any endpoint. |
-| **Task queue** | Redis-backed dispatch to separate worker processes with scheduler lease coordination | In-process execution inside the app process |
-| **Worker services** | `worker-thumbnails`, `worker-cleanup`, `worker-default`, and `scheduler` run as separate containers | Not needed. All background work runs in the app process |
+| **Task queue** | Redis-backed dispatch to separate worker processes with scheduler lease coordination | In-process execution, async by default. `TASK_QUEUE_MODE=sync` switches to synchronous execution. |
+| **Worker services** | `worker-thumbnails`, `worker-cleanup`, `worker-default`, and `scheduler` run as separate containers | Dedicated worker processes are optional. Background work can run in-process, and scheduled jobs run in the app only when `APP_SCHEDULER_ENABLED=true`; otherwise a separate scheduler process is still used. |
 | **Readiness probe** | Redis checked as dependency | Redis check skipped; public health stays coarse and reports Redis as disabled / not required. |
 
 ### Degradation Matrix
