@@ -14,6 +14,9 @@ class TelemetryState:
         self._origin_warning_deadlines: dict[tuple[str, str], float] = {}
         self.last_worker_started_at: float | None = None
         self.last_worker_stopped_at: float | None = None
+        self.last_task_event_at: float | None = None
+        self.last_task_event: dict[str, Any] | None = None
+        self.recent_task_events: list[dict[str, Any]] = []
         self.last_task_failure_at: float | None = None
         self.last_task_failure: dict[str, Any] | None = None
 
@@ -81,6 +84,14 @@ class TelemetryState:
     def record_task_failure(self, *, task_name: str, details: dict[str, Any]) -> None:
         self.last_task_failure_at = time()
         self.last_task_failure = {"task_name": task_name, **details}
+
+    def record_task_state(self, *, task_name: str, state: str, details: dict[str, Any]) -> None:
+        self.last_task_event_at = time()
+        event = {"task_name": task_name, "state": state, **details}
+        self.last_task_event = event
+        self.recent_task_events.append(event)
+        if len(self.recent_task_events) > 25:
+            self.recent_task_events = self.recent_task_events[-25:]
 
     def mark_worker_started(self) -> None:
         self.last_worker_started_at = time()

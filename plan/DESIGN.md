@@ -1073,7 +1073,8 @@ VIDEO_THUMB_FRAMES=10
 ANON_EXPIRY_HOURS=24                  # default expiry for anonymous uploads; overridable at runtime
 
 # Pruning
-PRUNE_CRON=0 12 * * *                 # noon UTC ≈ 4am Pacific
+SCHEDULER_POLL_SECONDS=30             # how often the scheduler loop wakes up
+CLEANUP_INTERVAL_SECONDS=3600         # run prune maintenance roughly once per hour
 
 # Logging & Metrics
 LOG_LEVEL=INFO
@@ -1398,7 +1399,8 @@ On permanent failure (retries exhausted): sets `thumb_status = 'failed'`. Album 
 
 ### Pruning Job
 
-**Schedule:** `0 12 * * *` (noon UTC / ~4am Pacific). Configurable via `PRUNE_CRON` env.
+**Schedule:** interval-based. The scheduler loop wakes up every `SCHEDULER_POLL_SECONDS` and enqueues cleanup when `CLEANUP_INTERVAL_SECONDS` has elapsed since the last run.
+This is intentionally simpler than cron-based scheduling for now. A cron-style wall-clock schedule can be considered later if operators need cleanup to run at specific times of day.
 **Runs in:** the `worker-cleanup` service.
 **Enqueued to:** the `cleanup` queue.
 
@@ -2098,7 +2100,7 @@ Two endpoints, distinct purposes. Never conflate them — they serve different o
 
 **Question it answers:** "Is this process alive and not deadlocked?"
 
-- Returns `200 OK` with `{"status": "alive"}` if the Python process is running
+- Returns `200 OK` with a minimal alive response if the Python process is running
 - **Never checks dependencies.** If Postgres is down, killing and restarting the app doesn't fix Postgres. Liveness failures should only trigger a container restart.
 - Used by: Docker `HEALTHCHECK`, Kubernetes `livenessProbe`, ECS health check
 
@@ -2106,44 +2108,49 @@ Two endpoints, distinct purposes. Never conflate them — they serve different o
 
 **Question it answers:** "Can this instance serve traffic right now?"
 
-- Checks each dependency and reports individual status:
+- Checks core dependencies:
   - **PostgreSQL:** Execute `SELECT 1` via the connection pool
   - **Redis (if configured):** Execute `PING`
   - **Storage backend:** Call `StorageBackend.health_check()` (e.g. `HEAD` on the bucket)
-- Returns `200 OK` with component statuses if all pass
-- Returns `503 Service Unavailable` with component statuses if any required check fails
+- Public response stays intentionally coarse:
+  - overall readiness boolean / status
+  - high-level degraded state
+  - compact per-subsystem summary when needed for operators
+- Public health responses do **not** expose detailed dependency latencies, error strings, or internal topology.
+- Detailed per-check status, latency, and skip reasons belong in authenticated admin or internal diagnostics, not anonymous public health endpoints.
+- Internal diagnostics are provided through the existing admin operations surface and runtime status endpoint, which expose operational state for Redis subsystems, task queues, worker/scheduler state, and network-trust configuration without turning the public health endpoints into a reconnaissance surface.
 - Redis failure does **not** fail readiness if `REDIS_URL` is unset (Redis-free mode)
 - Used by: Load balancer health checks, Kubernetes `readinessProbe`. When readiness fails, the load balancer stops routing traffic to this instance but doesn't kill it. When the dependency recovers, readiness passes again and traffic resumes.
 
 ```json
 // 200 OK — all healthy
 {
-  "status": "ready",
-  "checks": {
-    "database": {"status": "ok", "latency_ms": 2},
-    "redis": {"status": "ok", "latency_ms": 1},
-    "storage": {"status": "ok", "latency_ms": 15}
-  }
+  "ok": true,
+  "degraded": false,
+  "database": "ok",
+  "redis": "ok",
+  "storage": "ok",
+  "tasks": "ok"
 }
 
 // 503 — storage backend unreachable
 {
-  "status": "not_ready",
-  "checks": {
-    "database": {"status": "ok", "latency_ms": 2},
-    "redis": {"status": "ok", "latency_ms": 1},
-    "storage": {"status": "error", "error": "connection refused"}
-  }
+  "ok": false,
+  "degraded": true,
+  "database": "ok",
+  "redis": "ok",
+  "storage": "error",
+  "tasks": "ok"
 }
 
-// 200 OK — Redis-free mode, Redis not checked
+// 200 OK — Redis-free mode, Redis not required
 {
-  "status": "ready",
-  "checks": {
-    "database": {"status": "ok", "latency_ms": 2},
-    "redis": {"status": "skipped", "reason": "not configured"},
-    "storage": {"status": "ok", "latency_ms": 15}
-  }
+  "ok": true,
+  "degraded": false,
+  "database": "ok",
+  "redis": "disabled",
+  "storage": "ok",
+  "tasks": "ok"
 }
 ```
 
@@ -2348,7 +2355,7 @@ When Redis is disabled, the application starts in Redis-free mode. This is a **f
 | **Rate limiting** | Redis counters per IP+UA / per user | Disabled entirely. No rate limiting on any endpoint. |
 | **Task queue** | Redis-backed dispatch to separate worker processes with scheduler lease coordination | In-process execution inside the app process |
 | **Worker services** | `worker-thumbnails`, `worker-cleanup`, `worker-default`, and `scheduler` run as separate containers | Not needed. All background work runs in the app process |
-| **Readiness probe** | Redis checked as dependency | Redis check skipped; reports `"skipped"` in health response. |
+| **Readiness probe** | Redis checked as dependency | Redis check skipped; public health stays coarse and reports Redis as disabled / not required. |
 
 ### Degradation Matrix
 

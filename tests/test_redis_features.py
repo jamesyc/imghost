@@ -124,6 +124,7 @@ class DummyTelemetryService:
         self.degraded: list[tuple[str, str, str]] = []
         self.recovered: list[tuple[str, str]] = []
         self.task_failures: list[tuple[str, dict[str, object]]] = []
+        self.task_states: list[tuple[str, str, dict[str, object]]] = []
         self.enqueued: list[tuple[str, str]] = []
         self.worker_started = 0
         self.worker_stopped = 0
@@ -136,6 +137,9 @@ class DummyTelemetryService:
 
     def record_task_failure(self, *, task_name: str, details: dict[str, object]) -> None:
         self.task_failures.append((task_name, details))
+
+    def record_task_state(self, *, task_name: str, state: str, details: dict[str, object]) -> None:
+        self.task_states.append((task_name, state, details))
 
     def record_task_enqueued(self, *, queue: str, task_name: str) -> None:
         self.enqueued.append((queue, task_name))
@@ -498,7 +502,7 @@ def test_redis_task_queue_worker_only_consumes_selected_queues() -> None:
 
     assert calls == ["processed"]
     assert fake.lists[handle.prefixed("queue:default")] == [
-        '{"task_name":"demo","kwargs":{"value":"ignored"}}'
+        '{"task_name":"demo","kwargs":{"value":"ignored"},"attempt":1,"max_attempts":1}'
     ]
 
 
@@ -551,7 +555,7 @@ def test_redis_task_queue_marks_tasks_subsystem_degraded_and_then_recovers() -> 
         assert telemetry.recovered == [("tasks", "enqueue task")]
         assert calls == ["fallback"]
         assert fake.lists[handle.prefixed("queue:thumbnails")] == [
-            '{"task_name":"demo","kwargs":{"value":"redis"}}'
+            '{"task_name":"demo","kwargs":{"value":"redis"},"attempt":1,"max_attempts":1}'
         ]
         await queue.stop()
 

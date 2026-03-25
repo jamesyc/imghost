@@ -13,9 +13,16 @@ TaskCallback = Callable[..., Awaitable[object]]
 class TaskSpec:
     name: str
     default_queue: str
+    max_attempts: int = 1
+    pass_retry_metadata: bool = False
 
 
-GENERATE_THUMBNAIL_TASK = TaskSpec(name="generate_thumbnail", default_queue="thumbnails")
+GENERATE_THUMBNAIL_TASK = TaskSpec(
+    name="generate_thumbnail",
+    default_queue="thumbnails",
+    max_attempts=3,
+    pass_retry_metadata=True,
+)
 RECOVER_THUMBNAILS_TASK = TaskSpec(name="recover_thumbnails", default_queue="thumbnails")
 PRUNE_EXPIRED_ALBUMS_TASK = TaskSpec(name="prune_expired_albums", default_queue="cleanup")
 
@@ -43,6 +50,8 @@ def register_core_tasks(
         GENERATE_THUMBNAIL_TASK.name,
         uploads.generate_thumbnail,
         default_queue=GENERATE_THUMBNAIL_TASK.default_queue,
+        max_attempts=GENERATE_THUMBNAIL_TASK.max_attempts,
+        pass_retry_metadata=GENERATE_THUMBNAIL_TASK.pass_retry_metadata,
     )
     task_queue.register(
         RECOVER_THUMBNAILS_TASK.name,

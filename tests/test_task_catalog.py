@@ -13,10 +13,18 @@ from imghost.task_catalog import (
 
 class _RecordingTaskQueue:
     def __init__(self) -> None:
-        self.registered: list[tuple[str, str]] = []
+        self.registered: list[tuple[str, str, int, bool]] = []
 
-    def register(self, task_name: str, handler, *, default_queue: str = "default") -> None:
-        self.registered.append((task_name, default_queue))
+    def register(
+        self,
+        task_name: str,
+        handler,
+        *,
+        default_queue: str = "default",
+        max_attempts: int = 1,
+        pass_retry_metadata: bool = False,
+    ) -> None:
+        self.registered.append((task_name, default_queue, max_attempts, pass_retry_metadata))
 
 
 def test_task_catalog_registers_core_tasks_with_expected_queues() -> None:
@@ -36,9 +44,24 @@ def test_task_catalog_registers_core_tasks_with_expected_queues() -> None:
     )
 
     assert queue.registered == [
-        (GENERATE_THUMBNAIL_TASK.name, GENERATE_THUMBNAIL_TASK.default_queue),
-        (RECOVER_THUMBNAILS_TASK.name, RECOVER_THUMBNAILS_TASK.default_queue),
-        (PRUNE_EXPIRED_ALBUMS_TASK.name, PRUNE_EXPIRED_ALBUMS_TASK.default_queue),
+        (
+            GENERATE_THUMBNAIL_TASK.name,
+            GENERATE_THUMBNAIL_TASK.default_queue,
+            GENERATE_THUMBNAIL_TASK.max_attempts,
+            GENERATE_THUMBNAIL_TASK.pass_retry_metadata,
+        ),
+        (
+            RECOVER_THUMBNAILS_TASK.name,
+            RECOVER_THUMBNAILS_TASK.default_queue,
+            RECOVER_THUMBNAILS_TASK.max_attempts,
+            RECOVER_THUMBNAILS_TASK.pass_retry_metadata,
+        ),
+        (
+            PRUNE_EXPIRED_ALBUMS_TASK.name,
+            PRUNE_EXPIRED_ALBUMS_TASK.default_queue,
+            PRUNE_EXPIRED_ALBUMS_TASK.max_attempts,
+            PRUNE_EXPIRED_ALBUMS_TASK.pass_retry_metadata,
+        ),
     ]
 
 

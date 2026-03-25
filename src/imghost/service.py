@@ -45,6 +45,14 @@ from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
 from .payloads import album_to_payload
 from .storage import StorageBackend
+from .tasks import (
+    TASK_STATE_FAILED_EXHAUSTED,
+    TASK_STATE_FAILED_PERMANENT,
+    TASK_STATE_RETRY_SCHEDULED,
+    TASK_STATE_SKIPPED,
+    TASK_STATE_SUCCEEDED,
+    TaskRunResult,
+)
 from .web.display_helpers import is_expired
 from .zip_streaming import AsyncIterableBridge
 
@@ -184,7 +192,6 @@ class UploadService:
             if created_album and album is not None and not await self.repository.list_album_media(album.id):
                 await self.repository.delete_album(album.id)
             raise
-        album.updated_at = utcnow()
         if not album.title and title:
             album.title = title
         await self.repository.update_album(album)
@@ -348,10 +355,20 @@ class UploadService:
         refreshed_media = await self.repository.get_media(media.id)
         return refreshed_media or media
 
-    async def generate_thumbnail(self, media_id: str, correlation_id: str) -> None:
+    async def generate_thumbnail(
+        self,
+        media_id: str,
+        correlation_id: str,
+        attempt: int = 1,
+        max_attempts: int = 1,
+    ) -> TaskRunResult:
         media = await self.repository.get_media(media_id)
-        if media is None or media.thumb_status == "done":
-            return
+        if media is None:
+            return TaskRunResult(state=TASK_STATE_SKIPPED, reason="missing_media")
+        if media.thumb_status == "done":
+            if self.telemetry is not None:
+                self.telemetry.record_thumbnail_job(result="skipped", media_type=media.media_type, reason="already_done")
+            return TaskRunResult(state=TASK_STATE_SKIPPED, reason="already_done")
 
         started_at = monotonic()
         media.thumb_status = "processing"
@@ -387,15 +404,32 @@ class UploadService:
                     media_type=media.media_type,
                     duration_seconds=monotonic() - started_at,
                 )
-            return
+            return TaskRunResult(state=TASK_STATE_SUCCEEDED)
         except Exception as exc:
             reason = self._thumbnail_failure_reason(exc)
-            self._record_thumbnail_failure(
-                reason=reason,
-                media=media,
-                correlation_id=correlation_id,
-                error=exc,
-            )
+            retryable = self._thumbnail_failure_is_retryable(reason)
+            if retryable and attempt < max_attempts:
+                media.thumb_status = "pending"
+                media.thumb_key = None
+                media.thumb_size = None
+                media.thumb_is_orig = False
+                if written_thumb_key is not None:
+                    try:
+                        await self.storage.delete(written_thumb_key)
+                    except Exception:
+                        logger.warning(
+                            "thumbnail_retry_cleanup_failed",
+                            extra={"media_id": media.id, "correlation_id": correlation_id, "attempt": attempt},
+                        )
+                await self.repository.update_media(media)
+                if self.telemetry is not None:
+                    self.telemetry.record_thumbnail_job(
+                        result="retry",
+                        media_type=media.media_type,
+                        reason=reason,
+                        duration_seconds=monotonic() - started_at,
+                    )
+                return TaskRunResult(state=TASK_STATE_RETRY_SCHEDULED, reason=reason, retryable=True)
             if self.telemetry is not None:
                 self.telemetry.record_thumbnail_job(
                     result="failed",
@@ -403,6 +437,12 @@ class UploadService:
                     reason=reason,
                     duration_seconds=monotonic() - started_at,
                 )
+            self._record_thumbnail_failure(
+                reason=reason,
+                media=media,
+                correlation_id=correlation_id,
+                error=exc,
+            )
             media.thumb_status = "failed"
             media.thumb_key = None
             media.thumb_size = None
@@ -427,6 +467,8 @@ class UploadService:
                         correlation_id=correlation_id,
                         error=update_exc,
                     )
+            terminal_state = TASK_STATE_FAILED_EXHAUSTED if retryable else TASK_STATE_FAILED_PERMANENT
+            return TaskRunResult(state=terminal_state, reason=reason)
 
     def _thumbnail_failure_reason(self, exc: Exception) -> str:
         if isinstance(exc, ValueError) and str(exc) == "processor_missing":
@@ -443,6 +485,14 @@ class UploadService:
         if "update media" in message or "repository update" in message:
             return "repository_update_failed"
         return "thumbnail_generate_failed"
+
+    def _thumbnail_failure_is_retryable(self, reason: str) -> bool:
+        return reason in {
+            "storage_read_failed",
+            "thumbnail_store_failed",
+            "repository_update_failed",
+            "thumbnail_generate_failed",
+        }
 
     def _record_thumbnail_failure(
         self,
@@ -554,7 +604,6 @@ class UploadService:
                 )
 
         if changed:
-            album.updated_at = utcnow()
             await self.repository.update_album(album)
         return album, await self.repository.list_album_media(album_id)
 
@@ -589,7 +638,6 @@ class UploadService:
             positions = {item.id: index * 1000 for index, item in enumerate(reordered, start=1)}
             reordered = await self.repository.update_media_positions(album_id, positions)
 
-        album.updated_at = utcnow()
         await self.repository.update_album(album)
         await self.event_bus.emit(
             AlbumReordered(
@@ -666,7 +714,6 @@ class UploadService:
 
         if album.cover_media_id == deleted_media.id:
             album.cover_media_id = None
-        album.updated_at = utcnow()
         await self.repository.update_album(album)
         return MediaDeleteResult(
             deleted_media=deleted_media,
@@ -1097,7 +1144,6 @@ class UploadService:
             new_expiry = payload.expires_at.isoformat() if payload.expires_at else None
             if old_expiry != new_expiry:
                 album.expires_at = payload.expires_at
-                album.updated_at = utcnow()
                 await self.repository.update_album(album)
                 await self.event_bus.emit(
                     AlbumExpiryChanged(

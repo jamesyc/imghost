@@ -113,8 +113,7 @@ class AlbumMediaRepository:
                     title = $3,
                     cover_media_id = $4,
                     delete_token = $5,
-                    updated_at = $6,
-                    expires_at = $7
+                    expires_at = $6
                 WHERE id = $1
                 RETURNING *
                 """,
@@ -123,7 +122,6 @@ class AlbumMediaRepository:
                 album.title,
                 album.cover_media_id,
                 album.delete_token,
-                album.updated_at,
                 album.expires_at,
             )
         return row_to_album(row)

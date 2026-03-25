@@ -15,6 +15,7 @@ from imghost.processors import MediaMetadata, ThumbnailResult
 from imghost.storage import StorageStream
 from imghost.payloads import album_to_payload
 from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UNSET, UploadService, UserCreateInput, UserUpdateInput
+from imghost.tasks import TASK_STATE_FAILED_EXHAUSTED, TASK_STATE_RETRY_SCHEDULED
 
 
 class DummyRepository:
@@ -226,11 +227,15 @@ class RecordingTelemetry:
     def __init__(self) -> None:
         self.last_task_failure_at: float | None = None
         self.last_task_failure: dict[str, object] | None = None
+        self.last_task_event: dict[str, object] | None = None
         self.thumbnail_jobs: list[dict[str, object]] = []
         self.audit_count_before = None
         self.audit_delete_before = None
         self.audit_count_result = 0
         self.audit_delete_result = 0
+
+    def record_task_state(self, *, task_name: str, state: str, details: dict[str, object]) -> None:
+        self.last_task_event = {"task_name": task_name, "state": state, **details}
 
     def record_thumbnail_failure(self, *, media: Media, correlation_id: str, reason: str, error: Exception) -> None:
         self.last_task_failure = {
@@ -957,6 +962,38 @@ def test_generate_thumbnail_records_thumbnail_generation_failure_and_clears_fiel
     assert repository.media.thumb_key is None
     assert repository.media.thumb_size is None
     assert repository.media.thumb_is_orig is False
+    assert telemetry.last_task_failure is not None
+    assert telemetry.last_task_failure["reason"] == "thumbnail_generate_failed"
+
+
+def test_generate_thumbnail_retryable_failure_returns_retry_state_and_resets_pending() -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    processor = DummyProcessor()
+    processor.generate_error = RuntimeError("thumbnail generate failed")
+    service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(processor))
+    repository.media = make_media()
+
+    result = asyncio.run(service.generate_thumbnail("media-1", "thumb-retry", attempt=1, max_attempts=3))
+
+    assert result.state == TASK_STATE_RETRY_SCHEDULED
+    assert repository.media is not None
+    assert repository.media.thumb_status == "pending"
+    assert telemetry.last_task_failure is None
+    assert telemetry.thumbnail_jobs[-1]["result"] == "retry"
+
+
+def test_generate_thumbnail_retryable_failure_exhaustion_returns_failed_exhausted() -> None:
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    processor = DummyProcessor()
+    processor.generate_error = RuntimeError("thumbnail generate failed")
+    service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(processor))
+    repository.media = make_media()
+
+    result = asyncio.run(service.generate_thumbnail("media-1", "thumb-exhausted", attempt=3, max_attempts=3))
+
+    assert result.state == TASK_STATE_FAILED_EXHAUSTED
+    assert repository.media is not None
+    assert repository.media.thumb_status == "failed"
     assert telemetry.last_task_failure is not None
     assert telemetry.last_task_failure["reason"] == "thumbnail_generate_failed"
 

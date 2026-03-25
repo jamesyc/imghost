@@ -449,7 +449,6 @@ class AccountService:
                     correlation_id=correlation_id,
                 )
             )
-        user.updated_at = utcnow()
         await self.repository.update_user(user)
         return user
 
@@ -470,7 +469,6 @@ class AccountService:
 
         old_is_admin = user.is_admin
         user.is_admin = is_admin
-        user.updated_at = utcnow()
         await self.repository.update_user(user)
         await self.event_bus.emit(
             UserAdminStatusChanged(
@@ -491,7 +489,6 @@ class AccountService:
         new_password = self._require_password_value(new_password, label="New password")
 
         user.password_hash = self._hash_password(new_password)
-        user.updated_at = utcnow()
         await self.repository.update_user(user)
         await self.event_bus.emit(
             UserPasswordReset(
@@ -514,7 +511,6 @@ class AccountService:
         if user.password_hash is not None and not self._verify_password(payload.current_password, user.password_hash):
             raise HTTPException(status_code=403, detail="Current password is incorrect.")
         user.password_hash = self._hash_password(self._require_password_value(payload.new_password, label="New password"))
-        user.updated_at = utcnow()
         await self.repository.update_user(user)
         if correlation_id is not None:
             await self.event_bus.emit(

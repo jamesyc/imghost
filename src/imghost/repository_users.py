@@ -63,8 +63,7 @@ class UserRepository:
                     password_hash = $4,
                     is_admin = $5,
                     is_suspended = $6,
-                    quota_bytes = $7,
-                    updated_at = $8
+                    quota_bytes = $7
                 WHERE id = $1::uuid
                 """,
                 user.id,
@@ -74,7 +73,6 @@ class UserRepository:
                 user.is_admin,
                 user.suspended,
                 user.quota_bytes,
-                user.updated_at,
             )
             await self._set_rate_limit_overrides(conn, user.id, user.rate_limit_rpm, user.rate_limit_bph)
             row = await conn.fetchrow(f"{USER_SELECT} WHERE users.id = $1::uuid", user.id)

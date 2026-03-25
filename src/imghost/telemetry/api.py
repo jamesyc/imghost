@@ -326,6 +326,9 @@ class Telemetry:
     def record_task_failure(self, *, task_name: str, details: dict[str, Any]) -> None:
         self._state.record_task_failure(task_name=task_name, details=details)
 
+    def record_task_state(self, *, task_name: str, state: str, details: dict[str, Any]) -> None:
+        self._state.record_task_state(task_name=task_name, state=state, details=details)
+
     def mark_worker_started(self) -> None:
         self._state.mark_worker_started()
         if self._metrics is not None:
@@ -409,6 +412,14 @@ class Telemetry:
     @property
     def last_task_failure(self) -> dict[str, Any] | None:
         return self._state.last_task_failure
+
+    @property
+    def last_task_event_at(self) -> float | None:
+        return self._state.last_task_event_at
+
+    @property
+    def last_task_event(self) -> dict[str, Any] | None:
+        return self._state.last_task_event
 
 
 def build_telemetry(database: Database, event_bus: EventBus) -> Telemetry:

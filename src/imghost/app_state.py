@@ -290,6 +290,8 @@ class AppState:
                     "queues": list(self.task_worker_queues),
                     "last_started_at": self.telemetry.last_worker_started_at,
                     "last_stopped_at": self.telemetry.last_worker_stopped_at,
+                    "last_task_event_at": self.telemetry.last_task_event_at,
+                    "last_task_event": self.telemetry.last_task_event,
                     "last_task_failure_at": self.telemetry.last_task_failure_at,
                     "last_task_failure": self.telemetry.last_task_failure,
                 },
@@ -339,7 +341,6 @@ class AppState:
             return
 
         user.is_admin = True
-        user.updated_at = utcnow()
         await self.repository.update_user(user)
         self.bootstrap_admin_status["promoted"] = True
         logger.warning("bootstrap_admin_user_promoted", extra={"username": username, "user_id": user.id})
