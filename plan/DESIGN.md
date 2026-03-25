@@ -464,7 +464,8 @@ Current UI behavior:
 
 - full album pages render the original media directly
 - compact list/card views such as dashboard cards and public user album lists use thumbnails when available
-- thumbnail-based list/card views may show a loading placeholder for items with `thumb_status = pending` and poll until thumbnails are ready
+- dashboard and owned-album card views may show a loading placeholder for items with `thumb_status = pending` and poll until thumbnails are ready
+- public user album list cards may show a loading placeholder for pending cover thumbnails and poll until the thumbnail is ready
 
 **Without Redis (Pi mode):** Thumbnails are generated synchronously in-process during the upload request. The user waits slightly longer, but no worker process is needed. See [§23](#23-graceful-degradation).
 
@@ -569,7 +570,7 @@ Logged-in owners can:
 
 - All albums belonging to the user, sorted by **most recently modified** first
 - Shows: cover thumbnail, title, item count, created date, total album size
-- If the cover thumbnail is still pending, the list may show a placeholder until the thumbnail is ready
+- If the cover thumbnail is still pending, the list shows a compact placeholder and polls until the thumbnail is ready
 - Publicly accessible (no private albums)
 
 -----
@@ -849,7 +850,7 @@ The upload-size policy should stay deliberately simple unless separate image/vid
 
 ### Audit Log
 
-- **Retention:** 90 days, then pruned by the daily prune job
+- **Retention:** 90 days, then pruned by the interval-based cleanup job (`CLEANUP_INTERVAL_SECONDS`)
 - **Filterable by:** event type, action, actor, user, request/correlation ID, source, result, date range
 - Written through the audit abstraction layer (see [§18](#18-abstraction-layers)) so events can fan out to multiple sinks such as PostgreSQL and structured JSON logs
 - Security-sensitive request paths may emit audit records directly when they need request-local context; domain lifecycle events are still a strong fit for event-bus-triggered audit subscribers

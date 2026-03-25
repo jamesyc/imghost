@@ -354,4 +354,5 @@ async def user_album_list_page(request: Request, username: str) -> HTMLResponse:
             "public_user": user,
             **build_public_user_album_list_context(albums),
         },
+        script_paths=["js/album-cards.js", "js/public-user-albums.js"],
     )

@@ -9,7 +9,7 @@
   </section>
 
   {% if public_albums %}
-  <section class="stack">
+  <section class="stack" id="public-user-albums-list">
     {% for album in public_albums %}
     <a class="album-card album-list-card dashboard-recent-album-card public-user-album-card" href="/a/{{ album.id }}">
       <div class="dashboard-recent-album-copy">
@@ -23,7 +23,12 @@
         {% if album.cover_media_id and album.cover_thumb_format and album.cover_thumb_status == "done" %}
         <img src="/t/{{ album.cover_media_id }}.{{ album.cover_thumb_format }}" alt="{{ album.title or 'Untitled album' }}">
         {% elif album.cover_media_id and album.cover_thumb_format %}
-        <span class="dashboard-recent-album-thumb-placeholder">Thumbnail pending</span>
+        <span
+          class="dashboard-recent-album-thumb-placeholder"
+          data-album-card-thumb-status="{{ album.cover_thumb_status }}"
+          data-album-card-thumb-src="/t/{{ album.cover_media_id }}.{{ album.cover_thumb_format }}"
+          data-album-card-thumb-alt="{{ album.title or 'Untitled album' }}"
+        >Thumbnail pending</span>
         {% else %}
         <span class="dashboard-recent-album-thumb-placeholder">No media</span>
         {% endif %}

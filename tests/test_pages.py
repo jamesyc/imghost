@@ -986,6 +986,8 @@ def test_public_user_album_list_page_uses_template_shell(tmp_path, monkeypatch, 
         assert "Showcase Album" in page.text
         assert "Created " in page.text
         assert f'/a/{upload.json()["album_id"]}' in page.text
+        assert '<script src="/static/js/album-cards.js" defer></script>' in page.text
+        assert '<script src="/static/js/public-user-albums.js" defer></script>' in page.text
 
 
 def test_settings_page_includes_account_api_key_password_and_delete_ui(tmp_path, monkeypatch, capsys) -> None:
@@ -1307,6 +1309,18 @@ def test_public_user_album_list_page_shows_owned_albums_sorted_by_recent_update(
         assert f'/a/{first.json()["album_id"]}' in page.text
         assert f'/a/{second.json()["album_id"]}' in page.text
         assert page.text.index("Newer Album") < page.text.index("Older Album")
+
+
+def test_public_user_album_list_template_marks_pending_cover_thumbnails_for_polling() -> None:
+    template = Path(
+        "/home/james/imghost/src/imghost/templates/pages/public-user-albums.html"
+    ).read_text(encoding="utf-8")
+    script = Path("/home/james/imghost/src/imghost/static/js/public-user-albums.js").read_text(encoding="utf-8")
+
+    assert 'id="public-user-albums-list"' in template
+    assert 'data-album-card-thumb-status="{{ album.cover_thumb_status }}"' in template
+    assert 'data-album-card-thumb-src="/t/{{ album.cover_media_id }}.{{ album.cover_thumb_format }}"' in template
+    assert "window.attachAlbumCardThumbPolling?.(publicUserAlbumsList);" in script
 
 
 def test_public_user_album_list_page_hides_expired_albums_and_404s_for_missing_user(tmp_path, monkeypatch, capsys) -> None:
