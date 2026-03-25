@@ -921,6 +921,41 @@ def test_anonymous_manage_page_accepts_path_scoped_cookie_after_url_scrub(tmp_pa
         assert f'"album_id": "{payload["album_id"]}"' in page.text
 
 
+def test_anonymous_manage_cookie_does_not_apply_to_other_album_path(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "First Manage Album"},
+        )
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Second Manage Album"},
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_payload = first.json()
+        second_payload = second.json()
+        first_token = first_payload["manage_url"].split("token=")[1]
+
+        client.cookies.set(
+            f"imghost_manage_{first_payload['album_id']}",
+            first_token,
+            path=f"/manage/{first_payload['album_id']}",
+        )
+
+        first_page = client.get(f"/manage/{first_payload['album_id']}")
+        assert first_page.status_code == 200
+
+        second_page = client.get(f"/manage/{second_payload['album_id']}")
+        assert second_page.status_code == 403
+
+
 def test_anonymous_manage_page_requires_valid_token(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

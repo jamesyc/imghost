@@ -6,7 +6,14 @@ from fastapi.testclient import TestClient
 from imghost.main import app
 from imghost.models import utcnow
 
-from .helpers import PNG_1X1, browser_session_headers, create_admin_and_api_key, create_user_and_api_key, update_album_record
+from .helpers import (
+    PNG_1X1,
+    browser_session_headers,
+    create_admin_and_api_key,
+    create_user_and_api_key,
+    set_user_password,
+    update_album_record,
+)
 
 
 def test_album_patch_reorder_and_media_delete_require_token(tmp_path, monkeypatch) -> None:
@@ -248,6 +255,135 @@ def test_expired_anonymous_album_mutations_are_denied_even_with_valid_delete_tok
             params={"delete_token": delete_token},
         )
         assert delete_response.status_code == 404
+
+
+def test_anonymous_delete_token_is_scoped_to_single_album(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("first.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "First Album"},
+        )
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("second.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Second Album"},
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_payload = first.json()
+        second_payload = second.json()
+        first_token = first_payload["manage_url"].split("token=")[1]
+        second_media_id = second_payload["media_id"]
+
+        patch_other = client.patch(
+            f"/api/v1/album/{second_payload['album_id']}",
+            params={"delete_token": first_token},
+            json={"title": "Should fail"},
+        )
+        assert patch_other.status_code == 403
+
+        append_other = client.post(
+            "/api/v1/upload",
+            files=[("file", ("append.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"album_id": second_payload["album_id"], "delete_token": first_token},
+        )
+        assert append_other.status_code == 403
+
+        delete_media_other = client.delete(
+            f"/api/v1/media/{second_media_id}",
+            params={"delete_token": first_token},
+        )
+        assert delete_media_other.status_code == 403
+
+        delete_album_other = client.delete(
+            f"/api/v1/album/{second_payload['album_id']}",
+            params={"delete_token": first_token},
+        )
+        assert delete_album_other.status_code == 403
+
+
+def test_anonymous_delete_token_cannot_manage_owned_album(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, owner_key = create_user_and_api_key(capsys, username="ownedtarget", email="ownedtarget@example.com")
+
+    with TestClient(app) as client:
+        anonymous = client.post(
+            "/api/v1/upload",
+            files=[("file", ("anon.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Anonymous Album"},
+        )
+        owned = client.post(
+            "/api/v1/upload",
+            files=[("file", ("owned.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"Authorization": f"Bearer {owner_key}"},
+            data={"title": "Owned Album"},
+        )
+
+        assert anonymous.status_code == 200
+        assert owned.status_code == 200
+
+        anonymous_token = anonymous.json()["manage_url"].split("token=")[1]
+        owned_payload = owned.json()
+
+        patch_owned = client.patch(
+            f"/api/v1/album/{owned_payload['album_id']}",
+            params={"delete_token": anonymous_token},
+            json={"title": "Should fail"},
+        )
+        assert patch_owned.status_code == 403
+
+        delete_owned = client.delete(
+            f"/api/v1/album/{owned_payload['album_id']}",
+            params={"delete_token": anonymous_token},
+        )
+        assert delete_owned.status_code == 403
+
+
+def test_session_cookie_plus_delete_token_mutation_still_requires_trusted_csrf_source(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    user_id, _ = create_user_and_api_key(capsys, username="tokenbrowser", email="tokenbrowser@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        anonymous = client.post(
+            "/api/v1/upload",
+            files=[("file", ("anon.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Anonymous Album"},
+        )
+        assert anonymous.status_code == 200
+        payload = anonymous.json()
+        delete_token = payload["manage_url"].split("token=")[1]
+
+        set_user_password(client, user_id, "browser-pass")
+        login = client.post("/api/v1/auth/login", json={"login": "tokenbrowser@example.com", "password": "browser-pass"})
+        assert login.status_code == 200
+
+        blocked = client.patch(
+            f"/api/v1/album/{payload['album_id']}",
+            params={"delete_token": delete_token},
+            json={"title": "Blocked"},
+        )
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == "CSRF protection blocked the request."
+
+        allowed = client.patch(
+            f"/api/v1/album/{payload['album_id']}",
+            params={"delete_token": delete_token},
+            json={"title": "Allowed"},
+            headers=browser_session_headers("https://testserver", f"/manage/{payload['album_id']}"),
+        )
+        assert allowed.status_code == 200
+        assert allowed.json()["title"] == "Allowed"
 
 
 def test_admin_can_delete_expired_anonymous_album_for_cleanup(tmp_path, monkeypatch, capsys) -> None:
