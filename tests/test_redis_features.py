@@ -106,6 +106,11 @@ class FakeRedis:
         return None
 
 
+class DeleteFailingRedis(FakeRedis):
+    async def delete(self, key: str) -> int:
+        raise OSError("redis down")
+
+
 class DummyRuntimeConfig:
     def __init__(self, values: dict[str, int | bool]) -> None:
         self.values = values
@@ -943,6 +948,112 @@ def test_app_logout_still_clears_cookie_when_redis_delete_fails(tmp_path, monkey
 
         after_logout = client.get("/api/v1/user/me")
         assert after_logout.status_code == 401
+
+
+def test_browser_session_delete_current_user_clears_cookie_and_redis_session(tmp_path, monkeypatch, capsys) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    user_id, _ = create_user_and_api_key(capsys, username="redisdelete", email="redisdelete@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "secret-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "redisdelete@example.com", "password": "secret-pass"},
+        )
+        assert login.status_code == 200
+        cookie_token = client.cookies.get("imghost_session")
+        assert cookie_token is not None
+        payload = _decode_signed_token(client.app.state.imghost.settings, cookie_token)
+        assert payload is not None
+        assert payload.store == "redis"
+        session_key = next(key for key in fake.values if key.endswith(f"session:{payload.session_id}"))
+
+        deleted = client.request(
+            "DELETE",
+            "/api/v1/user/me",
+            headers=browser_session_headers("https://testserver", "/settings"),
+            json={"method": "password", "current_password": "secret-pass"},
+        )
+        assert deleted.status_code == 200
+        assert "imghost_session=" in deleted.headers["set-cookie"]
+        assert session_key not in fake.values
+
+        after_delete = client.get("/api/v1/user/me")
+        assert after_delete.status_code == 401
+
+
+def test_browser_session_delete_current_user_still_clears_cookie_when_redis_delete_fails(tmp_path, monkeypatch, capsys) -> None:
+    fake = DeleteFailingRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    user_id, _ = create_user_and_api_key(capsys, username="redisdeletefailopen", email="redisdeletefailopen@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "secret-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "redisdeletefailopen@example.com", "password": "secret-pass"},
+        )
+        assert login.status_code == 200
+
+        deleted = client.request(
+            "DELETE",
+            "/api/v1/user/me",
+            headers=browser_session_headers("https://testserver", "/settings"),
+            json={"method": "password", "current_password": "secret-pass"},
+        )
+        assert deleted.status_code == 200
+        assert "imghost_session=" in deleted.headers["set-cookie"]
+
+        after_delete = client.get("/api/v1/user/me")
+        assert after_delete.status_code == 401
+
+
+def test_browser_session_delete_current_user_still_clears_cookie_when_redis_delete_fails_in_strict_mode(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    fake = DeleteFailingRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    user_id, _ = create_user_and_api_key(capsys, username="redisdeletefailclosed", email="redisdeletefailclosed@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        set_user_password(client, user_id, "secret-pass")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "redisdeletefailclosed@example.com", "password": "secret-pass"},
+        )
+        assert login.status_code == 200
+
+        deleted = client.request(
+            "DELETE",
+            "/api/v1/user/me",
+            headers=browser_session_headers("https://testserver", "/settings"),
+            json={"method": "password", "current_password": "secret-pass"},
+        )
+        assert deleted.status_code == 200
+        assert "imghost_session=" in deleted.headers["set-cookie"]
+
+        after_delete = client.get("/api/v1/user/me")
+        assert after_delete.status_code == 401
 
 
 def test_health_ready_reports_detailed_status_when_redis_is_unavailable(tmp_path, monkeypatch) -> None:

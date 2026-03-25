@@ -42,6 +42,12 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
     )
 
 
+async def clear_browser_session(request: Request, response: Response) -> None:
+    state = get_state(request)
+    await state.session_backend.clear_session(request.cookies.get(state.settings.session_cookie_name))
+    clear_session_cookie(response, state.settings)
+
+
 async def authenticated_principal(request: Request, *, required: bool = False) -> ResolvedPrincipal | None:
     state = get_state(request)
     header = request.headers.get("Authorization", "")

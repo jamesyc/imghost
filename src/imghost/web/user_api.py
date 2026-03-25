@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from ..account_service import AccountDeletionConfirmationInput
 from ..service import PasswordChangeInput
 from ..public_origin import public_base_url
-from .auth_context import authenticated_principal, authenticated_user
+from .auth_context import authenticated_principal, authenticated_user, clear_browser_session
 from .pagination import validate_pagination
 from .request_context import correlation_id, get_state
 
@@ -130,7 +130,7 @@ async def delete_current_user(request: Request, payload: UserDeleteRequest) -> J
         ),
     )
     deleted = await state.uploads.delete_user_account(user, cid)
-    return JSONResponse(
+    response = JSONResponse(
         {
             "deleted": True,
             "user_id": user.id,
@@ -139,6 +139,8 @@ async def delete_current_user(request: Request, payload: UserDeleteRequest) -> J
         },
         headers={"X-Correlation-ID": cid},
     )
+    await clear_browser_session(request, response)
+    return response
 
 
 @router.post("/api/v1/user/me/oauth/google/disconnect")

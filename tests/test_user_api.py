@@ -740,6 +740,7 @@ def test_browser_session_delete_current_user_clears_session_and_removes_content(
         deleted_payload = deleted.json()
         assert deleted_payload["deleted"] is True
         assert deleted_payload["user_id"] == user_id
+        assert "imghost_session=" in deleted.headers["set-cookie"]
 
         me = client.get("/api/v1/user/me")
         assert me.status_code == 401

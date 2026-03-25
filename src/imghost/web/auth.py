@@ -10,7 +10,7 @@ from ..sessions import SessionBackendUnavailable
 from .auth_context import (
     apply_session_cookie,
     authenticated_user,
-    clear_session_cookie,
+    clear_browser_session,
 )
 from .request_context import correlation_id, get_state
 
@@ -108,9 +108,8 @@ async def logout(request: Request) -> JSONResponse:
         user = await authenticated_user(request, required=False)
     except HTTPException:
         user = None
-    await state.session_backend.clear_session(request.cookies.get(state.settings.session_cookie_name))
     if user is not None:
         await state.telemetry.record_logout_succeeded(request, user=user)
     response = JSONResponse({"authenticated": False}, headers={"X-Correlation-ID": cid})
-    clear_session_cookie(response, state.settings)
+    await clear_browser_session(request, response)
     return response
