@@ -37,40 +37,39 @@ Choose one:
 
 ### Beginner Install
 
-1. Copy the beginner env file:
+1. Copy the `compose.beginner.yaml`, `.env.example.beginner` file and the `docker` folder into a folder on your computer
+   
+2. Rename the beginner env file:
 
 ```bash
-cp .env.example.beginner .env.beginner
+mv .env.example.beginner .env.beginner
 ```
 
-2. Edit `.env.beginner` and set it for your system
-
-3. Copy the `compose.beginner.yaml` file and the `docker` folder into a folder on your computer
+3. Edit `.env.beginner` and set it up for your system and network. Set your hostname/IP address, etc. 
   
-5. Start the stack:
+4. Start the stack:
 
 ```bash
 docker compose -f compose.beginner.yaml --env-file .env.beginner up -d
 ```
 
-6. Open `http://your-server:8000`
+5. Open `http://your-server:8000`
 
 ### Standard Install
 
-1. Copy the standard env file:
+1. Copy the `compose.yaml`, `.env.example` file and the `docker` folder into a folder on your computer
+
+2.  Rename the standard env file:
 
 ```bash
-cp .env.example .env
+mv .env.example .env
 ```
 
-2. Edit `.env` and set it for your system
-
-3. Copy the `compose.beginner.yaml` file and the `docker` folder into a folder on your computer
+3. Edit `.env` and set it for your system and network. Set your hostname/IP address, etc. 
   
 4. Start the published images:
 
 ```bash
-docker compose -f compose.yaml --env-file .env pull
 docker compose -f compose.yaml --env-file .env up -d
 ```
 
