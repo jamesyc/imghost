@@ -43,7 +43,18 @@ jobs:
             type=ref,event=tag
             type=sha,prefix=sha-
 
-      - name: Build and push image
+      - name: Extract garage-init Docker metadata
+        id: garage_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/imghost-garage-init
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+
+      - name: Build and push app image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -52,5 +63,17 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push garage-init image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/GarageTools.Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.garage_meta.outputs.tags }}
+          labels: ${{ steps.garage_meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
