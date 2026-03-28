@@ -71,11 +71,15 @@ def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> 
         response = client.get("/")
         assert response.status_code == 200
         assert '<link rel="stylesheet" href="/static/css/base.css">' in response.text
+        assert '<script src="/static/js/nav.js" defer></script>' in response.text
         assert '<script src="/static/js/upload-box.js" defer></script>' in response.text
         assert '<script src="/static/js/home.js" defer></script>' in response.text
         assert 'href="/login"' in response.text
         assert 'href="/register"' in response.text
         assert '<a class="nav-brand" href="/">ImgHost</a>' in response.text
+        assert 'data-nav-root' in response.text
+        assert 'data-nav-toggle' in response.text
+        assert 'id="site-nav-menu"' in response.text
         assert '>Home<' not in response.text
         assert 'id="login-form"' not in response.text
         assert 'id="register-form"' not in response.text
@@ -158,11 +162,34 @@ def test_home_page_shows_session_state_when_logged_in(tmp_path, monkeypatch) -> 
         assert "Authenticated uploads do not expire by default." not in page.text
         assert "Uploads do not expire when you're logged in." in page.text
         assert "Anonymous uploads currently expire after 24 hour(s)." not in page.text
+        assert 'href="/dashboard"' in page.text
+        assert 'href="/albums"' in page.text
+        assert 'href="/settings"' in page.text
         assert 'data-logout-form' in page.text
         assert 'id="upload-form"' in page.text
         assert 'data-upload-feedback' in page.text
         assert 'id="flash"' not in page.text
         assert 'name="album_id"' not in page.text
+
+
+def test_admin_nav_includes_admin_link_and_mobile_toggle(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    create_admin_and_api_key(capsys, username="adminmobile", email="adminmobile@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "adminmobile@example.com", "password": "test-pass-123"},
+        )
+        assert login.status_code == 200
+
+        page = client.get("/admin")
+        assert page.status_code == 200
+        assert 'href="/admin"' in page.text
+        assert 'data-nav-toggle' in page.text
+        assert 'data-theme-toggle' in page.text
 
 
 def test_dashboard_page_uses_local_upload_feedback_anchor(tmp_path, monkeypatch) -> None:
@@ -485,7 +512,7 @@ def test_template_shell_wraps_phase_three_pages_and_private_pages(tmp_path, monk
             response = client.get(public_path)
             assert response.status_code == 200
             assert '<link rel="stylesheet" href="/static/css/base.css">' in response.text
-            assert '<nav class="site-nav" aria-label="Primary">' in response.text
+            assert '<nav class="site-nav" aria-label="Primary" data-nav-root data-nav-open="false">' in response.text
 
         set_user_password(client, user_id, "open-sesame")
         login = client.post("/api/v1/auth/login", json={"login": "dash@example.com", "password": "open-sesame"})
@@ -645,7 +672,7 @@ def test_public_album_page_uses_template_shell_and_shows_owner_edit_link_only_fo
         anonymous_page = client.get(f'/a/{upload.json()["album_id"]}')
         assert anonymous_page.status_code == 200
         assert '<link rel="stylesheet" href="/static/css/base.css">' in anonymous_page.text
-        assert '<nav class="site-nav" aria-label="Primary">' in anonymous_page.text
+        assert '<nav class="site-nav" aria-label="Primary" data-nav-root data-nav-open="false">' in anonymous_page.text
         assert 'id="public-album-bootstrap"' in anonymous_page.text
         assert '"total_size_display"' in anonymous_page.text
         assert '"file_size_display"' in anonymous_page.text
@@ -697,11 +724,6 @@ def test_public_album_page_shows_last_edited_only_after_album_changes(tmp_path, 
             headers={"Authorization": f"Bearer {api_key}"},
         )
         assert upload.status_code == 200
-
-        album = client.portal.call(client.app.state.imghost.repository.get_album, upload.json()["album_id"])
-        assert album is not None
-        album.updated_at = album.created_at
-        client.portal.call(client.app.state.imghost.repository.update_album, album)
 
         initial_page = client.get(f'/a/{upload.json()["album_id"]}')
         assert initial_page.status_code == 200
@@ -1020,7 +1042,7 @@ def test_public_user_album_list_page_uses_template_shell(tmp_path, monkeypatch, 
         page = client.get("/u/showcase2")
         assert page.status_code == 200
         assert '<link rel="stylesheet" href="/static/css/base.css">' in page.text
-        assert '<nav class="site-nav" aria-label="Primary">' in page.text
+        assert '<nav class="site-nav" aria-label="Primary" data-nav-root data-nav-open="false">' in page.text
         assert "Public user album list." in page.text
         assert "Showcase Album" in page.text
         assert "Created " in page.text

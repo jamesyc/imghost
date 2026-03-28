@@ -1,10 +1,9 @@
 .site-nav {
   position: relative;
   overflow: hidden;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   margin-bottom: 22px;
   padding: 14px 16px;
@@ -16,6 +15,27 @@
   box-shadow: var(--shadow-soft);
 }
 
+.site-nav-bar {
+  display: contents;
+}
+
+.site-nav-bar-actions {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.site-nav-menu {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .nav-links,
 .nav-actions {
   display: flex;
@@ -25,12 +45,21 @@
 }
 
 .nav-brand {
+  grid-column: 1;
   margin-right: 8px;
   color: var(--fg);
   text-decoration: none;
   font-size: 1.2rem;
   font-weight: 700;
   letter-spacing: -0.03em;
+}
+
+.nav-links {
+  min-width: 0;
+}
+
+.nav-actions {
+  justify-content: flex-end;
 }
 
 .site-nav::before,
@@ -69,11 +98,18 @@
   cursor: pointer;
 }
 
+.nav-menu-toggle {
+  display: none;
+  font: inherit;
+  cursor: pointer;
+}
+
 .nav-logout-form {
   margin: 0;
 }
 
-.nav-logout-button {
+.nav-logout-button,
+.nav-menu-toggle {
   min-height: 44px;
   padding: 10px 15px;
   color: var(--fg);

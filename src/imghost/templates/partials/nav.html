@@ -1,25 +1,41 @@
-<nav class="site-nav" aria-label="Primary">
-  <div class="nav-links">
+<nav class="site-nav" aria-label="Primary" data-nav-root data-nav-open="false">
+  <div class="site-nav-bar">
     <a class="nav-brand" href="/">ImgHost</a>
-    {% for item in nav_items %}
-    {% if item.href not in ["/login", "/register"] %}
-    <a class="nav-link" href="{{ item.href }}">{{ item.label }}</a>
-    {% endif %}
-    {% endfor %}
+    <div class="site-nav-bar-actions">
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
+        <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">◐</span>
+      </button>
+      <button
+        class="nav-menu-toggle"
+        type="button"
+        aria-label="Open navigation menu"
+        aria-controls="site-nav-menu"
+        aria-expanded="false"
+        data-nav-toggle
+      >
+        Menu
+      </button>
+    </div>
   </div>
-  <div class="nav-actions">
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
-      <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">◐</span>
-    </button>
-    {% if current_user %}
-    <form class="nav-logout-form" data-logout-form action="/api/v1/auth/logout" method="post">
-      <button type="submit" class="nav-logout-button">Log Out</button>
-    </form>
-    {% endif %}
-    {% for item in nav_items %}
-    {% if item.href in ["/login", "/register"] %}
-    <a class="nav-link nav-link-strong" href="{{ item.href }}">{{ item.label }}</a>
-    {% endif %}
-    {% endfor %}
+  <div id="site-nav-menu" class="site-nav-menu" data-nav-menu>
+    <div class="nav-links">
+      {% for item in nav_items %}
+      {% if item.href not in ["/login", "/register"] %}
+      <a class="nav-link" href="{{ item.href }}">{{ item.label }}</a>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="nav-actions">
+      {% if current_user %}
+      <form class="nav-logout-form" data-logout-form action="/api/v1/auth/logout" method="post">
+        <button type="submit" class="nav-logout-button">Log Out</button>
+      </form>
+      {% endif %}
+      {% for item in nav_items %}
+      {% if item.href in ["/login", "/register"] %}
+      <a class="nav-link nav-link-strong" href="{{ item.href }}">{{ item.label }}</a>
+      {% endif %}
+      {% endfor %}
+    </div>
   </div>
 </nav>
