@@ -29,6 +29,17 @@ CREATE TABLE IF NOT EXISTS user_sso_links (
   UNIQUE (provider, provider_uid)
 );
 
+CREATE TABLE IF NOT EXISTS oauth_state_nonces (
+  jti TEXT PRIMARY KEY,
+  mode TEXT NOT NULL,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  code_verifier TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+ALTER TABLE oauth_state_nonces ADD COLUMN IF NOT EXISTS code_verifier TEXT NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS api_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -81,14 +92,31 @@ CREATE TABLE IF NOT EXISTS config (
 CREATE TABLE IF NOT EXISTS audit_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_type TEXT NOT NULL,
+  action TEXT,
+  result TEXT,
+  source TEXT,
+  actor_type TEXT,
   actor_id UUID,
   actor_ip_hash TEXT,
+  request_id TEXT,
+  route TEXT,
+  method TEXT,
+  reason TEXT,
   target_type TEXT,
   target_id TEXT,
   correlation_id TEXT,
   metadata JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS action TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS result TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS source TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS actor_type TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS request_id TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS route TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS method TEXT;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS reason TEXT;
 
 CREATE TABLE IF NOT EXISTS user_rate_limits (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -105,8 +133,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log (created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log (actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_correlation ON audit_log (correlation_id);
 CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_log (event_type);
+CREATE INDEX IF NOT EXISTS idx_audit_action_created ON audit_log (action, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_result_created ON audit_log (result, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_source_created ON audit_log (source, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_log (request_id);
+CREATE INDEX IF NOT EXISTS idx_audit_route_created ON audit_log (route, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys (user_id);
 CREATE INDEX IF NOT EXISTS idx_sso_links_user_id ON user_sso_links (user_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_state_nonces_expires_at ON oauth_state_nonces (expires_at);
 
 DROP TRIGGER IF EXISTS users_set_updated_at ON users;
 CREATE TRIGGER users_set_updated_at
