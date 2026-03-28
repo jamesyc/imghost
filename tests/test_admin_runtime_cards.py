@@ -315,7 +315,7 @@ def test_render_admin_runtime_cards_worker_states(updates: dict, status: str, to
                 }
             },
             "Same service",
-            "ok",
+            "warn",
             "runs the scheduler loop",
         ),
         (

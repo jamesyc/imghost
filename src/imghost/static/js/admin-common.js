@@ -183,8 +183,10 @@ window.renderAdminRuntimeCards = (payload) => {
         : schedulerService.configured
           ? "Separate service"
           : "Disabled",
-      tone: schedulerService.enabled_in_this_process || schedulerService.configured
-        ? (schedulerService.last_enqueue_error ? "warn" : "ok")
+      tone: schedulerService.enabled_in_this_process
+        ? "warn"
+        : schedulerService.configured
+          ? (schedulerService.last_enqueue_error ? "warn" : "ok")
         : "neutral",
       hint: schedulerService.enabled_in_this_process
         ? `This process runs the scheduler loop. Poll ${window.adminFormatNumber(schedulerService.poll_seconds || 0)}s · Lease ${schedulerService.lease_enabled ? `${window.adminFormatNumber(schedulerService.lease_seconds || 0)}s (Redis)` : "disabled"}${schedulerJobs ? ` · ${window.escapeAdminHtml(schedulerJobs)}` : ""}`
