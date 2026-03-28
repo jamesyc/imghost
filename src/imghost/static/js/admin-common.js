@@ -75,6 +75,8 @@ window.renderAdminRuntimeCards = (payload) => {
   const schedulerService = payload.services?.scheduler || {};
   const sessionSubsystem = payload.redis?.subsystems?.sessions || {};
   const rateLimitSubsystem = payload.redis?.subsystems?.rate_limits || {};
+  const sessionMode = sessionSubsystem.effective_mode || sessionSubsystem.mode;
+  const rateLimitMode = rateLimitSubsystem.effective_mode || rateLimitSubsystem.mode;
   const bootstrapAdmin = payload.bootstrap_admin || {};
   const hasSeparateWorkerService = payload.redis?.configured && payload.tasks?.mode === "redis";
   const usesInProcessAsyncTasks = !workerService.enabled_in_this_process && !hasSeparateWorkerService && payload.tasks?.mode === "async";
@@ -110,16 +112,16 @@ window.renderAdminRuntimeCards = (payload) => {
       label: "Redis",
       status: payload.redis?.configured ? (payload.redis?.reachable ? "Reachable" : "Configured, not reachable") : "Disabled",
       tone: payload.redis?.configured ? (payload.redis?.reachable ? "ok" : "warn") : "neutral",
-      hint: `Sessions ${payload.redis?.subsystems?.sessions?.mode || "unknown"}${payload.redis?.session_fail_closed ? " (fail closed)" : " (graceful fallback)"} · Rate limits ${payload.redis?.subsystems?.rate_limits?.mode || "unknown"}`,
+      hint: `Sessions ${sessionMode || "unknown"}${payload.redis?.session_fail_closed ? " (fail closed)" : " (graceful fallback)"} · Rate limits ${rateLimitMode || "unknown"}`,
     },
     {
       label: "Sessions",
-      status: sessionSubsystem.mode === "redis"
+      status: sessionMode === "redis"
         ? "Redis-backed"
         : payload.redis?.session_fail_closed
           ? "Fail-closed"
           : "Signed-cookie fallback",
-      tone: sessionSubsystem.mode === "redis"
+      tone: sessionMode === "redis"
         ? "ok"
         : payload.redis?.session_fail_closed
           ? "warn"
@@ -130,21 +132,21 @@ window.renderAdminRuntimeCards = (payload) => {
     },
     {
       label: "Rate limits",
-      status: rateLimitSubsystem.mode === "redis"
+      status: rateLimitMode === "redis"
         ? "Redis-backed"
-        : rateLimitSubsystem.mode === "memory"
+        : rateLimitMode === "memory" || rateLimitMode === "fallback"
           ? "In-memory fallback"
-          : rateLimitSubsystem.mode === "disabled"
+        : rateLimitMode === "disabled"
             ? "Disabled"
-            : (rateLimitSubsystem.mode || "Unknown"),
-      tone: rateLimitSubsystem.mode === "redis"
+            : (rateLimitMode || "Unknown"),
+      tone: rateLimitMode === "redis"
         ? "ok"
-        : rateLimitSubsystem.mode === "memory"
+        : rateLimitMode === "memory" || rateLimitMode === "fallback"
           ? "warn"
           : "neutral",
-      hint: rateLimitSubsystem.mode === "redis"
+      hint: rateLimitMode === "redis"
         ? "Shared counters survive across processes."
-        : rateLimitSubsystem.mode === "memory"
+        : rateLimitMode === "memory" || rateLimitMode === "fallback"
           ? "Counters are process-local and reset on restart."
           : "Rate limiting is not backed by Redis in this process.",
     },
@@ -176,13 +178,19 @@ window.renderAdminRuntimeCards = (payload) => {
     },
     {
       label: "Scheduler",
-      status: schedulerService.enabled_in_this_process ? "Scheduler role active" : "Disabled",
-      tone: schedulerService.enabled_in_this_process
+      status: schedulerService.enabled_in_this_process
+        ? "Same service"
+        : schedulerService.configured
+          ? "Separate service"
+          : "Disabled",
+      tone: schedulerService.enabled_in_this_process || schedulerService.configured
         ? (schedulerService.last_enqueue_error ? "warn" : "ok")
         : "neutral",
       hint: schedulerService.enabled_in_this_process
-        ? `Poll ${window.adminFormatNumber(schedulerService.poll_seconds || 0)}s · Lease ${schedulerService.lease_enabled ? `${window.adminFormatNumber(schedulerService.lease_seconds || 0)}s (Redis)` : "disabled"}${schedulerJobs ? ` · ${window.escapeAdminHtml(schedulerJobs)}` : ""}`
-        : "No scheduler loop active in this process.",
+        ? `This process runs the scheduler loop. Poll ${window.adminFormatNumber(schedulerService.poll_seconds || 0)}s · Lease ${schedulerService.lease_enabled ? `${window.adminFormatNumber(schedulerService.lease_seconds || 0)}s (Redis)` : "disabled"}${schedulerJobs ? ` · ${window.escapeAdminHtml(schedulerJobs)}` : ""}`
+        : schedulerService.configured
+          ? `Scheduler loop runs in a separate ${window.escapeAdminHtml(schedulerService.hosted_by || "scheduler")} service. Poll ${window.adminFormatNumber(schedulerService.poll_seconds || 0)}s · Lease ${schedulerService.lease_enabled ? `${window.adminFormatNumber(schedulerService.lease_seconds || 0)}s (Redis)` : "disabled"}${schedulerJobs ? ` · ${window.escapeAdminHtml(schedulerJobs)}` : ""}`
+          : "Scheduler is disabled overall.",
     },
     {
       label: "Bootstrap admin",
