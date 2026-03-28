@@ -1,6 +1,6 @@
 # Authentication
 
-`imghost` supports browser sessions and bearer API keys.
+`imghost` supports browser sessions, bearer API keys, and optional Google OAuth.
 
 ## Local auth flows
 
@@ -25,6 +25,28 @@ Password-setting policy:
 
 - local passwords must be at least 8 characters
 - the backend enforces this for registration, admin user creation, admin reset, and current-user password change
+
+## OAuth flows
+
+Routes:
+
+- `GET /auth/google/start`
+- `GET /auth/google/callback`
+- `GET /auth/{provider}/start`
+- `GET /auth/{provider}/callback`
+- `POST /api/v1/user/me/oauth/google/disconnect`
+
+Current shipped provider support:
+
+- Google OAuth with PKCE
+
+Current behavior:
+
+- OAuth sign-in is optional and controlled by `GOOGLE_OAUTH_ENABLED`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`
+- OAuth can sign an existing linked user in, create a new account when registration is allowed, or link a provider to an already signed-in account
+- OAuth login still creates the normal browser session cookie after the provider callback completes
+- `/settings` supports Google disconnect and OAuth-based re-authentication for account deletion
+- disconnect is blocked if it would leave the account without any remaining sign-in method
 
 ## Browser sessions
 
@@ -98,6 +120,13 @@ Current user API key route:
 
 - `POST /api/v1/user/me/api-key`
 
+Current user summary payloads also expose:
+
+- `has_password`
+- `has_api_key`
+- API key timestamps
+- linked `sso_providers`
+
 ## Delete-token authorization
 
 Anonymous albums do not have an owning user, so their mutation model is based on `delete_token`.
@@ -135,3 +164,14 @@ Behavior:
 - if the request is browser-session-authenticated, the app auto-issues or rotates the API key and embeds the fresh raw key
 
 That behavior exists because the app only stores the hash of the key, not the original raw value.
+
+## Account deletion confirmation
+
+`DELETE /api/v1/user/me` requires an explicit confirmation payload.
+
+Supported confirmation modes:
+
+- `password`
+- `oauth_reauth`
+
+`oauth_reauth` is currently used with the Google OAuth delete-account re-auth flow from `/settings`.

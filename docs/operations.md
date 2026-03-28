@@ -29,18 +29,21 @@ Practical probe meaning:
 
 ## Readiness response contract
 
-`GET /health/ready` returns the runtime-status payload with a top-level `ok` field added by the endpoint.
+`GET /health/ready` returns a small readiness snapshot, not the full admin runtime-status payload.
 
 Stable fields to rely on:
 
 - `ok`
+- `degraded`
 - `database.ok`
 - `storage.ok`
 - `redis.configured`
 - `redis.reachable`
 - `tasks.mode`
 
-The payload also includes worker state, scheduler state, Redis subsystem snapshots, trusted-origin/proxy settings, and task queue details for debugging.
+Worker state, scheduler state, Redis subsystem snapshots, trusted-origin/proxy settings, and bootstrap-admin details live on:
+
+- `GET /api/v1/admin/runtime-status`
 
 ## Current tested health scenarios
 
@@ -71,6 +74,21 @@ Requires admin auth and returns:
 - trusted public origins
 - forwarded-header policy
 - trusted proxy CIDRs
+- bootstrap-admin promotion state
+
+## Metrics
+
+- `GET /metrics`
+
+This endpoint exposes Prometheus-format telemetry metrics, including current coverage for:
+
+- HTTP request counters and latency
+- upload counters and uploaded bytes
+- thumbnail job outcomes
+- auth and OAuth event counters
+- subsystem degraded/recovered transitions
+- worker running state
+- enqueued task counters
 
 ## Logging model
 

@@ -38,6 +38,8 @@ Practical modes:
 
 - `SECRET_KEY`
   Used to sign browser-session cookies.
+- `PROMOTE_USERNAME_TO_ADMIN`
+  Optional startup-time username to promote to admin if that user already exists.
 - `DATABASE_URL`
   Direct PostgreSQL DSN for non-Compose or app-only runs.
 - `DATABASE_USE_PGBOUNCER`
@@ -58,6 +60,12 @@ Practical modes:
 - `SESSION_REDIS_FAIL_CLOSED`
   When `true`, browser-session creation and resolution fail closed if Redis-backed sessions are unavailable. When `false`, the app falls back to signed-cookie session validation during Redis outages.
 - `SESSION_REMEMBER_DAYS`
+
+### OAuth settings
+
+- `GOOGLE_OAUTH_ENABLED`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
 
 ### Storage settings
 
@@ -90,9 +98,11 @@ Practical modes:
   Queue list used by the generic `run-worker` compatibility command
 - `THUMBNAIL_WORKER_COUNT`
 - `SCHEDULER_ENABLED`
+- `APP_SCHEDULER_ENABLED`
 - `SCHEDULER_POLL_SECONDS`
 - `SCHEDULER_LEASE_SECONDS`
 - `CLEANUP_INTERVAL_SECONDS`
+- `AUDIT_RETENTION_DAYS`
 
 Practical deployment shapes:
 
@@ -101,6 +111,7 @@ Practical deployment shapes:
   - `REDIS_MODE=disabled`
   - `TASK_QUEUE_MODE=async`
   - no separate worker or scheduler service
+  - app-hosted scheduler enabled by default with `APP_SCHEDULER_ENABLED=true`
 - advanced Docker stack:
   - `DATABASE_USE_PGBOUNCER=true`
   - `REDIS_MODE=auto`
@@ -161,6 +172,10 @@ Current keys:
 - `allow_registration`
 - `anon_upload_enabled`
 - `anon_expiry_hours`
+- `max_upload_bytes`
+- `video_thumb_frames`
+- `default_user_quota_bytes`
+- `server_quota_bytes`
 - `rate_limit_anon_rpm`
 - `rate_limit_anon_bph`
 - `rate_limit_global_anon_rpm`
@@ -173,6 +188,10 @@ These can be environment-locked with:
 - `LOCK_ALLOW_REGISTRATION`
 - `LOCK_ANON_UPLOAD`
 - `LOCK_ANON_EXPIRY`
+- `LOCK_MAX_UPLOAD_BYTES`
+- `LOCK_VIDEO_THUMB_FRAMES`
+- `LOCK_DEFAULT_USER_QUOTA_BYTES`
+- `LOCK_SERVER_QUOTA_BYTES`
 - `LOCK_RATE_LIMITS`
 
 ## Resolution notes
@@ -181,5 +200,8 @@ These can be environment-locked with:
 - `SESSION_REDIS_FAIL_CLOSED` defaults to `false`.
 - `PUBLIC_ORIGIN_ENABLED` defaults to `true`.
 - `TRUSTED_PROXY_CIDRS_ENABLED` defaults to `false`.
+- `GOOGLE_OAUTH_ENABLED` defaults to `false`.
 - `TRUSTED_PROXY_CIDRS_ENABLED=true` requires a non-empty `TRUSTED_PROXY_CIDRS` list.
 - `REDIS_PASSWORD` is only injected when `REDIS_URL` does not already contain credentials.
+- `APP_SCHEDULER_ENABLED` defaults to `false` in code and is turned on explicitly by the beginner Compose stack.
+- `AUDIT_RETENTION_DAYS` defaults to `90`.

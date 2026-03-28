@@ -8,7 +8,7 @@ uv run pytest -q
 
 Current full-suite baseline:
 
-- 212 passing tests
+- 647 collected tests
 
 ## Test database safety
 
@@ -36,6 +36,7 @@ Current tests cover:
 
 - uploads and album behavior
 - auth and sessions
+- Google OAuth login, linking, disconnect, and delete-account re-auth
 - password minimum-length enforcement on registration, admin create/reset, and current-user change flows
 - browser-session CSRF enforcement and exemptions
 - anonymous manage-token mutation coverage
@@ -52,7 +53,10 @@ Current tests cover:
 - storage backends
 - ZIP streaming
 - liveness and readiness health endpoints
+- Prometheus metrics endpoint and metrics middleware
 - runtime status
+- scheduler behavior and cleanup enqueueing
+- bootstrap admin promotion
 - admin operations
 
 ## Important warning

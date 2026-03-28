@@ -53,8 +53,9 @@ Purpose:
 - current-user summary
 - API key reveal/rotation
 - ShareX config export
+- connected Google account status and disconnect
 - password change
-- account deletion
+- account deletion, including OAuth re-auth support when needed
 
 ## `/admin`
 

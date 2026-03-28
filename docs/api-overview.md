@@ -5,6 +5,8 @@ This is a human-oriented map of the main routes. It is not meant to replace gene
 ## Public and browser pages
 
 - `GET /`
+- `GET /login`
+- `GET /register`
 - `GET /dashboard`
 - `GET /albums`
 - `GET /albums/{album_id}`
@@ -19,16 +21,23 @@ This is a human-oriented map of the main routes. It is not meant to replace gene
 - `GET /a/{album_id}`
 - `GET /u/{username}`
 - `GET /manage/{album_id}`
+- `GET /manifest.webmanifest`
+- `GET /service-worker.js`
 
 ## Auth
 
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/logout`
+- `GET /auth/google/start`
+- `GET /auth/{provider}/start`
+- `GET /auth/google/callback`
+- `GET /auth/{provider}/callback`
 
 ## Upload and album access
 
 - `POST /api/v1/upload`
+- `GET /api/v1/album/{album_id}/delete`
 - `GET /api/v1/album/{album_id}`
 - `GET /api/v1/album/{album_id}/zip`
 - `DELETE /api/v1/album/{album_id}`
@@ -51,6 +60,7 @@ Anonymous/public mutation rules:
 - `PATCH /api/v1/user/me/password`
 - `GET /api/v1/user/me/sharex-config`
 - `DELETE /api/v1/user/me`
+- `POST /api/v1/user/me/oauth/google/disconnect`
 
 `GET /api/v1/user/me/albums` returns a paginated envelope:
 
@@ -93,9 +103,13 @@ Anonymous/public mutation rules:
 `GET /api/v1/admin/audit` supports filters and pagination:
 
 - `event_type`
+- `action`
+- `result`
+- `source`
 - `actor_id`
 - `user_id`
 - `correlation_id`
+- `request_id`
 - `after`
 - `before`
 - `limit` default `100`, maximum `500`
@@ -113,6 +127,7 @@ Anonymous/public mutation rules:
 
 - `GET /health/live`
 - `GET /health/ready`
+- `GET /metrics`
 
 ## Common error/status patterns
 

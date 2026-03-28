@@ -7,16 +7,18 @@ The frontend is a server-rendered app with shared CSS and page-scoped vanilla Ja
 - [`src/imghost/templates/base.html`](/home/james/imghost/src/imghost/templates/base.html): shared document shell, asset loading, and common layout framing
 - [`src/imghost/templates/partials/nav.html`](/home/james/imghost/src/imghost/templates/partials/nav.html): primary nav
 - [`src/imghost/templates/partials/admin-subnav.html`](/home/james/imghost/src/imghost/templates/partials/admin-subnav.html): admin local navigation
-- [`src/imghost/templates/partials/flash.html`](/home/james/imghost/src/imghost/templates/partials/flash.html): shared flash rendering where still used
 - [`src/imghost/templates/pages`](/home/james/imghost/src/imghost/templates/pages): page templates by route surface
 
 ## Shared Frontend Assets
 
-- [`src/imghost/static/css/base.css`](/home/james/imghost/src/imghost/static/css/base.css): shared visual system and layout primitives
+- [`src/imghost/static/css/base.css`](/home/james/imghost/src/imghost/static/css/base.css): shared stylesheet entrypoint that imports the split base token/layout/component/form/page/responsive/upload layers
 - [`src/imghost/static/js/upload-box.js`](/home/james/imghost/src/imghost/static/js/upload-box.js): upload interactions used by landing, dashboard, and workspace flows
 - [`src/imghost/static/js/auth.js`](/home/james/imghost/src/imghost/static/js/auth.js): login and registration behavior
 - [`src/imghost/static/js/album-cards.js`](/home/james/imghost/src/imghost/static/js/album-cards.js): shared album card rendering/interaction helpers
 - [`src/imghost/static/js/admin-common.js`](/home/james/imghost/src/imghost/static/js/admin-common.js): shared admin page helpers
+- [`src/imghost/static/js/pwa.js`](/home/james/imghost/src/imghost/static/js/pwa.js): service-worker registration
+- [`src/imghost/static/js/theme-init.js`](/home/james/imghost/src/imghost/static/js/theme-init.js): early theme bootstrap
+- [`src/imghost/static/js/theme.js`](/home/james/imghost/src/imghost/static/js/theme.js): runtime theme controls
 
 ## Page-Specific JS Entry Points
 

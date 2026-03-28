@@ -17,6 +17,7 @@ This document summarizes the security-relevant behavior currently implemented.
 - API keys stored hash-only
 - browser sessions signed with `SECRET_KEY`
 - cookie security controlled by `SESSION_COOKIE_SECURE`
+- optional Google OAuth login/link flows with PKCE
 
 ## Session model
 
@@ -81,4 +82,4 @@ Important admin endpoints include:
 
 - no wildcard public-origin support
 - no full proxy-chain trust model
-- no richer metrics/telemetry backend yet
+- no external metrics or telemetry service yet; metrics are currently exposed from the app process and audit data is stored in PostgreSQL

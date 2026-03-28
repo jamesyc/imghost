@@ -10,10 +10,13 @@
 - Public per-user album listings
 - Album mutation by owner, admin, or delete token as appropriate
 - Browser sessions and API keys
+- Optional Google OAuth sign-in/linking
 - ShareX config export
 - Admin APIs and utility UI
 - Background thumbnail processing
 - ZIP streaming for album downloads
+- Prometheus-format metrics
+- PWA manifest and service worker endpoints
 - Health and runtime-status endpoints with degraded-mode readiness behavior
 
 ## Main moving parts

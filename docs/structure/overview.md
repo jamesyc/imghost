@@ -7,7 +7,7 @@ This directory documents the current shipped structure of the app.
 - FastAPI application with server-rendered Jinja templates
 - Shared first-party CSS in [`src/imghost/static/css/base.css`](/home/james/imghost/src/imghost/static/css/base.css)
 - Page-specific vanilla JavaScript modules in [`src/imghost/static/js`](/home/james/imghost/src/imghost/static/js)
-- SQLite/Postgres-backed persistence behind repository and service layers
+- PostgreSQL-backed persistence behind repository and service layers
 - Object storage and background media processing coordinated through app state
 
 ## High-Level Layout
@@ -20,6 +20,7 @@ This directory documents the current shipped structure of the app.
 - [`src/imghost/storage.py`](/home/james/imghost/src/imghost/storage.py): object storage reads and writes
 - [`src/imghost/processors.py`](/home/james/imghost/src/imghost/processors.py): media processing helpers
 - [`src/imghost/tasks.py`](/home/james/imghost/src/imghost/tasks.py): background work entrypoints
+- [`src/imghost/telemetry`](/home/james/imghost/src/imghost/telemetry): audit, metrics, telemetry state, and sinks
 - [`src/imghost/web`](/home/james/imghost/src/imghost/web): HTTP routing, auth/session helpers, template rendering helpers, and page payload shaping
 
 ## Web Layer Split
@@ -45,6 +46,7 @@ This directory documents the current shipped structure of the app.
 - Signed-in dashboard, album list, owner album workspace, and settings
 - Token-backed anonymous album management via the same workspace shell
 - Admin overview, user management, user detail, album moderation, config, and ops pages
+- Prometheus metrics and optional Google OAuth flows
 
 ## Notes Versus Older Planning Docs
 

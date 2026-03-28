@@ -12,6 +12,8 @@ This file describes the current route structure as implemented today.
 - `/a/{album_id}`: public album page
 - `/u/{username}`: public user album list
 - `/manage/{album_id}?token=...`: token-backed anonymous album management page using the shared workspace template
+- `/manifest.webmanifest`: web app manifest
+- `/service-worker.js`: minimal service worker bootstrap
 
 ### Signed-In Pages
 
@@ -47,10 +49,15 @@ This file describes the current route structure as implemented today.
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/logout`
+- `GET /auth/google/start`
+- `GET /auth/{provider}/start`
+- `GET /auth/google/callback`
+- `GET /auth/{provider}/callback`
 
 ### Public and Shared Album API
 
 - `POST /api/v1/upload`
+- `GET /api/v1/album/{album_id}/delete`
 - `GET /api/v1/album/{album_id}`
 - `GET /api/v1/album/{album_id}/zip`
 - `DELETE /api/v1/album/{album_id}`
@@ -68,6 +75,7 @@ These endpoints serve both authenticated owner actions and token-backed anonymou
 - `PATCH /api/v1/user/me/password`
 - `GET /api/v1/user/me/sharex-config`
 - `DELETE /api/v1/user/me`
+- `POST /api/v1/user/me/oauth/google/disconnect`
 
 ### Admin API
 
@@ -90,10 +98,11 @@ These endpoints serve both authenticated owner actions and token-backed anonymou
 
 ### Media and Health
 
-- `/i/{raw_id}`: original media streaming
-- `/t/{raw_id}`: thumbnail streaming
+- `/i/{id}.{ext}`: original media streaming
+- `/t/{id}.{ext}`: thumbnail streaming
 - `/health/live`
 - `/health/ready`
+- `/metrics`
 
 ## Source of Truth
 

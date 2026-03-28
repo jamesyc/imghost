@@ -11,7 +11,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   Opinionated step-by-step setup guide for a practical Docker plus reverse-proxy deployment.
 
 - [configuration.md](/home/james/imghost/docs/configuration.md)
-  Reference for the current env/config surface, including strict vs local public-origin behavior, Docker settings, and runtime config stored in PostgreSQL.
+  Reference for the current env/config surface, including strict vs local public-origin behavior, OAuth toggles, Docker settings, and runtime config stored in PostgreSQL.
 
 - [cli.md](/home/james/imghost/docs/cli.md)
   Operational command reference for the current `python -m imghost` subcommands and how they are used.
@@ -26,7 +26,7 @@ This directory holds implementation-oriented documentation for the current `imgh
   How public-origin handling works, how local direct-access differs from strict deployment mode, how trusted proxy CIDRs affect forwarded-header trust, and what a reverse proxy should send.
 
 - [authentication.md](/home/james/imghost/docs/authentication.md)
-  Browser sessions, browser-session CSRF policy, API keys, ShareX export behavior, and the current auth model and caveats.
+  Browser sessions, browser-session CSRF policy, local auth, Google OAuth, API keys, ShareX export behavior, and the current auth model and caveats.
 
 - [storage.md](/home/james/imghost/docs/storage.md)
   Filesystem and S3-compatible storage backends, media serving behavior, and ZIP streaming.
@@ -35,10 +35,10 @@ This directory holds implementation-oriented documentation for the current `imgh
   Task queue modes, split worker and scheduler behavior, Redis fallback semantics, and thumbnail recovery.
 
 - [operations.md](/home/james/imghost/docs/operations.md)
-  Health endpoint contract, runtime status, probe semantics, low-noise logging model, degraded-mode behavior, and browser-session mutation troubleshooting.
+  Health endpoint contract, runtime status, metrics, probe semantics, low-noise logging model, degraded-mode behavior, and browser-session mutation troubleshooting.
 
 - [testing.md](/home/james/imghost/docs/testing.md)
-  Test command, test database safety model, current full-suite baseline, browser-session CSRF coverage, and what the suite expects from the local environment.
+  Test command, test database safety model, current suite size, OAuth/metrics coverage, browser-session CSRF coverage, and what the suite expects from the local environment.
 
 - [api-overview.md](/home/james/imghost/docs/api-overview.md)
   Route map for the main HTML, API, admin, and health endpoints.

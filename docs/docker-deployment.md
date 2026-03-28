@@ -119,6 +119,7 @@ The beginner stack is pull-only and forces:
 - `REDIS_MODE=disabled`
 - `TASK_QUEUE_MODE=async`
 - no separate worker or scheduler container
+- `APP_SCHEDULER_ENABLED=true` so the app process hosts recurring cleanup by default
 
 ## Pulling The Published Image
 

@@ -63,6 +63,12 @@ Advanced Docker services:
 - `worker-default`
 - `scheduler`
 
+Beginner Docker behavior:
+
+- no separate worker or scheduler container
+- async jobs run in-process
+- recurring cleanup is hosted by the app process when `SCHEDULER_ENABLED=true` and `APP_SCHEDULER_ENABLED=true`
+
 The worker processes start the task queue and then sleep, allowing the queue backend to run the actual consumers. The scheduler only enqueues recurring jobs and does not execute cleanup inline.
 
 ## Recovery behavior

@@ -109,18 +109,28 @@ Creates a user directly in the database.
 Example:
 
 ```bash
-python -m imghost create-user --username alice --email alice@example.com
+python -m imghost create-user --username alice --email alice@example.com --password 'correct horse battery staple'
 ```
 
 Optional flags:
 
+- `--password <string>`
+- `--password-stdin`
 - `--admin`
 - `--quota-bytes <int>`
 
-Important note:
+Exactly one password input mode is required.
 
-- CLI-created users start with `password_hash=None`
-- local password login is only possible after setting a password later through the app or admin flows
+### `promote-user`
+
+Promotes an existing user to admin.
+
+Examples:
+
+```bash
+python -m imghost promote-user --user-id <user-id>
+python -m imghost promote-user --username alice
+```
 
 ### `issue-api-key`
 
