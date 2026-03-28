@@ -15,6 +15,7 @@ Thumbs.db
 
 .venv/
 .pytest_cache/
+postgres-data
 postgres-data/
 __pycache__/
 *.pyc
