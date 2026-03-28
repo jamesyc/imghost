@@ -1,6 +1,6 @@
 # imghost
 
-`imghost` is a self-hosted image and video hosting app with anonymous uploads, user accounts, public albums, admin tooling, and Docker-first deployment.
+`imghost` is a self-hosted image and video hosting app with anonymous uploads, user accounts, public albums, admin tooling, and practical deployment options for both Docker Compose and direct host installs.
 
 It is built with FastAPI, PostgreSQL, Redis, and either local filesystem storage or Garage/S3-compatible object storage.
 
@@ -18,9 +18,11 @@ It is built with FastAPI, PostgreSQL, Redis, and either local filesystem storage
 - Image, animated image, SVG, and video support
 - Async thumbnail generation
 - ShareX export
-- Docker Compose deployment
+- Docker Compose and non-Docker deployment options
 
 ## Quick Start
+
+If you do not want to use Docker, see [docs/non-docker-deployment.md](docs/non-docker-deployment.md).
 
 Prerequisites:
 
@@ -156,6 +158,7 @@ That config uses [`docker/nginx/nginx-site.conf`](docker/nginx/nginx-site.conf).
 For deployment guidance, see:
 
 - [docs/docker-deployment.md](docs/docker-deployment.md)
+- [docs/non-docker-deployment.md](docs/non-docker-deployment.md)
 - [docs/setup.md](docs/setup.md)
 - [docs/reverse-proxy.md](docs/reverse-proxy.md)
 
