@@ -24,20 +24,15 @@ It is built with FastAPI, PostgreSQL, Redis, and either local filesystem storage
 
 If you do not want to use Docker, see [docs/non-docker-deployment.md](docs/non-docker-deployment.md).
 
-Prerequisites:
-
-- Docker Engine
-- Docker Compose
-
 Choose one:
 
-- Beginner stack:
+- Beginner Docker stack:
   - simplest install
   - no Redis
   - no PgBouncer
   - no separate worker or scheduler containers
   - good for local, LAN, or first-time self-hosting
-- Standard stack:
+- Standard Docker stack:
   - full split-service deployment
   - Redis, PgBouncer, dedicated workers, and scheduler
   - better for heavier or more production-like setups
@@ -50,16 +45,7 @@ Choose one:
 cp .env.example.beginner .env.beginner
 ```
 
-2. Edit `.env.beginner` and set at least:
-
-```env
-BASE_URL=http://192.168.0.100:8000
-SECRET_KEY=change-me-secret-key
-POSTGRES_PASSWORD=change-me-postgres
-S3_ACCESS_KEY_ID=your-access-key
-S3_SECRET_ACCESS_KEY=your-secret-key
-S3_BUCKET=imghost
-```
+2. Edit `.env.beginner` and set it for your system
 
 3. Start the stack:
 
@@ -77,20 +63,7 @@ docker compose -f compose.beginner.yaml --env-file .env.beginner up -d
 cp .env.example .env
 ```
 
-2. Edit `.env` and set at least:
-
-```env
-BASE_URL=https://your-domain.example
-SECRET_KEY=change-me-secret-key
-POSTGRES_PASSWORD=change-me-postgres
-REDIS_PASSWORD=change-me-redis-password
-GARAGE_RPC_SECRET=change-me-rpc-secret
-GARAGE_ADMIN_TOKEN=change-me-garage-admin-token
-GARAGE_METRICS_TOKEN=change-me-garage-metrics-token
-S3_ACCESS_KEY_ID=your-access-key
-S3_SECRET_ACCESS_KEY=your-secret-key
-S3_BUCKET=imghost
-```
+2. Edit `.env` and set it for your system
 
 3. Pull and start the published images:
 
@@ -105,7 +78,7 @@ If you want to build locally instead:
 docker compose -f compose.build.yaml --env-file .env up -d
 ```
 
-## Compose Files
+## Docker Compose Files
 
 - [`compose.beginner.yaml`](compose.beginner.yaml): simple single-app stack
 - [`compose.yaml`](compose.yaml): standard pull-based stack
