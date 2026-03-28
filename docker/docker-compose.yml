@@ -3,9 +3,6 @@ name: imghost
 services:
   app:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
     restart: unless-stopped
     command: ["/bin/sh", "/app/scripts/start-app.sh"]
     env_file:
@@ -35,9 +32,6 @@ services:
 
   worker-thumbnails:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
     restart: unless-stopped
     command: ["python", "-m", "imghost", "run-worker-thumbnails"]
     env_file:
@@ -65,9 +59,6 @@ services:
 
   worker-cleanup:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
     restart: unless-stopped
     command: ["python", "-m", "imghost", "run-worker-cleanup"]
     env_file:
@@ -95,9 +86,6 @@ services:
 
   worker-default:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
     restart: unless-stopped
     command: ["python", "-m", "imghost", "run-worker-default"]
     env_file:
@@ -125,9 +113,6 @@ services:
 
   scheduler:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
     restart: unless-stopped
     command: ["python", "-m", "imghost", "run-scheduler"]
     env_file:
@@ -245,9 +230,7 @@ services:
       retries: 10
 
   garage-init:
-    build:
-      context: ..
-      dockerfile: docker/GarageTools.Dockerfile
+    image: ${GARAGE_INIT_IMAGE:-ghcr.io/jamesyc/imghost-garage-init}:${GARAGE_INIT_IMAGE_TAG:-latest}
     restart: "no"
     command: ["/bin/sh", "/scripts/garage-init.sh"]
     environment:
