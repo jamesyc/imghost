@@ -169,7 +169,8 @@ def test_local_http_login_uses_insecure_cookie_for_dev_refreshes(tmp_path, monke
 
         page = client.get("/")
         assert page.status_code == 200
-        assert "Hello devcookie" in page.text
+        assert "Uploads do not expire when you're logged in." in page.text
+        assert 'href="/dashboard"' in page.text
         assert "Signed in as <strong>devcookie</strong>." not in page.text
 
         logout = client.post("/api/v1/auth/logout", headers=browser_session_headers("http://testserver", "/"))
