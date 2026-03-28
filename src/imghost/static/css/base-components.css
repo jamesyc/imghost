@@ -80,7 +80,11 @@
 
 .nav-link,
 .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-decoration: none;
+  text-align: center;
   color: var(--fg);
   background: var(--card-soft);
   border: 1px solid var(--line);
@@ -97,6 +101,10 @@
 .theme-toggle {
   font: inherit;
   cursor: pointer;
+}
+
+.theme-toggle-mobile {
+  display: none;
 }
 
 .nav-menu-toggle {

@@ -175,6 +175,59 @@ def test_home_page_shows_session_state_when_logged_in(tmp_path, monkeypatch) -> 
         assert 'name="album_id"' not in page.text
 
 
+def test_authenticated_nav_places_theme_toggle_immediately_before_logout(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "navuser",
+                "email": "nav@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        page = client.get("/")
+        assert page.status_code == 200
+        assert '<div class="nav-actions">' in page.text
+        assert 'class="theme-toggle theme-toggle-desktop"' in page.text
+        nav_actions_start = page.text.index('<div class="nav-actions">')
+        logout_start = page.text.index('<form class="nav-logout-form"')
+        theme_start = page.text.index('class="theme-toggle theme-toggle-desktop"')
+        assert nav_actions_start < theme_start < logout_start
+
+
+def test_mobile_nav_template_keeps_menu_toggle_in_top_bar_and_actions_in_collapsible_menu(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        response = client.get("/")
+        assert response.status_code == 200
+        bar_start = response.text.index('<div class="site-nav-bar">')
+        bar_actions_start = response.text.index('<div class="site-nav-bar-actions">')
+        mobile_theme_start = response.text.index('class="theme-toggle theme-toggle-mobile"')
+        menu_toggle_start = response.text.index('class="nav-menu-toggle"')
+        menu_start = response.text.index('<div id="site-nav-menu" class="site-nav-menu" data-nav-menu>')
+        nav_links_start = response.text.index('<div class="nav-links">')
+        nav_actions_start = response.text.index('<div class="nav-actions">')
+        desktop_theme_start = response.text.index('class="theme-toggle theme-toggle-desktop"')
+        assert bar_start < bar_actions_start < mobile_theme_start < menu_toggle_start < menu_start
+        assert menu_start < nav_links_start < nav_actions_start
+        assert menu_start < desktop_theme_start
+
+
+def test_theme_js_syncs_multiple_theme_toggles_and_icons() -> None:
+    script = Path("src/imghost/static/js/theme.js").read_text()
+    assert 'document.querySelectorAll("[data-theme-toggle]")' in script
+    assert 'document.querySelectorAll("[data-theme-icon]")' in script
+    assert "for (const themeToggle of themeToggles)" in script
+    assert "for (const themeIcon of themeIcons)" in script
+
+
 def test_manifest_and_service_worker_routes_are_served(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
@@ -227,6 +280,50 @@ def test_admin_nav_includes_admin_link_and_mobile_toggle(tmp_path, monkeypatch, 
         assert 'href="/admin"' in page.text
         assert 'data-nav-toggle' in page.text
         assert 'data-theme-toggle' in page.text
+
+
+def test_mobile_nav_css_stacks_menu_below_top_bar() -> None:
+    css_path = Path("src/imghost/static/css/base-responsive.css")
+    css = css_path.read_text()
+    mobile_block = css.split("@media (max-width: 640px) {", 1)[1]
+    assert ".site-nav {" in mobile_block
+    assert "flex-direction: column;" in mobile_block
+    assert "align-items: stretch;" in mobile_block
+    assert "justify-content: flex-start;" in mobile_block
+    assert ".site-nav-bar {" in mobile_block
+    assert "width: 100%;" in mobile_block
+    assert ".site-nav-menu {" in mobile_block
+
+
+def test_mobile_nav_css_keeps_menu_button_right_aligned_and_menu_full_width() -> None:
+    css_path = Path("src/imghost/static/css/base-responsive.css")
+    css = css_path.read_text()
+    mobile_block = css.split("@media (max-width: 640px) {", 1)[1]
+    assert ".site-nav-bar-actions {" in mobile_block
+    assert "display: flex;" in mobile_block
+    assert "align-items: center;" in mobile_block
+    assert "gap: 10px;" in mobile_block
+    assert "margin-left: auto;" in mobile_block
+    assert ".theme-toggle-mobile {" in mobile_block
+    assert "display: inline-flex;" in mobile_block
+    assert ".theme-toggle-desktop {" in mobile_block
+    assert "display: none;" in mobile_block
+    assert ".site-nav-menu {" in mobile_block
+    assert "width: 100%;" in mobile_block
+    assert "flex-direction: column;" in mobile_block
+    assert ".nav-links," in mobile_block
+    assert ".nav-actions," in mobile_block
+    assert "width: 100%;" in mobile_block
+
+
+def test_nav_link_base_css_centers_text_for_mobile_full_width_buttons() -> None:
+    css = Path("src/imghost/static/css/base-components.css").read_text()
+    assert ".nav-link," in css
+    assert ".theme-toggle {" in css
+    assert "display: inline-flex;" in css
+    assert "align-items: center;" in css
+    assert "justify-content: center;" in css
+    assert "text-align: center;" in css
 
 
 def test_dashboard_page_uses_local_upload_feedback_anchor(tmp_path, monkeypatch) -> None:

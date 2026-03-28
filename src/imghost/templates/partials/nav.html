@@ -2,7 +2,12 @@
   <div class="site-nav-bar">
     <a class="nav-brand" href="/">ImgHost</a>
     <div class="site-nav-bar-actions">
-      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle color theme" data-theme-toggle>
+      <button
+        class="theme-toggle theme-toggle-mobile"
+        type="button"
+        aria-label="Toggle color theme"
+        data-theme-toggle
+      >
         <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">◐</span>
       </button>
       <button
@@ -26,6 +31,14 @@
       {% endfor %}
     </div>
     <div class="nav-actions">
+      <button
+        class="theme-toggle theme-toggle-desktop"
+        type="button"
+        aria-label="Toggle color theme"
+        data-theme-toggle
+      >
+        <span class="theme-toggle-icon" data-theme-icon aria-hidden="true">◐</span>
+      </button>
       {% if current_user %}
       <form class="nav-logout-form" data-logout-form action="/api/v1/auth/logout" method="post">
         <button type="submit" class="nav-logout-button">Log Out</button>
