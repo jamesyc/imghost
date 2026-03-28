@@ -2,6 +2,7 @@ name: imghost-beginner
 
 services:
   app:
+    image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile

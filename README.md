@@ -87,6 +87,14 @@ cp docker/.env.example.beginner docker/.env.beginner
 docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner up --build -d
 ```
 
+If you want to deploy elsewhere without building from source, the same Compose file can pull a published image instead:
+
+```bash
+cp docker/.env.example.beginner docker/.env.beginner
+docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner pull app
+docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner up -d
+```
+
 That stack is intentionally simple:
 
 - no Redis
@@ -107,6 +115,14 @@ For the full split-worker deployment, use the main stack:
 ```bash
 cp docker/.env.example docker/.env
 docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d
+```
+
+To deploy the published image instead of building locally:
+
+```bash
+cp docker/.env.example docker/.env
+docker compose -f docker/docker-compose.yml --env-file docker/.env pull
+docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
 ```
 
 If you want nginx inside the Compose stack instead of on the host, add the optional companion file:
@@ -133,6 +149,16 @@ The main Compose project name is `imghost`, so containers come up as:
 - `imghost-redis-1`
 - `imghost-garage-1`
 - `imghost-garage-init-1`
+
+## Published Container Image
+
+This repo can publish a multi-arch Docker image to GitHub Container Registry as:
+
+- `ghcr.io/jamesyc/imghost:latest`
+- `ghcr.io/jamesyc/imghost:<git-tag>`
+- `ghcr.io/jamesyc/imghost:sha-<commit>`
+
+The publish workflow lives at [publish-image.yml](/home/james/imghost/.github/workflows/publish-image.yml) and runs on pushes to `main`, version tags, and manual dispatch.
 
 Current default public base URL in the Docker env file:
 

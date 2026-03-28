@@ -98,6 +98,11 @@ Advanced stack only:
 
 The advanced stack uses [`docker/.env.example`](/home/james/imghost/docker/.env.example) copied to `docker/.env`. The beginner stack uses [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner) copied to `docker/.env.beginner`.
 
+Both Compose files can either build locally or pull a published image, using:
+
+- `APP_IMAGE` (defaults to `ghcr.io/jamesyc/imghost`)
+- `APP_IMAGE_TAG` (defaults to `latest`)
+
 The advanced stack injects additional derived values like `DATABASE_URL` into app, worker, and scheduler services.
 
 Notably:
@@ -113,6 +118,26 @@ The beginner stack forces:
 - `REDIS_MODE=disabled`
 - `TASK_QUEUE_MODE=async`
 - no separate worker or scheduler container
+
+## Pulling The Published Image
+
+If you want to deploy without building locally, pull first and then start normally.
+
+Beginner stack:
+
+```bash
+docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner pull app
+docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner up -d
+```
+
+Advanced stack:
+
+```bash
+docker compose -f docker/docker-compose.yml --env-file docker/.env pull
+docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+```
+
+The image publish workflow is defined in [publish-image.yml](/home/james/imghost/.github/workflows/publish-image.yml) and pushes multi-arch images to `ghcr.io/jamesyc/imghost`.
 
 ## Advanced PgBouncer behavior
 
