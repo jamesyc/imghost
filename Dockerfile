@@ -18,6 +18,6 @@ COPY src /app/src
 RUN pip install --no-cache-dir .
 
 COPY db /app/db
-COPY docker/scripts /app/scripts
+COPY docker/entrypoints /app/scripts
 
 CMD ["python", "-m", "uvicorn", "imghost.main:app", "--host", "0.0.0.0", "--port", "8000"]

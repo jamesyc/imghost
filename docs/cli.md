@@ -134,7 +134,7 @@ python -m imghost issue-api-key --user-id <user-id>
 
 ## Docker startup interaction
 
-When the app container starts with `STORAGE_BACKEND=garage`, [`docker/scripts/start-app.sh`](/home/james/imghost/docker/scripts/start-app.sh) runs:
+When the app container starts with `STORAGE_BACKEND=garage`, [`docker/entrypoints/start-app.sh`](/home/james/imghost/docker/entrypoints/start-app.sh) runs:
 
 ```bash
 python -m imghost init-storage

@@ -2,16 +2,17 @@
 
 There are two main Docker stacks plus one optional companion override:
 
-- beginner: [`docker/docker-compose.beginner.yml`](/home/james/imghost/docker/docker-compose.beginner.yml)
-- advanced: [`docker/docker-compose.yml`](/home/james/imghost/docker/docker-compose.yml)
-- optional nginx companion: [`docker/docker-compose.with-nginx.yml`](/home/james/imghost/docker/docker-compose.with-nginx.yml)
+- beginner: [`compose.beginner.yaml`](/home/james/imghost/compose.beginner.yaml)
+- advanced pull-based: [`compose.yaml`](/home/james/imghost/compose.yaml)
+- advanced local-build variant: [`compose.build.yaml`](/home/james/imghost/compose.build.yaml)
+- optional nginx companion: [`compose.with-nginx.yaml`](/home/james/imghost/compose.with-nginx.yaml)
 
 ## Services
 
 Beginner stack:
 
 - `app`
-  Runs the FastAPI web application through [`docker/scripts/start-app.sh`](/home/james/imghost/docker/scripts/start-app.sh).
+  Runs the FastAPI web application through [`docker/entrypoints/start-app.sh`](/home/james/imghost/docker/entrypoints/start-app.sh).
 - `postgres`
   PostgreSQL state store.
 - `garage`
@@ -37,7 +38,7 @@ Advanced stack adds:
 Optional nginx companion adds:
 
 - `nginx`
-  Reverse proxy container that terminates HTTPS and proxies to `app:8000` using [`docker/nginx-site.conf`](/home/james/imghost/docker/nginx-site.conf).
+  Reverse proxy container that terminates HTTPS and proxies to `app:8000` using [`docker/nginx/nginx-site.conf`](/home/james/imghost/docker/nginx/nginx-site.conf).
 
 ## Startup flow
 
@@ -61,7 +62,7 @@ Before uvicorn starts, the app container entrypoint script also runs:
 
 - `python -m imghost init-storage` when `STORAGE_BACKEND=garage`
 
-This behavior comes from [`docker/scripts/start-app.sh`](/home/james/imghost/docker/scripts/start-app.sh) and means web-container startup has a storage-bootstrap side effect in Garage mode.
+This behavior comes from [`docker/entrypoints/start-app.sh`](/home/james/imghost/docker/entrypoints/start-app.sh) and means web-container startup has a storage-bootstrap side effect in Garage mode.
 
 ## Health probe guidance
 
@@ -96,9 +97,9 @@ Advanced stack only:
 
 ## Compose env behavior
 
-The advanced stack uses [`docker/.env.example`](/home/james/imghost/docker/.env.example) copied to `docker/.env`. The beginner stack uses [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner) copied to `docker/.env.beginner`.
+The advanced stack uses [`.env.example`](/home/james/imghost/.env.example) copied to `.env`. The beginner stack uses [`.env.example.beginner`](/home/james/imghost/.env.example.beginner) copied to `.env.beginner`.
 
-Both Compose files can either build locally or pull a published image, using:
+The advanced stack can either build locally or pull a published image, using:
 
 - `APP_IMAGE` (defaults to `ghcr.io/jamesyc/imghost`)
 - `APP_IMAGE_TAG` (defaults to `latest`)
@@ -112,7 +113,7 @@ Notably:
 - `DATABASE_USE_PGBOUNCER=true` is set for the advanced stack
 - Redis auth is handled by `REDIS_PASSWORD` plus `REDIS_URL`
 
-The beginner stack forces:
+The beginner stack is pull-only and forces:
 
 - `DATABASE_USE_PGBOUNCER=false`
 - `REDIS_MODE=disabled`
@@ -126,15 +127,15 @@ If you want to deploy without building locally, pull first and then start normal
 Beginner stack:
 
 ```bash
-docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner pull app
-docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner up -d
+docker compose -f compose.beginner.yaml --env-file .env.beginner pull
+docker compose -f compose.beginner.yaml --env-file .env.beginner up -d
 ```
 
 Advanced stack:
 
 ```bash
-docker compose -f docker/docker-compose.yml --env-file docker/.env pull
-docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+docker compose -f compose.yaml --env-file .env pull
+docker compose -f compose.yaml --env-file .env up -d
 ```
 
 The image publish workflow is defined in [publish-image.yml](/home/james/imghost/.github/workflows/publish-image.yml) and pushes multi-arch images to `ghcr.io/jamesyc/imghost`.
@@ -154,15 +155,15 @@ The nginx companion is an override file, not a standalone stack. Start it with:
 
 ```bash
 docker compose \
-  -f docker/docker-compose.yml \
-  -f docker/docker-compose.with-nginx.yml \
-  --env-file docker/.env \
-  up --build -d
+  -f compose.yaml \
+  -f compose.with-nginx.yaml \
+  --env-file .env \
+  up -d
 ```
 
 It mounts:
 
-- [`docker/nginx-site.conf`](/home/james/imghost/docker/nginx-site.conf)
+- [`docker/nginx/nginx-site.conf`](/home/james/imghost/docker/nginx/nginx-site.conf)
   Container-facing nginx config with `proxy_pass http://app:8000;`
 - `../certs`
   Expected to contain `fullchain.pem` and `privkey.pem`
@@ -176,7 +177,7 @@ The Redis service starts with:
 - `redis-server --appendonly yes` when `REDIS_PASSWORD` is empty
 - `redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"` when `REDIS_PASSWORD` is set
 
-In the current stack, `REDIS_PASSWORD` is set in [`docker/.env`](/home/james/imghost/docker/.env), so Redis authentication is enabled.
+In the current stack, `REDIS_PASSWORD` is set in [`.env`](/home/james/imghost/.env), so Redis authentication is enabled.
 
 The Compose healthcheck follows the same auth mode:
 
@@ -185,7 +186,7 @@ The Compose healthcheck follows the same auth mode:
 
 ## Current Garage bootstrap behavior
 
-[`docker/scripts/garage-init.sh`](/home/james/imghost/docker/scripts/garage-init.sh) does the following:
+[`docker/garage/init.sh`](/home/james/imghost/docker/garage/init.sh) does the following:
 
 - assigns the node to the configured zone/capacity if no role exists yet
 - imports the configured S3 key if it does not exist

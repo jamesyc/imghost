@@ -3,6 +3,9 @@ name: imghost
 services:
   app:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["/bin/sh", "/app/scripts/start-app.sh"]
     env_file:
@@ -32,6 +35,9 @@ services:
 
   worker-thumbnails:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["python", "-m", "imghost", "run-worker-thumbnails"]
     env_file:
@@ -59,6 +65,9 @@ services:
 
   worker-cleanup:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["python", "-m", "imghost", "run-worker-cleanup"]
     env_file:
@@ -86,6 +95,9 @@ services:
 
   worker-default:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["python", "-m", "imghost", "run-worker-default"]
     env_file:
@@ -113,6 +125,9 @@ services:
 
   scheduler:
     image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     command: ["python", "-m", "imghost", "run-scheduler"]
     env_file:
@@ -148,8 +163,8 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ../postgres-data:/var/lib/postgresql/data
-      - ../docker/db/init:/docker-entrypoint-initdb.d:ro
+      - ./postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-imghost} -d ${POSTGRES_DB:-imghost}"]
       interval: 5s
@@ -217,7 +232,7 @@ services:
       GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-garage-admin-token-change-me}
       GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN:-garage-metrics-token-change-me}
     volumes:
-      - ../docker/garage.toml:/etc/garage.toml:ro
+      - ./docker/garage/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
     ports:
@@ -230,9 +245,10 @@ services:
       retries: 10
 
   garage-init:
-    image: ${GARAGE_INIT_IMAGE:-ghcr.io/jamesyc/imghost-garage-init}:${GARAGE_INIT_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: docker/garage-init.Dockerfile
     restart: "no"
-    command: ["/bin/sh", "/scripts/garage-init.sh"]
     environment:
       GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-garage-admin-token-change-me}
@@ -248,8 +264,7 @@ services:
       garage:
         condition: service_healthy
     volumes:
-      - ../docker/scripts:/scripts:ro
-      - ../docker/garage.toml:/etc/garage.toml:ro
+      - ./docker/garage/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
       - garage-data:/var/lib/garage/data
 

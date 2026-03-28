@@ -4,7 +4,7 @@ This is the practical deployment guide for running `imghost` on one machine with
 
 It is intentionally opinionated and focuses on the current implementation, not every theoretical deployment shape.
 
-For a simpler local or LAN setup, use the beginner stack described in [docker-deployment.md](/home/james/imghost/docs/docker-deployment.md) with [`docker/docker-compose.beginner.yml`](/home/james/imghost/docker/docker-compose.beginner.yml) and [`docker/.env.beginner`](/home/james/imghost/docker/.env.beginner).
+For a simpler local or LAN setup, use the beginner stack described in [docker-deployment.md](/home/james/imghost/docs/docker-deployment.md) with [`compose.beginner.yaml`](/home/james/imghost/compose.beginner.yaml) and [`.env.beginner`](/home/james/imghost/.env.beginner).
 
 ## What this guide assumes
 
@@ -24,27 +24,27 @@ If you want a different storage backend or a non-Docker deployment shape, use th
 
 Start from:
 
-- [`docker/.env.example`](/home/james/imghost/docker/.env.example)
+- [`.env.example`](/home/james/imghost/.env.example)
 
 Create:
 
-- [`docker/.env`](/home/james/imghost/docker/.env)
+- [`.env`](/home/james/imghost/.env)
 
 Example:
 
 ```bash
-cp docker/.env.example docker/.env
+cp .env.example .env
 ```
 
 For the beginner stack instead:
 
 ```bash
-cp docker/.env.example.beginner docker/.env.beginner
+cp .env.example.beginner .env.beginner
 ```
 
 ## 2. Set the minimum required values
 
-At minimum, set these values in [`docker/.env`](/home/james/imghost/docker/.env):
+At minimum, set these values in [`.env`](/home/james/imghost/.env):
 
 ### Public URL and proxy settings
 
@@ -159,7 +159,7 @@ If you change those later, especially after volumes already contain initialized 
 Bring the stack up with:
 
 ```bash
-docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d
+docker compose -f compose.build.yaml --env-file .env up -d
 ```
 
 This starts:
@@ -195,7 +195,7 @@ On first successful startup:
 Check containers:
 
 ```bash
-docker compose -f docker/docker-compose.yml --env-file docker/.env ps
+docker compose -f compose.yaml --env-file .env ps
 ```
 
 Check health:
@@ -203,7 +203,7 @@ Check health:
 ```bash
 curl http://127.0.0.1:8000/health/live
 curl http://127.0.0.1:8000/health/ready
-docker compose -f docker/docker-compose.yml --env-file docker/.env exec pgbouncer sh -lc 'pg_isready -h 127.0.0.1 -p 5432 -d "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432/pgbouncer"'
+docker compose -f compose.yaml --env-file .env exec pgbouncer sh -lc 'pg_isready -h 127.0.0.1 -p 5432 -d "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432/pgbouncer"'
 ```
 
 Expected:
@@ -249,13 +249,13 @@ If you want nginx inside the Compose stack instead of on the host, use the optio
 
 ```bash
 docker compose \
-  -f docker/docker-compose.yml \
-  -f docker/docker-compose.with-nginx.yml \
-  --env-file docker/.env \
-  up --build -d
+  -f compose.yaml \
+  -f compose.with-nginx.yaml \
+  --env-file .env \
+  up -d
 ```
 
-The bundled Compose nginx config lives at [`docker/nginx-site.conf`](/home/james/imghost/docker/nginx-site.conf) and proxies to `app:8000` on the Docker network. Mount your certificate pair at `./certs/fullchain.pem` and `./certs/privkey.pem` before enabling it.
+The bundled Compose nginx config lives at [`docker/nginx/nginx-site.conf`](/home/james/imghost/docker/nginx/nginx-site.conf) and proxies to `app:8000` on the Docker network. Mount your certificate pair at `./certs/fullchain.pem` and `./certs/privkey.pem` before enabling it.
 
 If nginx runs on the host instead, use [`docs/nginx-site.conf`](/home/james/imghost/docs/nginx-site.conf), which proxies to `127.0.0.1:8000`.
 

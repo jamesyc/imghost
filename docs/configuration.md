@@ -109,7 +109,7 @@ Practical deployment shapes:
 
 ## Docker/Compose settings
 
-These are defined in [`docker/.env.example`](/home/james/imghost/docker/.env.example).
+These are defined in [`.env.example`](/home/james/imghost/.env.example).
 That file is also intentionally deployment-oriented: strict public-origin mode is enabled, proxy trust gating is on, and session cookies are secure by default.
 
 They include all of the app-level concepts above, plus Docker-stack-specific settings:
@@ -131,7 +131,7 @@ They include all of the app-level concepts above, plus Docker-stack-specific set
 - `POSTGRES_HOST`
 - `POSTGRES_CONNECT_PORT`
 
-Compose derives `DATABASE_URL` from these values instead of storing a second copy in `docker/.env`.
+Compose derives `DATABASE_URL` from these values instead of storing a second copy in `.env`.
 
 ### PgBouncer values
 

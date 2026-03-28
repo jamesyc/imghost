@@ -8,8 +8,8 @@ Application code lives in [`src/imghost`](/home/james/imghost/src/imghost). `mai
 - `uv run pytest tests/test_pages.py tests/test_album_api.py`: run focused page/API checks during UI work.
 - `uv run python -m imghost run-worker`: start the background worker.
 - `uv run python -m imghost init-storage`: initialize object storage.
-- `docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d app`: rebuild and redeploy the app container only.
-- `docker compose -f docker/docker-compose.yml --env-file docker/.env down && docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d`: rebuild the full stack when Docker or infrastructure changes.
+- `docker compose -f compose.build.yaml --env-file .env up -d app`: rebuild and redeploy the app container only.
+- `docker compose -f compose.build.yaml --env-file .env down && docker compose -f compose.build.yaml --env-file .env up -d`: rebuild the full stack when Docker or infrastructure changes.
 
 ## Workflow Preferences
 After changes, add tests for notable or high-risk edge cases, then run tests and redeploy. Prefer running tests and the Docker redeploy at the same time to save time when the work is substantial enough to justify both. Prefer using a subagent for Docker redeploy when possible. Default to the faster app-only redeploy unless non-app Docker or infrastructure files changed.
@@ -24,7 +24,7 @@ Pytest is the test runner. Add or update tests for every behavioral change, espe
 Recent commits use short imperative subjects such as `Unify dashboard and albums card rendering` and `Refine signed-in album and dashboard flows`. Keep commit titles concise, capitalized, and action-oriented. PRs should include: what changed, why it changed, test coverage run, and screenshots for UI updates. Call out route, API, or deployment-impacting changes explicitly.
 
 ## Security & Configuration Tips
-Do not commit `.env` secrets or generated storage data. Use the Docker env file in [`docker/.env`](/home/james/imghost/docker/.env) for local configuration. Keep the main example env files, including [`.env.example`](/home/james/imghost/.env.example) and [`docker/.env.example`](/home/james/imghost/docker/.env.example), intentionally bloated and documentation-oriented; they should act as hardened deployment templates with security on by default. Keep the lean beginner env files, [`.env.example.beginner`](/home/james/imghost/.env.example.beginner) and [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner), small and beginner-friendly.
+Do not commit `.env` secrets or generated storage data. Use [`.env`](/home/james/imghost/.env) for local Compose configuration. Keep the main example env file [`.env.example`](/home/james/imghost/.env.example) intentionally bloated and documentation-oriented so it acts as a hardened deployment template with security on by default. Keep the lean beginner env file [`.env.example.beginner`](/home/james/imghost/.env.example.beginner) small and beginner-friendly.
 
 When editing example env files, keep `PUBLIC_ORIGIN_ENABLED=true` in the main example env files and `PUBLIC_ORIGIN_ENABLED=false` in the beginner example env files. Use a direct local-network URL such as `http://192.168.0.100:8000` for `BASE_URL` in the beginner env files. Prefer simple boolean config names over mode enums when the concept is simple.
 

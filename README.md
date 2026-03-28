@@ -69,30 +69,30 @@ The current UI is template-backed and centered on the upload, album, and public-
 
 ## Docker Setup
 
-The Docker setup lives under [`docker/`](/home/james/imghost/docker).
+The Docker setup uses root-level Compose files plus service-specific config under [`docker/`](/home/james/imghost/docker).
 
 Main files:
 
-- [`docker/docker-compose.beginner.yml`](/home/james/imghost/docker/docker-compose.beginner.yml)
-- [`docker/docker-compose.yml`](/home/james/imghost/docker/docker-compose.yml)
-- [`docker/docker-compose.with-nginx.yml`](/home/james/imghost/docker/docker-compose.with-nginx.yml)
-- [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner)
-- [`docker/.env.example`](/home/james/imghost/docker/.env.example)
-- [`docker/.env`](/home/james/imghost/docker/.env)
+- [`compose.beginner.yaml`](/home/james/imghost/compose.beginner.yaml)
+- [`compose.yaml`](/home/james/imghost/compose.yaml)
+- [`compose.with-nginx.yaml`](/home/james/imghost/compose.with-nginx.yaml)
+- [`.env.example.beginner`](/home/james/imghost/.env.example.beginner)
+- [`.env.example`](/home/james/imghost/.env.example)
+- [`.env`](/home/james/imghost/.env)
 
 For beginners or simple LAN installs, use the beginner stack:
 
 ```bash
-cp docker/.env.example.beginner docker/.env.beginner
-docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner up --build -d
+cp .env.example.beginner .env.beginner
+docker compose -f compose.beginner.yaml --env-file .env.beginner up -d
 ```
 
 If you want to deploy elsewhere without building from source, the same Compose file can pull a published image instead:
 
 ```bash
-cp docker/.env.example.beginner docker/.env.beginner
-docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner pull app
-docker compose -f docker/docker-compose.beginner.yml --env-file docker/.env.beginner up -d
+cp .env.example.beginner .env.beginner
+docker compose -f compose.beginner.yaml --env-file .env.beginner pull
+docker compose -f compose.beginner.yaml --env-file .env.beginner up -d
 ```
 
 That stack is intentionally simple:
@@ -113,29 +113,29 @@ The beginner Compose project name is `imghost-beginner`, so containers come up a
 For the full split-worker deployment, use the main stack:
 
 ```bash
-cp docker/.env.example docker/.env
-docker compose -f docker/docker-compose.yml --env-file docker/.env up --build -d
+cp .env.example .env
+docker compose -f compose.build.yaml --env-file .env up -d
 ```
 
 To deploy the published image instead of building locally:
 
 ```bash
-cp docker/.env.example docker/.env
-docker compose -f docker/docker-compose.yml --env-file docker/.env pull
-docker compose -f docker/docker-compose.yml --env-file docker/.env up -d
+cp .env.example .env
+docker compose -f compose.yaml --env-file .env pull
+docker compose -f compose.yaml --env-file .env up -d
 ```
 
 If you want nginx inside the Compose stack instead of on the host, add the optional companion file:
 
 ```bash
 docker compose \
-  -f docker/docker-compose.yml \
-  -f docker/docker-compose.with-nginx.yml \
-  --env-file docker/.env \
-  up --build -d
+  -f compose.yaml \
+  -f compose.with-nginx.yaml \
+  --env-file .env \
+  up -d
 ```
 
-That nginx service uses [`docker/nginx-site.conf`](/home/james/imghost/docker/nginx-site.conf), proxies to `app:8000`, and expects TLS certs at `./certs/fullchain.pem` and `./certs/privkey.pem`.
+That nginx service uses [`docker/nginx/nginx-site.conf`](/home/james/imghost/docker/nginx/nginx-site.conf), proxies to `app:8000`, and expects TLS certs at `./certs/fullchain.pem` and `./certs/privkey.pem`.
 
 The main Compose project name is `imghost`, so containers come up as:
 
@@ -242,10 +242,10 @@ Application/runtime defaults:
 
 Docker/infra defaults:
 
-- [`docker/.env.example.beginner`](/home/james/imghost/docker/.env.example.beginner)
-- [`docker/.env.example`](/home/james/imghost/docker/.env.example)
+- [`.env.example.beginner`](/home/james/imghost/.env.example.beginner)
+- [`.env.example`](/home/james/imghost/.env.example)
 
-`docker/.env` is ignored by git and is the file Compose should use locally.
+`.env` is ignored by git and is the file Compose should use locally.
 
 ## Auth And Session Notes
 
@@ -290,7 +290,7 @@ Important behavior:
 
 ## Queue And Rate-Limit Notes
 
-- The beginner Docker stack uses `docker/docker-compose.beginner.yml` with `TASK_QUEUE_MODE=async` and `REDIS_MODE=disabled`, so background jobs run in-process inside the app container.
+- The beginner Docker stack uses `compose.beginner.yaml` with `TASK_QUEUE_MODE=async` and `REDIS_MODE=disabled`, so background jobs run in-process inside the app container.
 - The beginner Docker stack connects directly to Postgres.
 - The advanced Docker stack routes app, worker, and scheduler DB traffic through PgBouncer.
 - The beginner no-Redis stack does not run a separate worker or scheduler service.
