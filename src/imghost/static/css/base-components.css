@@ -1,9 +1,9 @@
 .site-nav {
   position: relative;
   overflow: hidden;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 16px;
   margin-bottom: 22px;
   padding: 14px 16px;
@@ -16,11 +16,13 @@
 }
 
 .site-nav-bar {
-  display: contents;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
 }
 
 .site-nav-bar-actions {
-  grid-column: 3;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -28,8 +30,8 @@
 }
 
 .site-nav-menu {
-  grid-column: 2;
   min-width: 0;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -45,7 +47,6 @@
 }
 
 .nav-brand {
-  grid-column: 1;
   margin-right: 8px;
   color: var(--fg);
   text-decoration: none;
