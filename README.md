@@ -45,13 +45,15 @@ cp .env.example.beginner .env.beginner
 
 2. Edit `.env.beginner` and set it for your system
 
-3. Start the stack:
+3. Copy the `compose.beginner.yaml` file and the `docker` folder into a folder on your computer
+  
+5. Start the stack:
 
 ```bash
 docker compose -f compose.beginner.yaml --env-file .env.beginner up -d
 ```
 
-4. Open `http://your-server:8000`
+6. Open `http://your-server:8000`
 
 ### Standard Install
 
@@ -63,7 +65,9 @@ cp .env.example .env
 
 2. Edit `.env` and set it for your system
 
-3. Pull and start the published images:
+3. Copy the `compose.beginner.yaml` file and the `docker` folder into a folder on your computer
+  
+4. Start the published images:
 
 ```bash
 docker compose -f compose.yaml --env-file .env pull
