@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
 from ..public_origin import public_base_url
@@ -22,10 +24,65 @@ from .request_context import get_state
 
 router = APIRouter()
 
+PWA_THEME_COLOR = "#10233f"
+PWA_BACKGROUND_COLOR = "#edf4ff"
+
 
 async def _audit_admin_page_view(request: Request, user, page_name: str, *, object_id: str | None = None) -> None:
     state = get_state(request)
     await state.telemetry.record_admin_page_viewed(request, user=user, page_name=page_name, object_id=object_id)
+
+
+@router.get("/manifest.webmanifest")
+async def manifest(request: Request) -> Response:
+    base_url = public_base_url(request, get_state(request).settings)
+    payload = {
+        "id": "/",
+        "name": "ImgHost",
+        "short_name": "ImgHost",
+        "description": "Upload your photos and videos. Share them in seconds.",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "orientation": "portrait",
+        "background_color": PWA_BACKGROUND_COLOR,
+        "theme_color": PWA_THEME_COLOR,
+        "icons": [
+            {
+                "src": f"{base_url}/static/icons/icon-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": f"{base_url}/static/icons/icon-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any maskable",
+            },
+        ],
+    }
+    return Response(
+        content=json.dumps(payload),
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.get("/service-worker.js")
+async def service_worker() -> Response:
+    script = """self.addEventListener("install", (event) => {
+  event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});"""
+    return Response(
+        content=script,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @router.get("/", response_class=HTMLResponse)

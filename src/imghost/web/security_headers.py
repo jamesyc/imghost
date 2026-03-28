@@ -21,7 +21,8 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "connect-src 'self'",
         "form-action 'self'",
         "frame-src 'none'",
-        "worker-src 'none'",
+        "manifest-src 'self'",
+        "worker-src 'self'",
     ]
 )
 

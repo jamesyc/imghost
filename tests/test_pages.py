@@ -72,8 +72,13 @@ def test_home_page_shows_upload_and_auth_entry_points(tmp_path, monkeypatch) -> 
         assert response.status_code == 200
         assert '<link rel="stylesheet" href="/static/css/base.css">' in response.text
         assert '<script src="/static/js/nav.js" defer></script>' in response.text
+        assert '<script src="/static/js/pwa.js" defer></script>' in response.text
         assert '<script src="/static/js/upload-box.js" defer></script>' in response.text
         assert '<script src="/static/js/home.js" defer></script>' in response.text
+        assert '<meta name="theme-color" content="#10233f">' in response.text
+        assert '<meta name="apple-mobile-web-app-capable" content="yes">' in response.text
+        assert '<link rel="manifest" href="/manifest.webmanifest">' in response.text
+        assert '<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">' in response.text
         assert 'href="/login"' in response.text
         assert 'href="/register"' in response.text
         assert '<a class="nav-brand" href="/">ImgHost</a>' in response.text
@@ -113,7 +118,6 @@ def test_home_page_reflects_runtime_config_disabled_states(tmp_path, monkeypatch
 
         response = client.get("/")
         assert response.status_code == 200
-        assert "Registration is currently disabled." in response.text
         assert "Anonymous uploads are currently disabled. Sign in to upload." in response.text
         assert 'href="/register"' not in response.text
         assert 'id="upload-form"' not in response.text
@@ -155,7 +159,6 @@ def test_home_page_shows_session_state_when_logged_in(tmp_path, monkeypatch) -> 
 
         page = client.get("/")
         assert page.status_code == 200
-        assert "Hello browseruser" in page.text
         assert "Signed in as <strong>browseruser</strong>." not in page.text
         assert "Open dashboard" not in page.text
         assert 'id="logout-form"' not in page.text
@@ -170,6 +173,40 @@ def test_home_page_shows_session_state_when_logged_in(tmp_path, monkeypatch) -> 
         assert 'data-upload-feedback' in page.text
         assert 'id="flash"' not in page.text
         assert 'name="album_id"' not in page.text
+
+
+def test_manifest_and_service_worker_routes_are_served(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        manifest = client.get("/manifest.webmanifest")
+        assert manifest.status_code == 200
+        assert manifest.headers["content-type"].startswith("application/manifest+json")
+        assert manifest.json()["name"] == "ImgHost"
+        assert manifest.json()["display"] == "standalone"
+        assert manifest.json()["icons"][0]["src"] == "https://testserver/static/icons/icon-192.png"
+        assert manifest.json()["icons"][1]["purpose"] == "any maskable"
+
+        service_worker = client.get("/service-worker.js")
+        assert service_worker.status_code == 200
+        assert service_worker.headers["content-type"].startswith("application/javascript")
+        assert "self.addEventListener(\"install\"" in service_worker.text
+        assert "self.clients.claim()" in service_worker.text
+
+
+def test_pwa_icons_are_served(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        svg = client.get("/static/icons/icon.svg")
+        assert svg.status_code == 200
+        assert svg.headers["content-type"].startswith("image/svg+xml")
+
+        apple_touch = client.get("/static/icons/apple-touch-icon.png")
+        assert apple_touch.status_code == 200
+        assert apple_touch.headers["content-type"].startswith("image/png")
 
 
 def test_admin_nav_includes_admin_link_and_mobile_toggle(tmp_path, monkeypatch, capsys) -> None:

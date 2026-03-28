@@ -2,23 +2,6 @@
 
 {% block content %}
 <section class="stack home-shell">
-  <section class="card hero-card hero-card-primary">
-    <h1>Upload your photos and videos. Share them in seconds.</h1>
-    {% if current_user %}
-    <p class="eyebrow hero-greeting">Hello {{ current_user.username }}</p>
-    {% endif %}
-    <p class="lede">Drop your files in, get a link, and send it to anyone. No clutter, no weird extras, just a fast way to share.</p>
-    {% if current_user %}
-    {% else %}
-    <div class="status-panel">
-      <p class="hint">Anonymous uploads currently expire after {{ runtime_flags.anon_expiry_hours }} hour(s).</p>
-    {% if not runtime_flags.allow_registration %}
-    <p class="hint">Registration is currently disabled.</p>
-    {% endif %}
-    </div>
-    {% endif %}
-  </section>
-
   {% if upload_enabled %}
   <section class="card upload-card">
     <div class="upload-card-header">

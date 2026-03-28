@@ -200,7 +200,8 @@ def test_base_template_removes_unused_inline_escape_hatches() -> None:
 def test_csp_explicitly_blocks_inline_script_and_style_attributes() -> None:
     assert "script-src-attr 'none'" in CONTENT_SECURITY_POLICY
     assert "style-src-attr 'none'" in CONTENT_SECURITY_POLICY
-    assert "worker-src 'none'" in CONTENT_SECURITY_POLICY
+    assert "manifest-src 'self'" in CONTENT_SECURITY_POLICY
+    assert "worker-src 'self'" in CONTENT_SECURITY_POLICY
 
 
 def test_public_album_bootstrap_json_page_includes_csp_without_hsts(tmp_path, monkeypatch) -> None:
