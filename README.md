@@ -2,8 +2,6 @@
 
 `imghost` is a self-hosted image and video hosting app with anonymous uploads, user accounts, public albums, admin tooling, and practical deployment options for both Docker Compose and direct host installs.
 
-It is built with FastAPI, PostgreSQL, Redis, and either local filesystem storage or Garage/S3-compatible object storage.
-
 ## Features
 
 - Anonymous uploads into shareable public albums
