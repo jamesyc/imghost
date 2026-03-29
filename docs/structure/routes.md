@@ -12,6 +12,8 @@ This file describes the current route structure as implemented today.
 - `/a/{album_id}`: public album page
 - `/u/{username}`: public user album list
 - `/manage/{album_id}?token=...`: token-backed anonymous album management page using the shared workspace template
+- `/sharex/delete/{album_id}?token=...`: ShareX delete capability entry point; validates and redirects to confirmation
+- `/sharex/delete/{album_id}/confirm`: ShareX delete confirmation page
 - `/manifest.webmanifest`: web app manifest
 - `/service-worker.js`: minimal service worker bootstrap
 
@@ -40,6 +42,7 @@ This file describes the current route structure as implemented today.
 - `/register` can render a disabled state when runtime config disables registration.
 - `/albums/{album_id}` returns `404` when the album is missing, expired, or not owned by the current user. It does not fall back to the public album page.
 - `/manage/{album_id}` requires a valid delete token and reuses the owner workspace template in token mode.
+- `/sharex/delete/{album_id}` never deletes on `GET`; it validates the capability URL, sets a short-lived confirmation cookie, and redirects to `/sharex/delete/{album_id}/confirm`.
 - `/a/{album_id}` and `/u/{username}` are public page surfaces backed by page-context builders in [`src/imghost/web/page_views.py`](/home/james/imghost/src/imghost/web/page_views.py).
 
 ## API Route Groups
@@ -57,13 +60,20 @@ This file describes the current route structure as implemented today.
 ### Public and Shared Album API
 
 - `POST /api/v1/upload`
-- `GET /api/v1/album/{album_id}/delete`
 - `GET /api/v1/album/{album_id}`
 - `GET /api/v1/album/{album_id}/zip`
 - `DELETE /api/v1/album/{album_id}`
 - `PATCH /api/v1/album/{album_id}`
 - `PATCH /api/v1/album/{album_id}/order`
 - `DELETE /api/v1/media/{media_id}`
+
+### ShareX Delete Flow
+
+- `GET /sharex/delete/{album_id}`
+- `GET /sharex/delete/{album_id}/confirm`
+- `POST /sharex/delete/{album_id}/confirm`
+
+These routes handle ShareX deletion for authenticated API-key uploads. The initial `delete_url` is a capability URL, but deletion happens only after the confirmation `POST`.
 
 These endpoints serve both authenticated owner actions and token-backed anonymous management, depending on session state and `delete_token`.
 

@@ -82,6 +82,22 @@ CREATE TABLE IF NOT EXISTS media (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS sharex_delete_capabilities (
+  selector TEXT PRIMARY KEY,
+  purpose TEXT NOT NULL DEFAULT 'sharex_delete_album',
+  album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  secret_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  last_seen_at TIMESTAMPTZ
+);
+
+ALTER TABLE sharex_delete_capabilities
+  ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'sharex_delete_album';
+
 CREATE TABLE IF NOT EXISTS config (
   key TEXT PRIMARY KEY,
   value TEXT,
@@ -139,6 +155,9 @@ CREATE INDEX IF NOT EXISTS idx_audit_source_created ON audit_log (source, create
 CREATE INDEX IF NOT EXISTS idx_audit_request_id ON audit_log (request_id);
 CREATE INDEX IF NOT EXISTS idx_audit_route_created ON audit_log (route, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys (user_id);
+CREATE INDEX IF NOT EXISTS idx_sharex_delete_capabilities_album_id ON sharex_delete_capabilities (album_id);
+CREATE INDEX IF NOT EXISTS idx_sharex_delete_capabilities_user_id ON sharex_delete_capabilities (user_id);
+CREATE INDEX IF NOT EXISTS idx_sharex_delete_capabilities_expires_at ON sharex_delete_capabilities (expires_at);
 CREATE INDEX IF NOT EXISTS idx_sso_links_user_id ON user_sso_links (user_id);
 CREATE INDEX IF NOT EXISTS idx_oauth_state_nonces_expires_at ON oauth_state_nonces (expires_at);
 

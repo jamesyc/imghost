@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .db import Database
-from .models import Album, ApiKey, Media, OAuthStateNonce, User, UserSsoLink
+from .models import Album, ApiKey, Media, OAuthStateNonce, ShareXDeleteCapability, User, UserSsoLink
 from .repository_media import AlbumMediaRepository
 from .repository_users import UserRepository
 
@@ -100,6 +100,18 @@ class PostgresRepository:
 
     async def list_all_media(self) -> list[Media]:
         return await self.albums.list_all_media()
+
+    async def create_sharex_delete_capability(self, capability: ShareXDeleteCapability) -> ShareXDeleteCapability:
+        return await self.albums.create_sharex_delete_capability(capability)
+
+    async def get_sharex_delete_capability(self, selector: str) -> ShareXDeleteCapability | None:
+        return await self.albums.get_sharex_delete_capability(selector)
+
+    async def touch_sharex_delete_capability(self, selector: str) -> ShareXDeleteCapability | None:
+        return await self.albums.touch_sharex_delete_capability(selector)
+
+    async def consume_sharex_delete_capability(self, selector: str, album_id: str) -> ShareXDeleteCapability | None:
+        return await self.albums.consume_sharex_delete_capability(selector, album_id)
 
     async def list_albums_page(
         self,

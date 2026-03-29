@@ -165,6 +165,14 @@ Behavior:
 
 That behavior exists because the app only stores the hash of the key, not the original raw value.
 
+Authenticated ShareX uploads also return a dedicated `delete_url`:
+
+- the URL is scoped to a single album and owner
+- the URL is backed by a persisted capability record in PostgreSQL
+- `GET /sharex/delete/{album_id}?token=...` validates the capability and redirects to a confirmation page
+- `POST /sharex/delete/{album_id}/confirm` consumes the capability and deletes the album
+- the flow works the same with and without Redis
+
 ## Account deletion confirmation
 
 `DELETE /api/v1/user/me` requires an explicit confirmation payload.

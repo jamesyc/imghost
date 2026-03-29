@@ -4,8 +4,8 @@ from datetime import datetime
 from typing import Any
 
 from .db import Database
-from .models import Album, Media
-from .repository_mapping import row_to_album, row_to_media
+from .models import Album, Media, ShareXDeleteCapability
+from .repository_mapping import row_to_album, row_to_media, row_to_sharex_delete_capability
 
 
 class AlbumMediaRepository:
@@ -26,6 +26,77 @@ class AlbumMediaRepository:
             media = row_to_media(row)
             grouped.setdefault(media.album_id, []).append(media)
         return grouped
+
+    async def create_sharex_delete_capability(self, capability: ShareXDeleteCapability) -> ShareXDeleteCapability:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO sharex_delete_capabilities (
+                  selector, purpose, album_id, user_id, secret_hash, created_at, expires_at, consumed_at, revoked_at, last_seen_at
+                ) VALUES (
+                  $1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10
+                )
+                RETURNING *
+                """,
+                capability.selector,
+                capability.purpose,
+                capability.album_id,
+                capability.user_id,
+                capability.secret_hash,
+                capability.created_at,
+                capability.expires_at,
+                capability.consumed_at,
+                capability.revoked_at,
+                capability.last_seen_at,
+            )
+        return row_to_sharex_delete_capability(row)
+
+    async def get_sharex_delete_capability(self, selector: str) -> ShareXDeleteCapability | None:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT *
+                FROM sharex_delete_capabilities
+                WHERE selector = $1
+                """,
+                selector,
+            )
+        return row_to_sharex_delete_capability(row) if row else None
+
+    async def touch_sharex_delete_capability(self, selector: str) -> ShareXDeleteCapability | None:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE sharex_delete_capabilities
+                SET last_seen_at = now()
+                WHERE selector = $1
+                RETURNING *
+                """,
+                selector,
+            )
+        return row_to_sharex_delete_capability(row) if row else None
+
+    async def consume_sharex_delete_capability(self, selector: str, album_id: str) -> ShareXDeleteCapability | None:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE sharex_delete_capabilities
+                SET consumed_at = now(), last_seen_at = now()
+                WHERE selector = $1
+                  AND album_id = $2
+                  AND revoked_at IS NULL
+                  AND consumed_at IS NULL
+                  AND expires_at > now()
+                RETURNING *
+                """,
+                selector,
+                album_id,
+            )
+        return row_to_sharex_delete_capability(row) if row else None
 
     async def list_all_media(self) -> list[Media]:
         pool = self.database.require_pool()

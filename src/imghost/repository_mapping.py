@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .models import Album, ApiKey, Media, User, UserSsoLink
+from .models import Album, ApiKey, Media, ShareXDeleteCapability, User, UserSsoLink
 
 
 def row_to_user(row) -> User:
@@ -74,6 +74,21 @@ def row_to_media(row) -> Media:
         codec_hint=row["codec_hint"],
         position=row["position"],
         created_at=row["created_at"],
+    )
+
+
+def row_to_sharex_delete_capability(row) -> ShareXDeleteCapability:
+    return ShareXDeleteCapability(
+        selector=row["selector"],
+        purpose=row["purpose"],
+        album_id=row["album_id"],
+        user_id=str(row["user_id"]),
+        secret_hash=row["secret_hash"],
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        consumed_at=row["consumed_at"],
+        revoked_at=row["revoked_at"],
+        last_seen_at=row["last_seen_at"],
     )
 
 

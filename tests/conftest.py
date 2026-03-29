@@ -66,6 +66,7 @@ async def _truncate_database() -> None:
             TRUNCATE TABLE
               audit_log,
               config,
+              sharex_delete_capabilities,
               media,
               albums,
               oauth_state_nonces,

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="stack settings-shell">
+  <section class="card settings-card">
+    {% if sharex_delete.deleted %}
+    <p class="eyebrow">ShareX</p>
+    <h1>Album deleted</h1>
+    <p class="hint">
+      {% if sharex_delete.title %}
+      {{ sharex_delete.title }}
+      {% else %}
+      Album {{ sharex_delete.album_id }}
+      {% endif %}
+      has been removed.
+    </p>
+    {% else %}
+    <p class="eyebrow">ShareX</p>
+    <h1>Delete album?</h1>
+    <p class="hint">
+      {% if sharex_delete.title %}
+      Delete <strong>{{ sharex_delete.title }}</strong> and its {{ sharex_delete.item_count }} item(s)?
+      {% else %}
+      Delete album {{ sharex_delete.album_id }} and its {{ sharex_delete.item_count }} item(s)?
+      {% endif %}
+      This cannot be undone.
+    </p>
+    <form method="post" action="/sharex/delete/{{ sharex_delete.album_id }}/confirm" class="row row-actions">
+      <button type="submit" class="danger">Delete Album</button>
+      <a class="button secondary" href="/">Cancel</a>
+    </form>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}

@@ -112,6 +112,38 @@ class OAuthStateNonce:
 
 
 @dataclass
+class ShareXDeleteCapability:
+    selector: str
+    purpose: str
+    album_id: str
+    user_id: str
+    secret_hash: str
+    created_at: datetime
+    expires_at: datetime
+    consumed_at: datetime | None
+    revoked_at: datetime | None
+    last_seen_at: datetime | None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        for key in ("created_at", "expires_at", "consumed_at", "revoked_at", "last_seen_at"):
+            if data[key] is not None:
+                data[key] = data[key].isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ShareXDeleteCapability":
+        values = data.copy()
+        for key in ("created_at", "expires_at", "consumed_at", "revoked_at", "last_seen_at"):
+            if values.get(key) is not None:
+                values[key] = datetime.fromisoformat(values[key])
+        values.setdefault("consumed_at", None)
+        values.setdefault("revoked_at", None)
+        values.setdefault("last_seen_at", None)
+        return cls(**values)
+
+
+@dataclass
 class Album:
     id: str
     title: str | None

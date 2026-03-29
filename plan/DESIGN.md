@@ -949,7 +949,82 @@ When ShareX config is downloaded from a browser session, the server must auto-is
 }
 ```
 
-ShareX sends a `GET` request to `DeletionURL`, so `delete_url` points to a dedicated `GET /api/v1/album/{albumId}/delete` endpoint. Instead of reusing API key auth on that GET request, imghost signs a deletion token into the URL query string and validates that token server-side before deleting the album. This keeps ShareX compatibility while avoiding a raw API key in the delete URL. It remains separate from `DELETE /api/v1/album/{albumId}` (which is used by browser/programmatic clients).
+ShareX custom uploaders expose **one upload request definition** plus parsed output fields like `URL`, `ThumbnailURL`, and `DeletionURL`. In practice, `DeletionURL` behaves like a stored capability URL, not like a second independently-authenticated API client. The design should therefore treat ShareX deletion as a **capability-link workflow** rather than trying to reuse browser-session or API-key auth on a later delete request.
+
+Final design:
+
+- `delete_url` returned to ShareX points to a **confirmation page URL**, not a destructive endpoint
+- the initial ShareX delete URL is a capability URL such as:
+  - `GET /sharex/delete/{albumId}?token={selector}.{secret}`
+- that GET request **never deletes**
+- after capability validation, the server redirects to a tokenless confirmation page and stores a short-lived confirmation context
+- the actual delete happens only on:
+  - `POST /sharex/delete/{albumId}/confirm`
+
+This preserves ShareX compatibility while removing destructive `GET` behavior.
+
+### ShareX Delete Capability Model
+
+ShareX deletion uses a dedicated persisted capability token, **not** the anonymous album `manage_url` token.
+
+Token record fields:
+
+- `selector`
+- `secret_hash`
+- `purpose` = `sharex_delete_album`
+- `subject_type` = `album`
+- `subject_id` = `{albumId}`
+- `owner_user_id`
+- `created_at`
+- `expires_at`
+- `revoked_at`
+- `consumed_at`
+- `last_seen_at`
+
+Properties:
+
+- raw token is returned once as `{selector}.{secret}`
+- only `secret_hash` is stored server-side
+- token scope is delete-only for one album
+- token is revocable and expiring
+- token is single-use at confirmation/consume time
+
+Validation and consumption are **PostgreSQL-backed** so the workflow works identically with and without Redis.
+
+### Confirmation Flow
+
+1. ShareX opens `delete_url`
+2. `GET /sharex/delete/{albumId}?token=...`
+   - validate capability from PostgreSQL
+   - verify album still exists and belongs to the capability owner
+   - do **not** delete
+3. server issues a short-lived confirmation context and redirects to:
+   - `GET /sharex/delete/{albumId}/confirm`
+4. user confirms deletion
+5. `POST /sharex/delete/{albumId}/confirm`
+   - re-validates the short-lived confirmation context
+   - atomically consumes the underlying capability token in PostgreSQL
+   - deletes the album
+
+The confirmation context should be:
+
+- short-lived (for example 5 minutes)
+- tokenless in the URL after the initial redirect
+- stored in a path-scoped `HttpOnly` cookie with a signed payload
+- independent of browser-session auth so it works for ShareX users in both Redis and Redis-free deployments
+
+### Redis and No-Redis Behavior
+
+PostgreSQL is the source of truth for ShareX delete capabilities.
+
+- with Redis:
+  - Redis may cache capability lookups or provide additional rate limiting
+  - Redis is **not** required for correctness
+- without Redis:
+  - capability creation, validation, revocation, and single-use consumption still work through PostgreSQL
+  - the confirmation cookie remains signed and self-contained
+
+This avoids a split-brain security model between the standard Compose stack and the beginner Docker stack.
 
 ### Upload Behavior via API Key
 
@@ -965,7 +1040,7 @@ ShareX sends a `GET` request to `DeletionURL`, so `delete_url` points to a dedic
   "media_id":  "xk7m2np4q8wr",
   "media_url": "https://example.com/i/xk7m2np4q8wr.jpg",
   "thumb_url": "https://example.com/t/xk7m2np4q8wr.jpg",
-  "delete_url":"https://example.com/api/v1/album/xk7m2np4q",
+  "delete_url":"https://example.com/sharex/delete/xk7m2np4q?token=abc123.def456",
   "expires_at": null
 }
 ```
@@ -998,11 +1073,18 @@ POST /api/v1/upload
 
 ```
 GET    /api/v1/album/{albumId}            album metadata + ordered item list
-GET    /api/v1/album/{albumId}/delete     delete album via GET (ShareX DeletionURL — signed query token)
 DELETE /api/v1/album/{albumId}            delete album (owner or admin)
 PATCH  /api/v1/album/{albumId}            edit title, cover_media_id
 GET    /api/v1/album/{albumId}/zip        stream ZIP download (public — no auth required)
 PATCH  /api/v1/album/{albumId}/order      reorder items: [{media_id, position}, ...]
+```
+
+#### ShareX Delete Flow
+
+```
+GET    /sharex/delete/{albumId}           validate capability token, render/redirect to confirmation page, never delete
+GET    /sharex/delete/{albumId}/confirm   confirmation page after token exchange
+POST   /sharex/delete/{albumId}/confirm   consume capability token and delete album
 ```
 
 #### Media
@@ -2265,6 +2347,14 @@ The CLI should stay intentionally small and operator-oriented. User/account reco
 - Session tokens: 32-byte random, stored hashed in Redis (or signed cookies in Redis-free mode)
 - Cookie flags: `httponly; secure; samesite=lax`
 - CSRF protection on all state-mutating form endpoints
+- ShareX delete links use a dedicated persisted capability token with expiry and server-side revocation/consumption semantics; they do **not** reuse API keys, browser sessions, or anonymous album manage tokens
+
+### Capability URLs
+
+- No destructive action should happen on `GET`
+- ShareX deletion uses a confirmation flow because `.sxcu` treats `DeletionURL` as a stored output URL rather than a second fully-configurable authenticated API request
+- long-lived capability tokens should be purpose-scoped, expiring, and stored hash-only on the server
+- PostgreSQL is the source of truth for capability validation and single-use consumption; Redis may accelerate lookups but must not be required for correctness
 
 ### Rate Limit Key
 
@@ -2368,6 +2458,7 @@ When Redis is disabled, the application starts in Redis-free mode. This is a **f
 | **Task queue** | Redis-backed dispatch to separate worker processes with scheduler lease coordination | In-process execution, async by default. `TASK_QUEUE_MODE=sync` switches to synchronous execution. |
 | **Worker services** | `worker-thumbnails`, `worker-cleanup`, `worker-default`, and `scheduler` run as separate containers | Dedicated worker processes are optional. Background work can run in-process, and scheduled jobs run in the app only when `APP_SCHEDULER_ENABLED=true`; otherwise a separate scheduler process is still used. |
 | **Readiness probe** | Redis checked as dependency | Redis check skipped; public health stays coarse and reports Redis as disabled / not required. |
+| **ShareX delete capability tokens** | PostgreSQL-backed capability validation with optional Redis cache/rate-limit assist | Same PostgreSQL-backed validation and consumption behavior; no Redis dependency for correctness |
 
 ### Degradation Matrix
 

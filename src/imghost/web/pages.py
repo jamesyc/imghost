@@ -6,7 +6,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from ..ids import ALBUM_ID_LENGTH, is_valid_id
+from ..models import utcnow
 from ..public_origin import public_base_url
+from ..sharex_delete import (
+    SHAREX_DELETE_CONFIRM_COOKIE_NAME,
+    ShareXDeleteConfirmationPayload,
+    ShareXDeleteTokenManager,
+)
 from .auth_context import (
     authenticated_user,
     require_page_admin,
@@ -31,6 +37,46 @@ PWA_BACKGROUND_COLOR = "#edf4ff"
 async def _audit_admin_page_view(request: Request, user, page_name: str, *, object_id: str | None = None) -> None:
     state = get_state(request)
     await state.telemetry.record_admin_page_viewed(request, user=user, page_name=page_name, object_id=object_id)
+
+
+def _sharex_confirm_path(album_id: str) -> str:
+    return f"/sharex/delete/{album_id}/confirm"
+
+
+def _clear_sharex_confirm_cookie(response: Response, request: Request, album_id: str) -> None:
+    response.delete_cookie(
+        key=SHAREX_DELETE_CONFIRM_COOKIE_NAME,
+        httponly=True,
+        samesite="lax",
+        secure=get_state(request).settings.session_cookie_secure,
+        path=f"/sharex/delete/{album_id}",
+    )
+
+
+def _set_sharex_confirm_cookie(response: Response, request: Request, album_id: str, token: str) -> None:
+    response.set_cookie(
+        key=SHAREX_DELETE_CONFIRM_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=get_state(request).settings.session_cookie_secure,
+        max_age=300,
+        path=f"/sharex/delete/{album_id}",
+    )
+
+
+def _load_sharex_confirmation(request: Request, album_id: str) -> ShareXDeleteConfirmationPayload:
+    raw = request.cookies.get(SHAREX_DELETE_CONFIRM_COOKIE_NAME, "")
+    if not raw:
+        raise HTTPException(status_code=403, detail="Missing ShareX deletion confirmation.")
+    manager = ShareXDeleteTokenManager(get_state(request).settings.secret_key)
+    try:
+        payload = manager.loads_confirmation(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="ShareX deletion confirmation expired or is invalid.") from exc
+    if payload.album_id != album_id:
+        raise HTTPException(status_code=403, detail="ShareX deletion confirmation expired or is invalid.")
+    return payload
 
 
 @router.get("/manifest.webmanifest")
@@ -259,6 +305,126 @@ async def settings_page(request: Request) -> HTMLResponse:
         },
         script_paths=["js/settings.js"],
     )
+
+
+@router.get("/sharex/delete/{album_id}")
+async def sharex_delete_entry(request: Request, album_id: str, token: str | None = None) -> RedirectResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    if not token:
+        raise HTTPException(status_code=403, detail="Missing ShareX deletion token.")
+    state = get_state(request)
+    manager = ShareXDeleteTokenManager(state.settings.secret_key)
+    try:
+        selector, secret = manager.split_capability_token(token)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.") from exc
+    capability = await state.repository.get_sharex_delete_capability(selector)
+    if capability is None:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    if capability.purpose != "sharex_delete_album":
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    if capability.album_id != album_id:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    if capability.revoked_at is not None or capability.consumed_at is not None or capability.expires_at <= utcnow():
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    if not manager.verify_capability_secret(capability, secret):
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    album = await state.repository.get_album(album_id)
+    if album is None or album.user_id != capability.user_id:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    await state.repository.touch_sharex_delete_capability(selector)
+    confirmation = manager.dumps_confirmation(
+        ShareXDeleteConfirmationPayload(
+            selector=selector,
+            album_id=album_id,
+            user_id=capability.user_id,
+        )
+    )
+    response = RedirectResponse(url=_sharex_confirm_path(album_id), status_code=303)
+    _set_sharex_confirm_cookie(response, request, album_id, confirmation)
+    return response
+
+
+@router.get("/sharex/delete/{album_id}/confirm", response_class=HTMLResponse)
+async def sharex_delete_confirm_page(request: Request, album_id: str) -> HTMLResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    confirmation = _load_sharex_confirmation(request, album_id)
+    capability = await state.repository.get_sharex_delete_capability(confirmation.selector)
+    album = await state.repository.get_album(album_id)
+    if capability is None:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    if capability.purpose != "sharex_delete_album":
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    if album is None and capability.consumed_at is not None:
+        response = await render_template_page(
+            request,
+            "pages/sharex-delete-confirm.html",
+            "Album Deleted",
+            extra_context={"sharex_delete": {"deleted": True, "album_id": album_id, "title": None, "item_count": 0}},
+        )
+        _clear_sharex_confirm_cookie(response, request, album_id)
+        return response
+    if album is None or album.user_id != confirmation.user_id:
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    items = await state.repository.list_album_media(album_id)
+    return await render_template_page(
+        request,
+        "pages/sharex-delete-confirm.html",
+        "Confirm ShareX Delete",
+        extra_context={
+            "sharex_delete": {
+                "deleted": False,
+                "album_id": album.id,
+                "title": album.title,
+                "item_count": len(items),
+            }
+        },
+    )
+
+
+@router.post("/sharex/delete/{album_id}/confirm", response_class=HTMLResponse)
+async def sharex_delete_confirm_submit(request: Request, album_id: str) -> HTMLResponse:
+    if not is_valid_id(album_id, ALBUM_ID_LENGTH):
+        raise HTTPException(status_code=404)
+    state = get_state(request)
+    cid = getattr(request.state, "correlation_id", None) or "sharex-delete"
+    confirmation = _load_sharex_confirmation(request, album_id)
+    capability = await state.repository.consume_sharex_delete_capability(confirmation.selector, album_id)
+    if capability is None:
+        current = await state.repository.get_sharex_delete_capability(confirmation.selector)
+        album = await state.repository.get_album(album_id)
+        if current is not None and current.user_id == confirmation.user_id and current.consumed_at is not None and album is None:
+            response = await render_template_page(
+                request,
+                "pages/sharex-delete-confirm.html",
+                "Album Deleted",
+                extra_context={"sharex_delete": {"deleted": True, "album_id": album_id, "title": None, "item_count": 0}},
+            )
+            _clear_sharex_confirm_cookie(response, request, album_id)
+            return response
+        raise HTTPException(status_code=403, detail="ShareX deletion confirmation expired or is invalid.")
+    actor_user = await state.repository.get_user(capability.user_id)
+    if actor_user is None:
+        raise HTTPException(status_code=403, detail="ShareX deletion confirmation expired or is invalid.")
+    deleted_album, items = await state.uploads.delete_album(album_id, None, cid, actor_user=actor_user)
+    response = await render_template_page(
+        request,
+        "pages/sharex-delete-confirm.html",
+        "Album Deleted",
+        extra_context={
+            "sharex_delete": {
+                "deleted": True,
+                "album_id": deleted_album.id,
+                "title": deleted_album.title,
+                "item_count": len(items),
+            }
+        },
+    )
+    _clear_sharex_confirm_cookie(response, request, album_id)
+    return response
 
 
 @router.get("/admin", response_class=HTMLResponse)

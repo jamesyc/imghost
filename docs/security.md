@@ -45,6 +45,15 @@ Tradeoff:
 
 Anonymous album manage-token flows are separate from browser-session auth, but if a session cookie is also present the browser-session CSRF gate still applies unless the request carries same-origin headers.
 
+## ShareX delete posture
+
+- authenticated ShareX uploads return a dedicated `delete_url`
+- the URL is a capability entry point, not a destructive `GET`
+- capability records are stored in PostgreSQL, scoped to one album and one owner, and expire automatically
+- `GET /sharex/delete/{album_id}?token=...` validates the capability and exchanges it for a short-lived HTTP-only confirmation cookie
+- `POST /sharex/delete/{album_id}/confirm` consumes the capability and deletes the album
+- Redis is optional acceleration only; ShareX delete correctness does not depend on Redis being available
+
 ## URL generation and proxy trust
 
 - exact trusted public-origin allowlist
