@@ -8,7 +8,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-imghost}:${POSTGRES_PASSWORD:-imghost}@pgbouncer:5432/${POSTGRES_DB:-imghost}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       DATABASE_USE_PGBOUNCER: "true"
       IMGHOST_DATA_DIR: ${IMGHOST_DATA_DIR:-/app/data}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -37,7 +37,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-imghost}:${POSTGRES_PASSWORD:-imghost}@pgbouncer:5432/${POSTGRES_DB:-imghost}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       DATABASE_USE_PGBOUNCER: "true"
       IMGHOST_DATA_DIR: ${IMGHOST_DATA_DIR:-/app/data}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -64,7 +64,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-imghost}:${POSTGRES_PASSWORD:-imghost}@pgbouncer:5432/${POSTGRES_DB:-imghost}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       DATABASE_USE_PGBOUNCER: "true"
       IMGHOST_DATA_DIR: ${IMGHOST_DATA_DIR:-/app/data}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -91,7 +91,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-imghost}:${POSTGRES_PASSWORD:-imghost}@pgbouncer:5432/${POSTGRES_DB:-imghost}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       DATABASE_USE_PGBOUNCER: "true"
       IMGHOST_DATA_DIR: ${IMGHOST_DATA_DIR:-/app/data}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -118,7 +118,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-imghost}:${POSTGRES_PASSWORD:-imghost}@pgbouncer:5432/${POSTGRES_DB:-imghost}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}
       DATABASE_USE_PGBOUNCER: "true"
       IMGHOST_DATA_DIR: ${IMGHOST_DATA_DIR:-/app/data}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -142,16 +142,16 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-imghost}
-      POSTGRES_USER: ${POSTGRES_USER:-imghost}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-imghost}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - ./postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-imghost} -d ${POSTGRES_DB:-imghost}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -160,7 +160,7 @@ services:
     image: edoburu/pgbouncer:v1.25.1-p0
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-imghost}:${POSTGRES_PASSWORD:-imghost}@postgres:5432/${POSTGRES_DB:-imghost}
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       AUTH_TYPE: scram-sha-256
       POOL_MODE: transaction
       MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-200}
@@ -173,7 +173,7 @@ services:
     ports:
       - "${PGBOUNCER_PORT:-6432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -d postgres://${POSTGRES_USER:-imghost}:${POSTGRES_PASSWORD:-imghost}@127.0.0.1:5432/${POSTGRES_DB:-imghost}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -d postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -190,7 +190,7 @@ services:
         fi
         exec redis-server --appendonly yes
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     ports:
@@ -213,9 +213,9 @@ services:
     restart: unless-stopped
     command: ["/garage", "-c", "/etc/garage.toml", "server"]
     environment:
-      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
-      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-garage-admin-token-change-me}
-      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN:-garage-metrics-token-change-me}
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
+      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN}
     volumes:
       - ./docker/garage/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
@@ -233,9 +233,9 @@ services:
     image: ${GARAGE_INIT_IMAGE:-ghcr.io/jamesyc/imghost-garage-init}:${GARAGE_INIT_IMAGE_TAG:-latest}
     restart: "no"
     environment:
-      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
-      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-garage-admin-token-change-me}
-      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN:-garage-metrics-token-change-me}
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
+      GARAGE_METRICS_TOKEN: ${GARAGE_METRICS_TOKEN}
       GARAGE_ZONE: ${GARAGE_ZONE:-dc1}
       GARAGE_CAPACITY: ${GARAGE_CAPACITY:-1G}
       GARAGE_KEY_NAME: ${GARAGE_KEY_NAME:-imghost-app}
