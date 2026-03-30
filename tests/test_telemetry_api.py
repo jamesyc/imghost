@@ -122,6 +122,7 @@ def test_telemetry_facade_delegates_state_helpers() -> None:
     [
         ("record_login_failed", "record_login_failed", {"login_identifier": "user@example.com", "reason": "invalid_password"}),
         ("record_login_succeeded", "record_login_succeeded", {"user": SimpleNamespace(id="user-1"), "remember_me": True}),
+        ("record_auth_rate_limited", "record_auth_rate_limited", {"scope": "login", "method": "password"}),
         ("record_registration_denied", "record_registration_denied", {"username": "newuser", "email": "new@example.com", "reason": "registration_disabled"}),
         ("record_logout_succeeded", "record_logout_succeeded", {"user": SimpleNamespace(id="user-1")}),
         (

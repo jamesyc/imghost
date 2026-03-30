@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from imghost.auth_rate_limits import InMemoryAuthRateLimiter, RedisAuthRateLimiter
 from imghost.config import Settings
 from imghost.main import app
 from imghost.models import User, utcnow
@@ -259,6 +260,87 @@ def test_redis_session_backend_strict_mode_rejects_session_creation_when_redis_i
 
     with pytest.raises(SessionBackendUnavailable, match="Redis-backed sessions"):
         asyncio.run(backend.create_session(make_user(), remember_me=True))
+
+
+def test_in_memory_auth_rate_limiter_locks_after_repeated_login_failures() -> None:
+    limiter = InMemoryAuthRateLimiter(
+        DummyRuntimeConfig(
+            {
+                "auth_rate_limit_login_ip_rpm": 10,
+                "auth_rate_limit_login_account_failures": 2,
+                "auth_rate_limit_login_account_window_seconds": 300,
+                "auth_rate_limit_login_lock_seconds": 300,
+                "auth_rate_limit_registration_ip_rpm": 5,
+                "auth_rate_limit_api_key_ip_failures": 2,
+                "auth_rate_limit_api_key_ip_window_seconds": 300,
+                "auth_rate_limit_api_key_lock_seconds": 300,
+                "auth_rate_limit_admin_ip_failures": 2,
+                "auth_rate_limit_admin_ip_window_seconds": 300,
+                "auth_rate_limit_admin_lock_seconds": 300,
+            }
+        )
+    )
+
+    asyncio.run(limiter.enforce_login_attempt(ip_key="ip-1", login_key="acct-1"))
+    asyncio.run(limiter.record_login_failure(ip_key="ip-1", login_key="acct-1"))
+    asyncio.run(limiter.enforce_login_attempt(ip_key="ip-1", login_key="acct-1"))
+    asyncio.run(limiter.record_login_failure(ip_key="ip-1", login_key="acct-1"))
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(limiter.enforce_login_attempt(ip_key="ip-1", login_key="acct-1"))
+    assert denied.value.status_code == 429
+
+
+def test_redis_auth_rate_limiter_falls_back_when_redis_is_down() -> None:
+    fake = FakeRedis()
+    fake.fail = True
+    settings = make_settings(redis_url="redis://fake")
+    telemetry = make_telemetry()
+    limiter = RedisAuthRateLimiter(
+        DummyRuntimeConfig(
+            {
+                "auth_rate_limit_login_ip_rpm": 10,
+                "auth_rate_limit_login_account_failures": 2,
+                "auth_rate_limit_login_account_window_seconds": 300,
+                "auth_rate_limit_login_lock_seconds": 300,
+                "auth_rate_limit_registration_ip_rpm": 5,
+                "auth_rate_limit_api_key_ip_failures": 2,
+                "auth_rate_limit_api_key_ip_window_seconds": 300,
+                "auth_rate_limit_api_key_lock_seconds": 300,
+                "auth_rate_limit_admin_ip_failures": 2,
+                "auth_rate_limit_admin_ip_window_seconds": 300,
+                "auth_rate_limit_admin_lock_seconds": 300,
+            }
+        ),
+        RedisHandle(settings, client_factory=lambda _: fake, cooldown_seconds=0),
+        InMemoryAuthRateLimiter(
+            DummyRuntimeConfig(
+                {
+                    "auth_rate_limit_login_ip_rpm": 10,
+                    "auth_rate_limit_login_account_failures": 2,
+                    "auth_rate_limit_login_account_window_seconds": 300,
+                    "auth_rate_limit_login_lock_seconds": 300,
+                    "auth_rate_limit_registration_ip_rpm": 5,
+                    "auth_rate_limit_api_key_ip_failures": 2,
+                    "auth_rate_limit_api_key_ip_window_seconds": 300,
+                    "auth_rate_limit_api_key_lock_seconds": 300,
+                    "auth_rate_limit_admin_ip_failures": 2,
+                    "auth_rate_limit_admin_ip_window_seconds": 300,
+                    "auth_rate_limit_admin_lock_seconds": 300,
+                }
+            )
+        ),
+        telemetry,
+    )
+
+    asyncio.run(limiter.record_api_key_failure(ip_key="ip-1"))
+    asyncio.run(limiter.record_api_key_failure(ip_key="ip-1"))
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(limiter.enforce_api_key_attempt(ip_key="ip-1"))
+    assert denied.value.status_code == 429
+    assert telemetry.degraded
+    assert telemetry.degraded[0] == ("auth_rate_limits", "api key failure record", "redis_unavailable")
 
 
 def test_redis_session_backend_strict_mode_fails_closed_when_redis_goes_down_after_login() -> None:

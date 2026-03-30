@@ -17,6 +17,7 @@ from .helpers import (
     record_admin_page_viewed,
     record_api_key_auth_failed,
     record_api_key_authenticated,
+    record_auth_rate_limited,
     record_cli_command,
     record_csrf_blocked,
     record_login_failed,
@@ -55,6 +56,11 @@ class Telemetry:
         await record_login_succeeded(self._service, request, user=user, remember_me=remember_me)
         if self._metrics is not None:
             self._metrics.record_auth_event(event="login", method="password", result="success")
+
+    async def record_auth_rate_limited(self, request: Request, *, scope: str, method: str) -> None:
+        await record_auth_rate_limited(self._service, request, scope=scope, method=method)
+        if self._metrics is not None:
+            self._metrics.record_auth_event(event="auth_rate_limit", method=method, result="denied")
 
     async def record_registration_denied(
         self,

@@ -19,6 +19,17 @@ This document summarizes the security-relevant behavior currently implemented.
 - cookie security controlled by `SESSION_COOKIE_SECURE`
 - optional Google OAuth login/link flows with PKCE
 
+## Auth rate limiting
+
+- password login is rate limited by client IP and by repeated failures against the same normalized login identifier
+- registration is rate limited by client IP
+- repeated invalid bearer API-key attempts are rate limited by client IP
+- repeated admin-access denials are rate limited by client IP
+- throttled auth routes return `429 Too Many Requests` with a generic error instead of exposing account validity details
+- successful password login clears the narrow account-scoped login failure state
+- Redis improves shared enforcement across multiple processes, but auth throttling still works when Redis is disabled or temporarily unavailable
+- without Redis, auth throttles are enforced with process-local in-memory counters, which is acceptable for the beginner stack but weaker across multiple app instances
+
 ## Session model
 
 The app supports two Redis session outage postures:
@@ -86,6 +97,8 @@ Important admin endpoints include:
 - runtime config
 - audit log
 - runtime status
+
+Repeated failed or forbidden admin access attempts are also subject to auth throttling.
 
 ## Current limits
 

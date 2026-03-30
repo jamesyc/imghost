@@ -26,6 +26,15 @@ Password-setting policy:
 - local passwords must be at least 8 characters
 - the backend enforces this for registration, admin user creation, admin reset, and current-user password change
 
+Auth throttling:
+
+- `POST /api/v1/auth/login` can return `429` after repeated attempts from one client IP
+- repeated failed login attempts against the same normalized login identifier can also trigger a temporary lock
+- `POST /api/v1/auth/register` can return `429` after repeated attempts from one client IP
+- repeated invalid bearer API-key attempts can trigger `429` on protected API routes
+- repeated admin-access denials can trigger `429` on admin routes
+- throttled responses stay generic and do not reveal whether an account or API key is valid
+
 ## OAuth flows
 
 Routes:
@@ -73,10 +82,13 @@ Operational consequence:
   - the app keeps working through Redis outages
   - logout still clears the browser cookie
   - server-side revocation semantics are weaker during the outage because Redis session records cannot be consulted
+  - auth rate limiting falls back to process-local counters if Redis-backed counters cannot be used
 - fail-closed mode:
   - browser login and registration return `503` while Redis-backed sessions are unavailable
   - existing browser sessions stop authenticating until Redis recovers
   - revocation semantics stay closer to server-tracked session behavior
+
+Auth throttling is independent of the browser-session fail-closed setting. In the beginner stack and other Redis-free deployments, login, registration, API-key, and admin throttles still run with in-memory counters.
 
 ## Browser-session mutation protection
 
@@ -126,6 +138,8 @@ Current user summary payloads also expose:
 - `has_api_key`
 - API key timestamps
 - linked `sso_providers`
+
+Bearer API-key authentication can be rate limited after repeated invalid attempts from one client IP. Normal successful API use is not itself rate limited by these auth counters.
 
 ## Delete-token authorization
 

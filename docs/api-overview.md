@@ -137,6 +137,9 @@ Anonymous/public mutation rules:
 Some important API behaviors worth knowing:
 
 - `POST /api/v1/upload` can return `400`, `413`, `415`, or `429` for invalid uploads, quota rejection, unsupported media, or rate limiting
+- `POST /api/v1/auth/login` and `POST /api/v1/auth/register` can return `429` after repeated auth attempts
+- protected bearer-authenticated endpoints can return `429` after repeated invalid API-key attempts
+- admin routes can return `429` after repeated failed or forbidden admin access attempts
 - `GET /api/v1/user/me/albums` validates `limit` as `1..200` and requires non-negative `offset`
 - protected endpoints return `401` for missing or invalid authentication
 - mutation endpoints return `403` for failed owner/admin/delete-token authorization

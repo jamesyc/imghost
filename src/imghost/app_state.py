@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
+from .auth_rate_limits import build_auth_rate_limiter
 from .telemetry import Telemetry, build_telemetry
 from .config import Settings
 from .db import Database
@@ -48,6 +49,7 @@ class AppState:
         self.redis = RedisHandle(settings)
         self.session_backend: SessionBackend = build_session_backend(settings, self.redis, self.telemetry)
         self.rate_limiter = build_rate_limiter(self.runtime_config, self.redis, self.telemetry)
+        self.auth_rate_limiter = build_auth_rate_limiter(self.runtime_config, self.redis, self.telemetry)
         self.storage = build_storage_backend(settings)
         self.oauth_state = OAuthStateManager(settings.secret_key)
         self.oauth_providers: dict[str, OAuthProvider] = {}

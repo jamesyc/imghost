@@ -17,6 +17,10 @@ def client_ip(request: Request) -> str:
     return "unknown"
 
 
+def auth_rate_limit_ip_key(request: Request) -> str:
+    return client_ip(request)
+
+
 def upload_rate_limit_key(request: Request, user: User | None) -> str:
     if user is not None:
         return user.id

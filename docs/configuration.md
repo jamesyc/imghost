@@ -182,6 +182,42 @@ Current keys:
 - `rate_limit_global_anon_bph`
 - `rate_limit_user_rpm`
 - `rate_limit_user_bph`
+- `auth_rate_limit_login_ip_rpm`
+- `auth_rate_limit_login_account_failures`
+- `auth_rate_limit_login_account_window_seconds`
+- `auth_rate_limit_login_lock_seconds`
+- `auth_rate_limit_registration_ip_rpm`
+- `auth_rate_limit_api_key_ip_failures`
+- `auth_rate_limit_api_key_ip_window_seconds`
+- `auth_rate_limit_api_key_lock_seconds`
+- `auth_rate_limit_admin_ip_failures`
+- `auth_rate_limit_admin_ip_window_seconds`
+- `auth_rate_limit_admin_lock_seconds`
+
+Auth rate-limit key meanings:
+
+- `auth_rate_limit_login_ip_rpm`
+  Client-IP login attempt ceiling per minute.
+- `auth_rate_limit_login_account_failures`
+  Failed login threshold for the same normalized login identifier before a temporary lock is applied.
+- `auth_rate_limit_login_account_window_seconds`
+  Rolling window used for account-scoped failed login counting.
+- `auth_rate_limit_login_lock_seconds`
+  Temporary lock duration after the account-scoped login failure threshold is exceeded.
+- `auth_rate_limit_registration_ip_rpm`
+  Client-IP registration attempt ceiling per minute.
+- `auth_rate_limit_api_key_ip_failures`
+  Failed bearer API-key authentication threshold per client IP before a temporary lock is applied.
+- `auth_rate_limit_api_key_ip_window_seconds`
+  Rolling window used for failed bearer API-key counting.
+- `auth_rate_limit_api_key_lock_seconds`
+  Temporary lock duration after the bearer API-key failure threshold is exceeded.
+- `auth_rate_limit_admin_ip_failures`
+  Failed or forbidden admin-access threshold per client IP before a temporary lock is applied.
+- `auth_rate_limit_admin_ip_window_seconds`
+  Rolling window used for admin denial counting.
+- `auth_rate_limit_admin_lock_seconds`
+  Temporary lock duration after the admin denial threshold is exceeded.
 
 These can be environment-locked with:
 
@@ -193,6 +229,8 @@ These can be environment-locked with:
 - `LOCK_DEFAULT_USER_QUOTA_BYTES`
 - `LOCK_SERVER_QUOTA_BYTES`
 - `LOCK_RATE_LIMITS`
+
+`LOCK_RATE_LIMITS=true` locks both upload rate limits and the auth-throttling runtime keys above.
 
 ## Resolution notes
 

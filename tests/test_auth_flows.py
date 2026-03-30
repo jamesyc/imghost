@@ -274,6 +274,155 @@ def test_non_admin_local_login_does_not_write_admin_login_audit_event(tmp_path, 
         assert audit.json() == []
 
 
+def test_login_rate_limit_locks_repeated_bad_password_attempts(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="loginlimitadmin", email="loginlimitadmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="loginlimituser", email="loginlimituser@example.com")
+
+    with TestClient(app) as client:
+        set_user_password(client, user_id, "correct-pass")
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={
+                "auth_rate_limit_login_account_failures": 2,
+                "auth_rate_limit_login_account_window_seconds": 300,
+                "auth_rate_limit_login_lock_seconds": 300,
+            },
+        )
+        assert configured.status_code == 200
+
+        first = client.post("/api/v1/auth/login", json={"login": "loginlimituser", "password": "wrong-pass"})
+        assert first.status_code == 401
+
+        second = client.post("/api/v1/auth/login", json={"login": "loginlimituser", "password": "wrong-pass"})
+        assert second.status_code == 401
+
+        blocked = client.post("/api/v1/auth/login", json={"login": "loginlimituser", "password": "correct-pass"})
+        assert blocked.status_code == 429
+        assert blocked.json()["detail"] == "Too many authentication attempts. Try again later."
+
+
+def test_successful_login_clears_account_rate_limit_failures(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="loginclearadmin", email="loginclearadmin@example.com")
+    user_id, _ = create_user_and_api_key(capsys, username="loginclearuser", email="loginclearuser@example.com")
+
+    with TestClient(app) as client:
+        set_user_password(client, user_id, "correct-pass")
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={
+                "auth_rate_limit_login_account_failures": 2,
+                "auth_rate_limit_login_account_window_seconds": 300,
+                "auth_rate_limit_login_lock_seconds": 300,
+            },
+        )
+        assert configured.status_code == 200
+
+        bad = client.post("/api/v1/auth/login", json={"login": "loginclearuser", "password": "wrong-pass"})
+        assert bad.status_code == 401
+
+        good = client.post("/api/v1/auth/login", json={"login": "loginclearuser", "password": "correct-pass"})
+        assert good.status_code == 200
+
+        bad_again = client.post("/api/v1/auth/login", json={"login": "loginclearuser", "password": "wrong-pass"})
+        assert bad_again.status_code == 401
+
+
+def test_registration_rate_limit_blocks_second_attempt_at_threshold(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="registerlimitadmin", email="registerlimitadmin@example.com")
+
+    with TestClient(app) as client:
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"auth_rate_limit_registration_ip_rpm": 1},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(
+            "/api/v1/auth/register",
+            json={"username": "registerone", "email": "registerone@example.com", "password": "secret-pass"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/auth/register",
+            json={"username": "registertwo", "email": "registertwo@example.com", "password": "secret-pass"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Too many authentication attempts. Try again later."
+
+
+def test_api_key_failures_lock_the_client_ip(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="apikeylimitadmin", email="apikeylimitadmin@example.com")
+    _, valid_user_key = create_user_and_api_key(capsys, username="apikeylimituser", email="apikeylimituser@example.com")
+
+    with TestClient(app) as client:
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={
+                "auth_rate_limit_api_key_ip_failures": 2,
+                "auth_rate_limit_api_key_ip_window_seconds": 300,
+                "auth_rate_limit_api_key_lock_seconds": 300,
+            },
+        )
+        assert configured.status_code == 200
+
+        first = client.get("/api/v1/user/me", headers={"Authorization": "Bearer invalid-key"})
+        assert first.status_code == 401
+
+        second = client.get("/api/v1/user/me", headers={"Authorization": "Bearer invalid-key"})
+        assert second.status_code == 401
+
+        blocked = client.get("/api/v1/user/me", headers={"Authorization": f"Bearer {valid_user_key}"})
+        assert blocked.status_code == 429
+        assert blocked.json()["detail"] == "Too many authentication attempts. Try again later."
+
+
+def test_admin_denials_lock_the_client_ip(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="admindenyadmin", email="admindenyadmin@example.com")
+    _, user_key = create_user_and_api_key(capsys, username="admindenyuser", email="admindenyuser@example.com")
+
+    with TestClient(app) as client:
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={
+                "auth_rate_limit_admin_ip_failures": 2,
+                "auth_rate_limit_admin_ip_window_seconds": 300,
+                "auth_rate_limit_admin_lock_seconds": 300,
+            },
+        )
+        assert configured.status_code == 200
+
+        first = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {user_key}"})
+        assert first.status_code == 403
+
+        second = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {user_key}"})
+        assert second.status_code == 403
+
+        blocked = client.get("/api/v1/admin/stats", headers={"Authorization": f"Bearer {admin_key}"})
+        assert blocked.status_code == 429
+        assert blocked.json()["detail"] == "Too many authentication attempts. Try again later."
+
+
 def test_failed_login_attempts_are_audited_with_coarse_reasons(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

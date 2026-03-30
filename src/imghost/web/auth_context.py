@@ -11,6 +11,7 @@ from ..config import Settings
 from ..models import User, utcnow
 from .page_context import login_redirect
 from .request_context import get_state
+from .request_helpers import auth_rate_limit_ip_key
 
 
 @dataclass
@@ -53,9 +54,17 @@ async def authenticated_principal(request: Request, *, required: bool = False) -
     header = request.headers.get("Authorization", "")
     scheme, _, token = header.partition(" ")
     if scheme.lower() == "bearer" and token:
+        ip_key = auth_rate_limit_ip_key(request)
+        try:
+            await state.auth_rate_limiter.enforce_api_key_attempt(ip_key=ip_key)
+        except HTTPException as exc:
+            if exc.status_code == 429:
+                await state.telemetry.record_auth_rate_limited(request, scope="api_key", method="api_key")
+            raise
         request.state.telemetry_auth_method = "api_key"
         api_key = await state.repository.get_api_key_by_hash(sha256(token.encode("utf-8")).hexdigest())
         if api_key is None:
+            await state.auth_rate_limiter.record_api_key_failure(ip_key=ip_key)
             await state.telemetry.record_api_key_auth_failed(
                 request,
                 actor=None,
@@ -66,6 +75,7 @@ async def authenticated_principal(request: Request, *, required: bool = False) -
             raise HTTPException(status_code=401, detail="Invalid API key.")
         user = await state.repository.get_user(api_key.user_id)
         if user is None or user.suspended:
+            await state.auth_rate_limiter.record_api_key_failure(ip_key=ip_key)
             await state.telemetry.record_api_key_auth_failed(
                 request,
                 actor=user,
@@ -75,6 +85,7 @@ async def authenticated_principal(request: Request, *, required: bool = False) -
                 admin_denial=bool(user is not None and user.is_admin),
             )
             raise HTTPException(status_code=403, detail="User is not allowed to authenticate.")
+        await state.auth_rate_limiter.record_api_key_success(ip_key=ip_key)
         api_key.last_used_at = utcnow()
         await state.repository.update_api_key(api_key)
         await state.telemetry.record_api_key_authenticated(request, user=user, api_key_id=api_key.id)
@@ -109,10 +120,18 @@ async def authenticated_user(request: Request, *, required: bool = False) -> Use
 
 async def require_admin_user(request: Request) -> User:
     state = get_state(request)
+    ip_key = auth_rate_limit_ip_key(request)
+    try:
+        await state.auth_rate_limiter.enforce_admin_attempt(ip_key=ip_key)
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            await state.telemetry.record_auth_rate_limited(request, scope="admin", method="api_key")
+        raise
     try:
         user = await authenticated_user(request, required=True)
     except HTTPException as exc:
         if exc.status_code in {401, 403}:
+            await state.auth_rate_limiter.record_admin_denial(ip_key=ip_key)
             await state.telemetry.record_admin_access_denied(
                 request,
                 actor=None,
@@ -122,6 +141,7 @@ async def require_admin_user(request: Request) -> User:
             )
         raise
     if user is None or not user.is_admin:
+        await state.auth_rate_limiter.record_admin_denial(ip_key=ip_key)
         await state.telemetry.record_admin_access_denied(
             request,
             actor=user,
@@ -142,8 +162,16 @@ async def require_page_user(request: Request) -> User | RedirectResponse:
 
 async def require_page_admin(request: Request) -> User | RedirectResponse:
     state = get_state(request)
+    ip_key = auth_rate_limit_ip_key(request)
+    try:
+        await state.auth_rate_limiter.enforce_admin_attempt(ip_key=ip_key)
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            await state.telemetry.record_auth_rate_limited(request, scope="admin", method="session")
+        raise
     user = await authenticated_user(request, required=False)
     if user is None:
+        await state.auth_rate_limiter.record_admin_denial(ip_key=ip_key)
         await state.telemetry.record_admin_access_denied(
             request,
             actor=None,
@@ -153,6 +181,7 @@ async def require_page_admin(request: Request) -> User | RedirectResponse:
         )
         return login_redirect(str(request.url.path))
     if not user.is_admin:
+        await state.auth_rate_limiter.record_admin_denial(ip_key=ip_key)
         await state.telemetry.record_admin_access_denied(
             request,
             actor=user,

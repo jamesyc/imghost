@@ -135,6 +135,7 @@ Graceful mode (`SESSION_REDIS_FAIL_CLOSED=false`):
 - new browser sessions can still be created
 - sessions fall back to signed-cookie validation
 - rate limits fall back to in-memory counters
+- auth throttles fall back to in-memory counters
 - Redis task queue falls back to in-process async enqueue
 
 Fail-closed mode (`SESSION_REDIS_FAIL_CLOSED=true`):
@@ -143,6 +144,7 @@ Fail-closed mode (`SESSION_REDIS_FAIL_CLOSED=true`):
 - existing browser sessions stop authenticating until Redis recovers
 - API-key flows remain independent of browser-session storage
 - rate limits and tasks still follow their own Redis fallback behavior
+- auth throttles still follow their own Redis fallback behavior
 
 That degraded state should still be reflected as ready by `/health/ready` unless Redis is configured as required.
 
@@ -151,6 +153,25 @@ Graceful-mode tradeoff:
 - browser auth keeps working
 - logout still clears the cookie in the current browser
 - Redis-backed revocation is temporarily unavailable until Redis recovers
+
+## Auth throttling operations
+
+Auth throttling is separate from upload rate limiting.
+
+Current protections:
+
+- password login uses both per-client-IP throttling and per-account failure lockouts
+- registration uses per-client-IP throttling
+- repeated invalid bearer API-key auth attempts are throttled per client IP
+- repeated failed or forbidden admin access attempts are throttled per client IP
+
+Operational notes:
+
+- throttled auth requests return `429 Too Many Requests`
+- when Redis is available, counters are shared across processes
+- when Redis is disabled or temporarily unavailable, counters fall back to process-local memory
+- the fallback is sufficient for the beginner stack and single-process installs, but it is weaker across multiple app instances
+- operators can tune the auth-throttling runtime config through the admin runtime-config surface unless `LOCK_RATE_LIMITS=true`
 
 ## Current Docker operational caveats
 

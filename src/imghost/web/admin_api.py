@@ -79,6 +79,17 @@ class AdminConfigPatchRequest(BaseModel):
     rate_limit_global_anon_bph: int | None = None
     rate_limit_user_rpm: int | None = None
     rate_limit_user_bph: int | None = None
+    auth_rate_limit_login_ip_rpm: int | None = None
+    auth_rate_limit_login_account_failures: int | None = None
+    auth_rate_limit_login_account_window_seconds: int | None = None
+    auth_rate_limit_login_lock_seconds: int | None = None
+    auth_rate_limit_registration_ip_rpm: int | None = None
+    auth_rate_limit_api_key_ip_failures: int | None = None
+    auth_rate_limit_api_key_ip_window_seconds: int | None = None
+    auth_rate_limit_api_key_lock_seconds: int | None = None
+    auth_rate_limit_admin_ip_failures: int | None = None
+    auth_rate_limit_admin_ip_window_seconds: int | None = None
+    auth_rate_limit_admin_lock_seconds: int | None = None
 
 
 @router.get("/api/v1/admin/users")

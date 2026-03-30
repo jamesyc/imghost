@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from ..auth_rate_limits import hash_auth_identifier
 from ..events import AdminLoggedIn
 from ..service import LocalLoginInput, UserCreateInput
 from ..sessions import SessionBackendUnavailable
@@ -13,6 +14,7 @@ from .auth_context import (
     clear_browser_session,
 )
 from .request_context import correlation_id, get_state
+from .request_helpers import auth_rate_limit_ip_key
 
 router = APIRouter()
 
@@ -35,6 +37,14 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
     state = get_state(request)
     cid = correlation_id(request)
     normalized_login = payload.login.strip()
+    ip_key = auth_rate_limit_ip_key(request)
+    login_key = hash_auth_identifier(normalized_login)
+    try:
+        await state.auth_rate_limiter.enforce_login_attempt(ip_key=ip_key, login_key=login_key)
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            await state.telemetry.record_auth_rate_limited(request, scope="login", method="password")
+        raise
     try:
         user = await state.uploads.authenticate_local_user(
             LocalLoginInput(login=payload.login, password=payload.password)
@@ -46,7 +56,9 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
         elif exc.status_code == 403:
             reason = "suspended"
         await state.telemetry.record_login_failed(request, login_identifier=normalized_login, reason=reason)
+        await state.auth_rate_limiter.record_login_failure(ip_key=ip_key, login_key=login_key)
         raise
+    await state.auth_rate_limiter.record_login_success(login_key=login_key)
     await state.telemetry.record_login_succeeded(request, user=user, remember_me=payload.remember_me)
     if user.is_admin:
         await state.event_bus.emit(
@@ -70,6 +82,12 @@ async def login(request: Request, payload: LoginRequest) -> JSONResponse:
 async def register(request: Request, payload: RegistrationRequest) -> JSONResponse:
     state = get_state(request)
     cid = correlation_id(request)
+    try:
+        await state.auth_rate_limiter.enforce_registration_attempt(ip_key=auth_rate_limit_ip_key(request))
+    except HTTPException as exc:
+        if exc.status_code == 429:
+            await state.telemetry.record_auth_rate_limited(request, scope="registration", method="password")
+        raise
     if not await state.runtime_config.get_value("allow_registration"):
         await state.telemetry.record_registration_denied(
             request,

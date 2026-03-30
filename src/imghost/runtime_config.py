@@ -80,6 +80,67 @@ RUNTIME_CONFIG_SPECS: dict[str, RuntimeConfigSpec] = {
     "rate_limit_global_anon_bph": RuntimeConfigSpec("rate_limit_global_anon_bph", "int", lambda: 1073741824, "LOCK_RATE_LIMITS"),
     "rate_limit_user_rpm": RuntimeConfigSpec("rate_limit_user_rpm", "int", lambda: 30, "LOCK_RATE_LIMITS"),
     "rate_limit_user_bph": RuntimeConfigSpec("rate_limit_user_bph", "int", lambda: 524288000, "LOCK_RATE_LIMITS"),
+    "auth_rate_limit_login_ip_rpm": RuntimeConfigSpec("auth_rate_limit_login_ip_rpm", "int", lambda: 10, "LOCK_RATE_LIMITS"),
+    "auth_rate_limit_login_account_failures": RuntimeConfigSpec(
+        "auth_rate_limit_login_account_failures",
+        "int",
+        lambda: 5,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_login_account_window_seconds": RuntimeConfigSpec(
+        "auth_rate_limit_login_account_window_seconds",
+        "int",
+        lambda: 900,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_login_lock_seconds": RuntimeConfigSpec(
+        "auth_rate_limit_login_lock_seconds",
+        "int",
+        lambda: 300,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_registration_ip_rpm": RuntimeConfigSpec(
+        "auth_rate_limit_registration_ip_rpm",
+        "int",
+        lambda: 5,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_api_key_ip_failures": RuntimeConfigSpec(
+        "auth_rate_limit_api_key_ip_failures",
+        "int",
+        lambda: 20,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_api_key_ip_window_seconds": RuntimeConfigSpec(
+        "auth_rate_limit_api_key_ip_window_seconds",
+        "int",
+        lambda: 600,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_api_key_lock_seconds": RuntimeConfigSpec(
+        "auth_rate_limit_api_key_lock_seconds",
+        "int",
+        lambda: 300,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_admin_ip_failures": RuntimeConfigSpec(
+        "auth_rate_limit_admin_ip_failures",
+        "int",
+        lambda: 10,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_admin_ip_window_seconds": RuntimeConfigSpec(
+        "auth_rate_limit_admin_ip_window_seconds",
+        "int",
+        lambda: 600,
+        "LOCK_RATE_LIMITS",
+    ),
+    "auth_rate_limit_admin_lock_seconds": RuntimeConfigSpec(
+        "auth_rate_limit_admin_lock_seconds",
+        "int",
+        lambda: 300,
+        "LOCK_RATE_LIMITS",
+    ),
 }
 
 

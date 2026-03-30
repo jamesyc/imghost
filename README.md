@@ -113,6 +113,8 @@ Common things to configure:
 - Garage/S3 credentials
 - public origin settings if running behind a reverse proxy
 
+The app also has runtime-tunable upload and auth rate limits. See [docs/configuration.md](docs/configuration.md) and [docs/security.md](docs/security.md).
+
 For full configuration details, see [docs/configuration.md](docs/configuration.md).
 
 ## Reverse Proxy

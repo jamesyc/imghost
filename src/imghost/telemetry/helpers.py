@@ -105,6 +105,28 @@ async def record_login_failed(
     )
 
 
+async def record_auth_rate_limited(
+    telemetry: "TelemetryService",
+    request: Request,
+    *,
+    scope: str,
+    method: str,
+) -> None:
+    await emit_request_action(
+        telemetry,
+        request,
+        event_type=actions.AUTH_RATE_LIMITED,
+        action="auth.rate_limited",
+        result="denied",
+        actor=anonymous_actor(),
+        object=TelemetryObject(type="auth_rate_limit", id=scope),
+        metadata={"scope": scope, "method": method},
+        reason="rate_limited",
+        auth_method=method,
+        source="api" if method == "api_key" else "web",
+    )
+
+
 async def record_login_succeeded(
     telemetry: "TelemetryService",
     request: Request,
