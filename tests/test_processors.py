@@ -81,6 +81,8 @@ SVG_MIXED_CASE_DANGEROUS_SAMPLE = b"""<?xml version="1.0"?>
   <rect width="32" height="24" fill="red"/>
 </svg>"""
 
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
 
 def sample_video_metadata(*, duration_secs: float = 4.0) -> MediaMetadata:
     return MediaMetadata(
@@ -377,6 +379,63 @@ def test_svg_upload_strips_namespaced_dangerous_elements(tmp_path, monkeypatch) 
         assert original.status_code == 200
         assert b"foreignObject" not in original.content
         assert b"<style" not in original.content
+        assert b'fill="red"' in original.content
+
+
+def test_svg_evil_input_corpus_rejects_malformed_fixture(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    payload = (FIXTURES_DIR / "evil_svg_malformed_unclosed.svg").read_bytes()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("vector.svg", BytesIO(payload), "image/svg+xml"))],
+        )
+
+        assert response.status_code == 415
+        assert response.json()["detail"] == "Unsupported or invalid image file."
+
+
+def test_svg_evil_input_corpus_sanitizes_doctype_entity_fixture(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    payload = (FIXTURES_DIR / "evil_svg_doctype_entity.svg").read_bytes()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("vector.svg", BytesIO(payload), "image/svg+xml"))],
+        )
+
+        assert response.status_code == 200
+        media_id = response.json()["media_id"]
+        original = client.get(f"/i/{media_id}.svg")
+        assert original.status_code == 200
+        assert b"<!DOCTYPE" not in original.content
+        assert b"data:image" not in original.content
+        assert b"https://example.com" not in original.content
+        assert b'fill="red"' in original.content
+
+
+def test_svg_evil_input_corpus_sanitizes_processing_instruction_fixture(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    payload = (FIXTURES_DIR / "evil_svg_stylesheet_processing_instruction.svg").read_bytes()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("vector.svg", BytesIO(payload), "image/svg+xml"))],
+        )
+
+        assert response.status_code == 200
+        media_id = response.json()["media_id"]
+        original = client.get(f"/i/{media_id}.svg")
+        assert original.status_code == 200
+        assert b"xml-stylesheet" not in original.content
+        assert b"javascript:" not in original.content
+        assert b"https://example.com/track.css" not in original.content
         assert b'fill="red"' in original.content
 
 

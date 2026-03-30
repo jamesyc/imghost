@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<!DOCTYPE svg [
+  <!ENTITY marker "ENTITY-EXPANDED">
+]>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24">
+  <text>&marker;</text>
+  <image href="data:image/png;base64,AAAA" width="10" height="10"/>
+  <use href="https://example.com/sprite.svg#icon"/>
+  <rect width="32" height="24" fill="red"/>
+</svg>
