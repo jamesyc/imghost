@@ -49,7 +49,7 @@ def test_expected_routes_are_registered() -> None:
         "/api/v1/user/me/albums": {"GET"},
         "/api/v1/user/me/api-key": {"POST"},
         "/api/v1/user/me/password": {"PATCH"},
-        "/api/v1/user/me/sharex-config": {"GET"},
+        "/api/v1/user/me/sharex-config": {"POST"},
         "/api/v1/user/me/oauth/google/disconnect": {"POST"},
         "/api/v1/admin/users/{user_id}": {"GET", "PATCH", "DELETE"},
         "/api/v1/admin/users/{user_id}/stats": {"GET"},

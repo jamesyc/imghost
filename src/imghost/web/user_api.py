@@ -77,7 +77,7 @@ async def change_current_user_password(request: Request, payload: UserPasswordPa
     return JSONResponse({"updated": True}, headers={"X-Correlation-ID": cid})
 
 
-@router.get("/api/v1/user/me/sharex-config")
+@router.post("/api/v1/user/me/sharex-config")
 async def download_sharex_config(request: Request) -> Response:
     principal = await authenticated_principal(request, required=True)
     state = get_state(request)

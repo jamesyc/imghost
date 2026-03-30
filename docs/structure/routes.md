@@ -83,7 +83,7 @@ These endpoints serve both authenticated owner actions and token-backed anonymou
 - `GET /api/v1/user/me/albums`
 - `POST /api/v1/user/me/api-key`
 - `PATCH /api/v1/user/me/password`
-- `GET /api/v1/user/me/sharex-config`
+- `POST /api/v1/user/me/sharex-config`
 - `DELETE /api/v1/user/me`
 - `POST /api/v1/user/me/oauth/google/disconnect`
 

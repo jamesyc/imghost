@@ -204,7 +204,10 @@ def test_local_login_supports_username_session_cookie_and_browser_sharex_downloa
         assert "Secure" in login.headers["set-cookie"]
         assert "Max-Age=" not in login.headers["set-cookie"]
 
-        sharex = client.get("/api/v1/user/me/sharex-config")
+        sharex = client.post(
+            "/api/v1/user/me/sharex-config",
+            headers=browser_session_headers("https://testserver", "/settings"),
+        )
         assert sharex.status_code == 200
         payload = sharex.json()
         new_auth_header = payload["Headers"]["Authorization"]

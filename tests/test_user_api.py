@@ -482,7 +482,7 @@ def test_sharex_config_download_embeds_active_api_key(tmp_path, monkeypatch, cap
     _, api_key = create_user_and_api_key(capsys, username="dana", email="dana@example.com")
 
     with TestClient(app) as client:
-        response = client.get(
+        response = client.post(
             "/api/v1/user/me/sharex-config",
             headers={"Authorization": f"Bearer {api_key}"},
         )
@@ -512,7 +512,10 @@ def test_sharex_config_download_from_browser_session_auto_issues_api_key(tmp_pat
         )
         assert registered.status_code == 200
 
-        response = client.get("/api/v1/user/me/sharex-config")
+        response = client.post(
+            "/api/v1/user/me/sharex-config",
+            headers=browser_session_headers("https://testserver", "/settings"),
+        )
         assert response.status_code == 200
         payload = response.json()
         auth_header = payload["Headers"]["Authorization"]
@@ -534,6 +537,43 @@ def test_sharex_config_download_from_browser_session_auto_issues_api_key(tmp_pat
         assert sharex_events
         assert sharex_events[0]["metadata"]["replaced_existing"] is False
         assert sharex_events[0]["metadata"]["source"] == "sharex"
+
+
+def test_sharex_config_download_from_browser_session_requires_same_origin_headers(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+
+    create_user_and_api_key(capsys, username="sharexcsrf", email="sharexcsrf@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "sharexcsrfsession",
+                "email": "sharexcsrfsession@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+
+        response = client.post("/api/v1/user/me/sharex-config")
+        assert response.status_code == 403
+        assert response.json()["detail"] == "CSRF protection blocked the request."
+
+
+def test_sharex_config_get_is_not_allowed(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexget", email="sharexget@example.com")
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/user/me/sharex-config",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert response.status_code == 405
 
 
 def test_current_user_summary_without_api_key_reports_null_api_key_metadata(tmp_path, monkeypatch) -> None:

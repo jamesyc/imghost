@@ -4,7 +4,7 @@
 
 ## Endpoint
 
-- `GET /api/v1/user/me/sharex-config`
+- `POST /api/v1/user/me/sharex-config`
 
 ## Generated config
 
@@ -40,6 +40,8 @@ The route works with either:
 - the fresh raw key is embedded into the generated config
 
 This is necessary because the app stores only the hash of the API key, not the raw value.
+
+Because this route can issue or rotate an API key for browser-session callers, it is a `POST` and same-origin browser requests must satisfy the normal browser-session CSRF checks.
 
 ## Delete capability behavior
 

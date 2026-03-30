@@ -361,7 +361,7 @@ def test_sharex_config_uses_forwarded_public_origin(tmp_path, monkeypatch, capsy
     _, api_key = create_user_and_api_key(capsys, username="sharexforward", email="sharexforward@example.com")
 
     with TestClient(app, base_url="http://backend") as client:
-        response = client.get(
+        response = client.post(
             "/api/v1/user/me/sharex-config",
             headers={
                 "Authorization": f"Bearer {api_key}",
@@ -382,7 +382,7 @@ def test_sharex_config_rejects_untrusted_forwarded_public_origin(tmp_path, monke
     _, api_key = create_user_and_api_key(capsys, username="sharexfallback", email="sharexfallback@example.com")
 
     with TestClient(app, base_url="http://backend") as client:
-        response = client.get(
+        response = client.post(
             "/api/v1/user/me/sharex-config",
             headers={
                 "Authorization": f"Bearer {api_key}",
@@ -403,7 +403,7 @@ def test_sharex_config_rejects_malformed_forwarded_public_origin_and_falls_back_
     _, api_key = create_user_and_api_key(capsys, username="sharexmalformed", email="sharexmalformed@example.com")
 
     with TestClient(app, base_url="http://backend") as client:
-        response = client.get(
+        response = client.post(
             "/api/v1/user/me/sharex-config",
             headers={
                 "Authorization": f"Bearer {api_key}",

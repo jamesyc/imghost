@@ -218,7 +218,7 @@ if (settingsBootstrapNode) {
   document.getElementById("download-sharex-settings")?.addEventListener("click", async () => {
     try {
       setApiWarning(defaultApiWarningText);
-      const data = await requestJson("/api/v1/user/me/sharex-config");
+      const data = await requestJson("/api/v1/user/me/sharex-config", { method: "POST" });
       triggerDownload(data);
       await refreshUser();
       setApiWarning("ShareX config downloaded. Browser-session download rotates the API key before embedding it.", "success");

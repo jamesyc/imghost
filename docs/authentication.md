@@ -170,7 +170,7 @@ Important interaction with browser sessions:
 
 ## ShareX behavior
 
-`GET /api/v1/user/me/sharex-config` works with either:
+`POST /api/v1/user/me/sharex-config` works with either:
 
 - bearer API-key auth
 - browser-session auth
@@ -181,6 +181,8 @@ Behavior:
 - if the request is browser-session-authenticated, the app auto-issues or rotates the API key and embeds the fresh raw key
 
 That behavior exists because the app only stores the hash of the key, not the original raw value.
+
+Because browser-session calls can rotate credentials, this route is a `POST` and is subject to the normal browser-session CSRF gate.
 
 Authenticated ShareX uploads also return a dedicated `delete_url`:
 
