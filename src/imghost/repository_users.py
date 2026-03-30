@@ -96,12 +96,17 @@ class UserRepository:
 
     async def upsert_api_key(self, api_key: ApiKey) -> ApiKey:
         pool = self.database.require_pool()
-        async with pool.acquire() as conn, conn.transaction():
-            await conn.execute("DELETE FROM api_keys WHERE user_id = $1::uuid", api_key.user_id)
+        async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO api_keys (id, user_id, key_hash, created_at, last_used_at)
                 VALUES ($1::uuid, $2::uuid, $3, $4, $5)
+                ON CONFLICT (user_id)
+                DO UPDATE
+                SET id = EXCLUDED.id,
+                    key_hash = EXCLUDED.key_hash,
+                    created_at = EXCLUDED.created_at,
+                    last_used_at = EXCLUDED.last_used_at
                 RETURNING id, user_id, key_hash, created_at, last_used_at
                 """,
                 api_key.id,

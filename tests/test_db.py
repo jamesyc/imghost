@@ -3,10 +3,11 @@ import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import asyncpg
 from imghost.db import Database
-from imghost.models import Album, Media, ShareXDeleteCapability, User, utcnow
+from imghost.models import Album, ApiKey, Media, ShareXDeleteCapability, User, utcnow
 from imghost.repositories import PostgresRepository
 
 
@@ -327,6 +328,60 @@ def test_concurrent_media_inserts_assign_distinct_positions_per_album() -> None:
             await database.close()
 
     assert asyncio.run(run()) == [1000, 2000]
+
+
+def test_concurrent_api_key_upserts_leave_one_row_per_user() -> None:
+    async def run() -> tuple[int, str | None]:
+        database = Database(os.environ["DATABASE_URL"])
+        await database.connect()
+        try:
+            repository = PostgresRepository(database)
+            now = utcnow()
+            user_id = str(uuid4())
+            await repository.create_user(
+                User(
+                    id=user_id,
+                    username=f"apikey-{uuid4().hex[:8]}",
+                    email=f"apikey-{uuid4().hex[:8]}@example.com",
+                    password_hash="hash",
+                    is_admin=False,
+                    suspended=False,
+                    quota_bytes=None,
+                    rate_limit_rpm=None,
+                    rate_limit_bph=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+            hashes = [f"key-hash-{index}" for index in range(8)]
+
+            async def upsert(key_hash: str) -> None:
+                await repository.upsert_api_key(
+                    ApiKey(
+                        id=str(uuid4()),
+                        user_id=user_id,
+                        key_hash=key_hash,
+                        created_at=utcnow(),
+                        last_used_at=None,
+                    )
+                )
+
+            await asyncio.gather(*(upsert(key_hash) for key_hash in hashes))
+
+            pool = database.require_pool()
+            async with pool.acquire() as conn:
+                count = int(await conn.fetchval("SELECT COUNT(*) FROM api_keys WHERE user_id = $1::uuid", user_id))
+                key_hash = await conn.fetchval("SELECT key_hash FROM api_keys WHERE user_id = $1::uuid", user_id)
+            assert key_hash in hashes
+            return count, key_hash
+        finally:
+            await database.close()
+
+    count, key_hash = asyncio.run(run())
+
+    assert count == 1
+    assert key_hash is not None
 
 
 def test_repository_update_album_missing_row_raises_lookup_error() -> None:
