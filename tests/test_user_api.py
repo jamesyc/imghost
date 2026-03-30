@@ -14,7 +14,9 @@ from .helpers import (
     create_user_and_api_key,
     get_album_record,
     get_media_record,
+    get_sharex_delete_capability,
     get_user_record,
+    parse_sharex_delete_token,
     set_user_password,
     wait_for_thumbnail,
 )
@@ -776,6 +778,39 @@ def test_delete_current_user_requires_explicit_confirmation(tmp_path, monkeypatc
         )
         assert wrong.status_code == 403
         assert wrong.json()["detail"] == "Current password is incorrect."
+
+
+def test_delete_current_user_revokes_outstanding_sharex_delete_capabilities(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    user_id, api_key = create_user_and_api_key(capsys, username="deletecapuser", email="deletecapuser@example.com")
+
+    with TestClient(app) as client:
+        set_user_password(client, user_id, "open-sesame")
+
+        upload = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+        selector, _ = parse_sharex_delete_token(payload["delete_url"], "sharex-delete-secret")
+        capability = get_sharex_delete_capability(client, selector)
+        assert capability is not None
+        assert capability.revoked_at is None
+
+        deleted = client.request(
+            "DELETE",
+            "/api/v1/user/me",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"method": "password", "current_password": "open-sesame"},
+        )
+        assert deleted.status_code == 200
+
+        assert get_sharex_delete_capability(client, selector) is None
 
 
 def test_delete_current_user_rejects_password_confirmation_when_account_has_no_password(tmp_path, monkeypatch, capsys) -> None:

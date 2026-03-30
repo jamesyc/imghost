@@ -6,7 +6,8 @@ import bcrypt
 from fastapi.testclient import TestClient
 
 from imghost.__main__ import main as cli_main
-from imghost.models import utcnow
+from imghost.models import ShareXDeleteCapability, utcnow
+from imghost.sharex_delete import ShareXDeleteTokenManager
 
 PNG_1X1 = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
@@ -109,3 +110,12 @@ def get_media_record(client: TestClient, media_id: str):
 
 def get_user_record(client: TestClient, user_id: str):
     return client.portal.call(client.app.state.imghost.repository.get_user, user_id)
+
+
+def parse_sharex_delete_token(delete_url: str, secret_key: str) -> tuple[str, str]:
+    token = delete_url.split("token=", 1)[1]
+    return ShareXDeleteTokenManager(secret_key).split_capability_token(token)
+
+
+def get_sharex_delete_capability(client: TestClient, selector: str) -> ShareXDeleteCapability | None:
+    return client.portal.call(client.app.state.imghost.repository.get_sharex_delete_capability, selector)

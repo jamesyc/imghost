@@ -413,6 +413,8 @@ class AccountService:
                 )
         if payload.suspended is not None and payload.suspended != user.suspended:
             user.suspended = payload.suspended
+            if user.suspended:
+                await self.repository.revoke_sharex_delete_capabilities_for_user(user.id)
             await self.event_bus.emit(
                 UserSuspended(
                     user_id=user.id,
@@ -612,6 +614,7 @@ class AccountService:
         if user is None:
             raise HTTPException(status_code=404, detail="User not found.")
 
+        await self.repository.revoke_sharex_delete_capabilities_for_user(user.id)
         albums = await self.repository.list_user_albums(user.id)
         media_items = await self.repository.list_user_media(user.id)
 

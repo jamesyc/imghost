@@ -1,5 +1,6 @@
 from io import BytesIO
 from pathlib import Path
+from datetime import timedelta
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
@@ -7,11 +8,36 @@ from PIL import Image
 from pillow_heif import register_heif_opener
 
 from imghost.main import app
+from imghost.models import utcnow
 from imghost.processors import MediaMetadata, SanitizedFile, ValidationResult, VideoProcessingError
 
-from .helpers import PNG_1X1, create_admin_and_api_key, create_user_and_api_key, wait_for_thumbnail
+from .helpers import (
+    PNG_1X1,
+    create_admin_and_api_key,
+    create_user_and_api_key,
+    get_sharex_delete_capability,
+    parse_sharex_delete_token,
+    wait_for_thumbnail,
+)
 
 register_heif_opener(thumbnails=False)
+
+
+def _update_sharex_capability(client: TestClient, selector: str, **changes) -> None:
+    state = client.app.state.imghost
+
+    async def _apply() -> None:
+        pool = state.database.require_pool()
+        assignments = []
+        values = []
+        for index, (key, value) in enumerate(changes.items(), start=2):
+            assignments.append(f"{key} = ${index}")
+            values.append(value)
+        query = f"UPDATE sharex_delete_capabilities SET {', '.join(assignments)} WHERE selector = $1"
+        async with pool.acquire() as conn:
+            await conn.execute(query, selector, *values)
+
+    client.portal.call(_apply)
 
 
 def jpeg_bytes(color: str = "red", size: tuple[int, int] = (8, 8)) -> bytes:
@@ -337,6 +363,168 @@ def test_sharex_delete_confirm_requires_cookie_and_does_not_accept_direct_post(t
 
         album_response = client.get(f"/api/v1/album/{payload['album_id']}")
         assert album_response.status_code == 200
+
+
+def test_sharex_delete_entry_allows_repeated_get_before_album_is_deleted(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexrepeatget", email="sharexrepeatget@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = response.json()
+
+        first = client.get(payload["delete_url"], follow_redirects=False)
+        second = client.get(payload["delete_url"], follow_redirects=False)
+
+        assert first.status_code == 303
+        assert second.status_code == 303
+        assert first.headers["location"] == second.headers["location"] == f"/sharex/delete/{payload['album_id']}/confirm"
+
+
+def test_sharex_delete_post_replay_after_success_returns_invalid_link(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexpostreplay", email="sharexpostreplay@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = response.json()
+
+        entry = client.get(payload["delete_url"], follow_redirects=False)
+        assert client.post(entry.headers["location"]).status_code == 200
+
+        replay = client.post(entry.headers["location"])
+        assert replay.status_code == 403
+        assert replay.json()["detail"] == "Missing ShareX deletion confirmation."
+
+
+def test_consumed_sharex_capability_cannot_be_reused_even_with_confirmation_cookie(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexcookieconsume", email="sharexcookieconsume@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = response.json()
+        entry = client.get(payload["delete_url"], follow_redirects=False)
+
+        selector, _ = parse_sharex_delete_token(payload["delete_url"], "sharex-delete-secret")
+        _update_sharex_capability(client, selector, consumed_at=utcnow())
+
+        rejected = client.post(entry.headers["location"])
+        assert rejected.status_code == 403
+        assert rejected.json()["detail"] == "ShareX deletion confirmation expired or is invalid."
+
+
+def test_expired_sharex_capability_url_returns_invalid_link(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexexpired", email="sharexexpired@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = response.json()
+        selector, _ = parse_sharex_delete_token(payload["delete_url"], "sharex-delete-secret")
+        _update_sharex_capability(client, selector, expires_at=utcnow() - timedelta(seconds=1))
+
+        rejected = client.get(payload["delete_url"])
+        assert rejected.status_code == 403
+        assert rejected.json()["detail"] == "Invalid ShareX deletion URL."
+
+
+def test_revoked_sharex_capability_url_returns_invalid_link(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexrevoked", email="sharexrevoked@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = response.json()
+        selector, _ = parse_sharex_delete_token(payload["delete_url"], "sharex-delete-secret")
+        _update_sharex_capability(client, selector, revoked_at=utcnow())
+
+        rejected = client.get(payload["delete_url"])
+        assert rejected.status_code == 403
+        assert rejected.json()["detail"] == "Invalid ShareX deletion URL."
+
+
+def test_sharex_delete_url_for_one_album_cannot_delete_another_album(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexalbummismatch", email="sharexalbummismatch@example.com")
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        ).json()
+        second = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+        ).json()
+
+        token = first["delete_url"].split("token=", 1)[1]
+        mismatched = client.get(f"/sharex/delete/{second['album_id']}?token={token}")
+        assert mismatched.status_code == 403
+        assert mismatched.json()["detail"] == "Invalid ShareX deletion URL."
+
+
+def test_sharex_confirm_post_rejects_valid_cookie_after_capability_is_revoked(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexrevokepost", email="sharexrevokepost@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = response.json()
+        entry = client.get(payload["delete_url"], follow_redirects=False)
+        selector, _ = parse_sharex_delete_token(payload["delete_url"], "sharex-delete-secret")
+        _update_sharex_capability(client, selector, revoked_at=utcnow())
+
+        rejected = client.post(entry.headers["location"])
+        assert rejected.status_code == 403
+        assert rejected.json()["detail"] == "ShareX deletion confirmation expired or is invalid."
 
 
 def test_invalid_image_upload_is_rejected(tmp_path, monkeypatch) -> None:

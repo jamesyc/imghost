@@ -183,8 +183,13 @@ Authenticated ShareX uploads also return a dedicated `delete_url`:
 
 - the URL is scoped to a single album and owner
 - the URL is backed by a persisted capability record in PostgreSQL
+- the capability expires after 90 days
 - `GET /sharex/delete/{album_id}?token=...` validates the capability and redirects to a confirmation page
 - `POST /sharex/delete/{album_id}/confirm` consumes the capability and deletes the album
+- the confirmation cookie is valid for 5 minutes
+- repeated `GET` requests are allowed while the capability is still valid and unconsumed
+- expired, revoked, or consumed links return a generic invalid-link response
+- capabilities are invalidated when the owning user is deleted and revoked when the owning user is suspended
 - the flow works the same with and without Redis
 
 ## Account deletion confirmation

@@ -60,9 +60,14 @@ Anonymous album manage-token flows are separate from browser-session auth, but i
 
 - authenticated ShareX uploads return a dedicated `delete_url`
 - the URL is a capability entry point, not a destructive `GET`
-- capability records are stored in PostgreSQL, scoped to one album and one owner, and expire automatically
+- capability records are stored in PostgreSQL, scoped to one album and one owner, and expire automatically after 90 days
 - `GET /sharex/delete/{album_id}?token=...` validates the capability and exchanges it for a short-lived HTTP-only confirmation cookie
 - `POST /sharex/delete/{album_id}/confirm` consumes the capability and deletes the album
+- the confirmation cookie expires after 5 minutes
+- repeated `GET` requests are allowed while the capability is still valid
+- expired, revoked, or consumed links return a generic invalid-link response
+- capabilities are invalidated when the owning user is deleted and revoked when the owning user is suspended
+- expired, revoked, and old consumed capability rows are pruned during cleanup
 - Redis is optional acceleration only; ShareX delete correctness does not depend on Redis being available
 
 ## URL generation and proxy trust

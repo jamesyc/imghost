@@ -11,6 +11,8 @@ from .helpers import (
     browser_session_headers,
     create_admin_and_api_key,
     create_user_and_api_key,
+    get_sharex_delete_capability,
+    parse_sharex_delete_token,
     set_user_password,
 )
 
@@ -544,6 +546,39 @@ def test_admin_user_listing_supports_search_filters_and_pagination(tmp_path, mon
         assert suspended_payload["items"]
         assert any(item["id"] == suspended_user_id for item in suspended_payload["items"])
         assert all(item["suspended"] is True for item in suspended_payload["items"])
+
+
+def test_admin_suspending_user_revokes_outstanding_sharex_delete_capabilities(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="adminsuspendsharex", email="adminsuspendsharex@example.com")
+    user_id, user_key = create_user_and_api_key(capsys, username="suspendsharexuser", email="suspendsharexuser@example.com")
+
+    with TestClient(app) as client:
+        upload = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {user_key}"},
+            files=[("file", ("sample.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert upload.status_code == 200
+        payload = upload.json()
+        selector, _ = parse_sharex_delete_token(payload["delete_url"], "sharex-delete-secret")
+        capability = get_sharex_delete_capability(client, selector)
+        assert capability is not None
+        assert capability.revoked_at is None
+
+        suspended = client.patch(
+            f"/api/v1/admin/users/{user_id}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            json={"suspended": True},
+        )
+        assert suspended.status_code == 200
+
+        revoked = get_sharex_delete_capability(client, selector)
+        assert revoked is not None
+        assert revoked.revoked_at is not None
 
         bad_limit = client.get(
             "/api/v1/admin/users",

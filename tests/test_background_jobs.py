@@ -1,6 +1,8 @@
 import asyncio
+from datetime import timedelta
 from io import BytesIO
 from time import monotonic, sleep
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
@@ -8,17 +10,48 @@ from imghost.app_state import AppState
 from imghost.__main__ import main as cli_main
 from imghost.config import load_settings
 from imghost.main import app
-from imghost.models import utcnow
+from imghost.models import ShareXDeleteCapability, utcnow
 from imghost.processors import MediaMetadata, SanitizedFile, ThumbnailResult, ValidationResult, VideoProcessingError
+from imghost.sharex_delete import (
+    SHAREX_DELETE_CONSUMED_RETENTION_DAYS,
+    SHAREX_DELETE_REVOKED_RETENTION_DAYS,
+)
 
 from .helpers import (
     PNG_1X1,
+    create_user_and_api_key,
     get_album_record,
     get_media_record,
     update_album_record,
     update_media_record,
     wait_for_thumbnail,
 )
+
+
+async def _create_sharex_capability(
+    state: AppState,
+    *,
+    album_id: str,
+    user_id: str,
+    created_at=None,
+    expires_at=None,
+    consumed_at=None,
+    revoked_at=None,
+) -> ShareXDeleteCapability:
+    now = utcnow()
+    capability = ShareXDeleteCapability(
+        selector=f"cap-{uuid4().hex[:16]}",
+        purpose="sharex_delete_album",
+        album_id=album_id,
+        user_id=user_id,
+        secret_hash=uuid4().hex,
+        created_at=created_at or now,
+        expires_at=expires_at or (now + timedelta(days=90)),
+        consumed_at=consumed_at,
+        revoked_at=revoked_at,
+        last_seen_at=None,
+    )
+    return await state.repository.create_sharex_delete_capability(capability)
 
 
 def wait_for_failed_thumbnail(client: TestClient, media_id: str, *, timeout: float = 2.0) -> None:
@@ -207,6 +240,165 @@ def test_prune_deletes_expired_album_and_media(tmp_path, monkeypatch, capsys) ->
     with TestClient(app) as client:
         assert client.get(f"/api/v1/album/{payload['album_id']}").status_code == 404
         assert client.get(f"/i/{payload['media_id']}.png").status_code == 404
+
+
+def test_prune_removes_expired_sharex_delete_capabilities(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+    user_id, api_key = create_user_and_api_key(capsys, username="prunecapowner1", email="prunecapowner1@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("expired.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        state = client.app.state.imghost
+        capability = client.portal.call(
+            lambda: _create_sharex_capability(
+                state,
+                album_id=payload["album_id"],
+                user_id=user_id,
+                expires_at=utcnow() - timedelta(seconds=1),
+            )
+        )
+
+    exit_code = cli_main(["prune"])
+    assert exit_code == 0
+
+    with TestClient(app) as client:
+        assert client.portal.call(client.app.state.imghost.repository.get_sharex_delete_capability, capability.selector) is None
+
+
+def test_prune_keeps_recent_consumed_sharex_delete_capabilities(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    user_id, api_key = create_user_and_api_key(capsys, username="prunecapowner2", email="prunecapowner2@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("kept.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = created.json()
+        capability = client.portal.call(
+            lambda: _create_sharex_capability(
+                client.app.state.imghost,
+                album_id=payload["album_id"],
+                user_id=user_id,
+                consumed_at=utcnow() - timedelta(days=SHAREX_DELETE_CONSUMED_RETENTION_DAYS - 1),
+            )
+        )
+        client.portal.call(lambda: client.app.state.imghost.uploads.prune_expired_albums(dry_run=False))
+        kept = client.portal.call(client.app.state.imghost.repository.get_sharex_delete_capability, capability.selector)
+        assert kept is not None
+
+
+def test_prune_removes_consumed_sharex_delete_capabilities_past_retention(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    user_id, api_key = create_user_and_api_key(capsys, username="prunecapowner3", email="prunecapowner3@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("oldconsumed.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = created.json()
+        capability = client.portal.call(
+            lambda: _create_sharex_capability(
+                client.app.state.imghost,
+                album_id=payload["album_id"],
+                user_id=user_id,
+                consumed_at=utcnow() - timedelta(days=SHAREX_DELETE_CONSUMED_RETENTION_DAYS + 1),
+            )
+        )
+        client.portal.call(lambda: client.app.state.imghost.uploads.prune_expired_albums(dry_run=False))
+        assert client.portal.call(client.app.state.imghost.repository.get_sharex_delete_capability, capability.selector) is None
+
+
+def test_prune_keeps_recent_revoked_sharex_delete_capabilities(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    user_id, api_key = create_user_and_api_key(capsys, username="prunecapowner4", email="prunecapowner4@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("keptrevoked.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = created.json()
+        capability = client.portal.call(
+            lambda: _create_sharex_capability(
+                client.app.state.imghost,
+                album_id=payload["album_id"],
+                user_id=user_id,
+                revoked_at=utcnow() - timedelta(days=SHAREX_DELETE_REVOKED_RETENTION_DAYS - 1),
+            )
+        )
+        client.portal.call(lambda: client.app.state.imghost.uploads.prune_expired_albums(dry_run=False))
+        kept = client.portal.call(client.app.state.imghost.repository.get_sharex_delete_capability, capability.selector)
+        assert kept is not None
+
+
+def test_prune_removes_revoked_sharex_delete_capabilities_past_retention(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    user_id, api_key = create_user_and_api_key(capsys, username="prunecapowner5", email="prunecapowner5@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("oldrevoked.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = created.json()
+        capability = client.portal.call(
+            lambda: _create_sharex_capability(
+                client.app.state.imghost,
+                album_id=payload["album_id"],
+                user_id=user_id,
+                revoked_at=utcnow() - timedelta(days=SHAREX_DELETE_REVOKED_RETENTION_DAYS + 1),
+            )
+        )
+        client.portal.call(lambda: client.app.state.imghost.uploads.prune_expired_albums(dry_run=False))
+        assert client.portal.call(client.app.state.imghost.repository.get_sharex_delete_capability, capability.selector) is None
+
+
+def test_app_scheduler_cleanup_prunes_sharex_capabilities_without_redis(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("REDIS_MODE", "disabled")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "async")
+    monkeypatch.setenv("APP_SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    user_id, api_key = create_user_and_api_key(capsys, username="prunecapowner6", email="prunecapowner6@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("sched.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = created.json()
+        capability = client.portal.call(
+            lambda: _create_sharex_capability(
+                client.app.state.imghost,
+                album_id=payload["album_id"],
+                user_id=user_id,
+                expires_at=utcnow() - timedelta(seconds=1),
+            )
+        )
+        state = client.app.state.imghost
+        client.portal.call(lambda: state.scheduler.tick(now_monotonic=10**12))
+        client.portal.call(state.tasks.join)
+        assert client.portal.call(state.repository.get_sharex_delete_capability, capability.selector) is None
 
 
 def test_retry_thumbnails_cli_recovers_failed_thumbnail(tmp_path, monkeypatch, capsys) -> None:

@@ -46,8 +46,16 @@ This is necessary because the app stores only the hash of the API key, not the r
 ShareX delete URLs are backed by persisted capability records in PostgreSQL.
 
 - each authenticated ShareX upload creates a scoped delete capability for that album
+- capabilities expire after 90 days
 - the raw capability secret is returned only in the upload response
 - the long-lived capability URL is exchanged for a short-lived confirmation cookie before deletion
+- the confirmation cookie is short-lived and valid for 5 minutes
+- repeated `GET` requests are allowed while the capability is still valid and the album has not been deleted
+- expired, revoked, or already-consumed links return a generic invalid-link error
+- capabilities are invalidated when the owning user is deleted
+- capabilities are revoked when the owning user is suspended
+- expired capabilities are pruned during the normal cleanup path
+- revoked and consumed capabilities are retained briefly, then pruned during cleanup
 - Redis is not required for correctness; Redis-backed deployments and Redis-free beginner deployments use the same ShareX delete flow
 
 ## Reverse proxy behavior

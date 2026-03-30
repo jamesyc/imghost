@@ -32,6 +32,9 @@ class DummyRepository:
         self.media: Media | None = None
         self.update_media_calls = 0
         self.fail_update_media_on_call: int | None = None
+        self.deleted_expired_sharex_delete_capabilities = 0
+        self.deleted_consumed_sharex_delete_capabilities = 0
+        self.deleted_revoked_sharex_delete_capabilities = 0
 
     async def get_user_by_email(self, email: str) -> User | None:
         if self.user and self.user.email == email:
@@ -103,6 +106,15 @@ class DummyRepository:
             raise RuntimeError("repository update failed")
         self.media = media
         return media
+
+    async def delete_expired_sharex_delete_capabilities(self, now) -> int:
+        return self.deleted_expired_sharex_delete_capabilities
+
+    async def delete_consumed_sharex_delete_capabilities_older_than(self, cutoff) -> int:
+        return self.deleted_consumed_sharex_delete_capabilities
+
+    async def delete_revoked_sharex_delete_capabilities_older_than(self, cutoff) -> int:
+        return self.deleted_revoked_sharex_delete_capabilities
 
 
 class DummyStorage:

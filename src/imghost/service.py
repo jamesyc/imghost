@@ -43,6 +43,7 @@ from .processors import ProcessorRegistry, VideoProcessingError
 from .rate_limits import RateLimiter
 from .repositories import PostgresRepository
 from .runtime_config import PostgresRuntimeConfig
+from .sharex_delete import SHAREX_DELETE_CONSUMED_RETENTION_DAYS, SHAREX_DELETE_REVOKED_RETENTION_DAYS
 from .payloads import album_to_payload
 from .storage import StorageBackend
 from .tasks import (
@@ -743,7 +744,8 @@ class UploadService:
         return AsyncIterableBridge(factory)
 
     async def prune_expired_albums(self, *, dry_run: bool = False) -> PruneResult:
-        expired_albums = await self.repository.list_expired_albums(utcnow())
+        now = utcnow()
+        expired_albums = await self.repository.list_expired_albums(now)
         album_ids: list[str] = []
         item_count = 0
         bytes_freed = 0
@@ -795,6 +797,15 @@ class UploadService:
                 audit_event_count = await self.telemetry.count_audit_events_older_than(audit_before)
             else:
                 audit_event_count = await self.telemetry.delete_audit_events_older_than(audit_before)
+
+        if not dry_run:
+            await self.repository.delete_expired_sharex_delete_capabilities(now)
+            await self.repository.delete_revoked_sharex_delete_capabilities_older_than(
+                now - timedelta(days=SHAREX_DELETE_REVOKED_RETENTION_DAYS)
+            )
+            await self.repository.delete_consumed_sharex_delete_capabilities_older_than(
+                now - timedelta(days=SHAREX_DELETE_CONSUMED_RETENTION_DAYS)
+            )
 
         return PruneResult(
             dry_run=dry_run,

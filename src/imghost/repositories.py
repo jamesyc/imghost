@@ -113,6 +113,21 @@ class PostgresRepository:
     async def consume_sharex_delete_capability(self, selector: str, album_id: str) -> ShareXDeleteCapability | None:
         return await self.albums.consume_sharex_delete_capability(selector, album_id)
 
+    async def revoke_sharex_delete_capabilities_for_album(self, album_id: str) -> int:
+        return await self.albums.revoke_sharex_delete_capabilities_for_album(album_id)
+
+    async def revoke_sharex_delete_capabilities_for_user(self, user_id: str) -> int:
+        return await self.albums.revoke_sharex_delete_capabilities_for_user(user_id)
+
+    async def delete_expired_sharex_delete_capabilities(self, now) -> int:
+        return await self.albums.delete_expired_sharex_delete_capabilities(now)
+
+    async def delete_consumed_sharex_delete_capabilities_older_than(self, cutoff) -> int:
+        return await self.albums.delete_consumed_sharex_delete_capabilities_older_than(cutoff)
+
+    async def delete_revoked_sharex_delete_capabilities_older_than(self, cutoff) -> int:
+        return await self.albums.delete_revoked_sharex_delete_capabilities_older_than(cutoff)
+
     async def list_albums_page(
         self,
         *,

@@ -98,6 +98,71 @@ class AlbumMediaRepository:
             )
         return row_to_sharex_delete_capability(row) if row else None
 
+    async def revoke_sharex_delete_capabilities_for_album(self, album_id: str) -> int:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            status = await conn.execute(
+                """
+                UPDATE sharex_delete_capabilities
+                SET revoked_at = COALESCE(revoked_at, now()), last_seen_at = now()
+                WHERE album_id = $1
+                  AND consumed_at IS NULL
+                  AND revoked_at IS NULL
+                """,
+                album_id,
+            )
+        return int(status.rsplit(" ", 1)[-1])
+
+    async def revoke_sharex_delete_capabilities_for_user(self, user_id: str) -> int:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            status = await conn.execute(
+                """
+                UPDATE sharex_delete_capabilities
+                SET revoked_at = COALESCE(revoked_at, now()), last_seen_at = now()
+                WHERE user_id = $1::uuid
+                  AND consumed_at IS NULL
+                  AND revoked_at IS NULL
+                """,
+                user_id,
+            )
+        return int(status.rsplit(" ", 1)[-1])
+
+    async def delete_expired_sharex_delete_capabilities(self, now: datetime) -> int:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            status = await conn.execute(
+                "DELETE FROM sharex_delete_capabilities WHERE expires_at <= $1",
+                now,
+            )
+        return int(status.rsplit(" ", 1)[-1])
+
+    async def delete_consumed_sharex_delete_capabilities_older_than(self, cutoff: datetime) -> int:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            status = await conn.execute(
+                """
+                DELETE FROM sharex_delete_capabilities
+                WHERE consumed_at IS NOT NULL
+                  AND consumed_at <= $1
+                """,
+                cutoff,
+            )
+        return int(status.rsplit(" ", 1)[-1])
+
+    async def delete_revoked_sharex_delete_capabilities_older_than(self, cutoff: datetime) -> int:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            status = await conn.execute(
+                """
+                DELETE FROM sharex_delete_capabilities
+                WHERE revoked_at IS NOT NULL
+                  AND revoked_at <= $1
+                """,
+                cutoff,
+            )
+        return int(status.rsplit(" ", 1)[-1])
+
     async def list_all_media(self) -> list[Media]:
         pool = self.database.require_pool()
         async with pool.acquire() as conn:
