@@ -171,6 +171,8 @@ Operational notes:
 - when Redis is available, counters are shared across processes
 - when Redis is disabled or temporarily unavailable, counters fall back to process-local memory
 - the fallback is sufficient for the beginner stack and single-process installs, but it is weaker across multiple app instances
+- successful password login clears the account-scoped login failure lock, but it does not erase broader per-IP attempt history
+- successful bearer API-key auth clears the current client-IP API-key failure lock
 - operators can tune the auth-throttling runtime config through the admin runtime-config surface unless `LOCK_RATE_LIMITS=true`
 
 ## Current Docker operational caveats

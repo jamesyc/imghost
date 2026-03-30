@@ -162,6 +162,8 @@ Bring the stack up with:
 docker compose -f compose.build.yaml --env-file .env up -d
 ```
 
+This guide uses `compose.build.yaml` because it is the easiest stack for local setup, debugging, and test tooling. If you are deploying the standard pull-based stack instead, substitute `compose.yaml` in the commands below. The safer production-like default is `compose.yaml`, which keeps PostgreSQL, PgBouncer, Redis, and Garage off the host network.
+
 This starts:
 
 - app
@@ -195,7 +197,7 @@ On first successful startup:
 Check containers:
 
 ```bash
-docker compose -f compose.yaml --env-file .env ps
+docker compose -f compose.build.yaml --env-file .env ps
 ```
 
 Check health:
@@ -203,7 +205,7 @@ Check health:
 ```bash
 curl http://127.0.0.1:8000/health/live
 curl http://127.0.0.1:8000/health/ready
-docker compose -f compose.yaml --env-file .env exec pgbouncer sh -lc 'pg_isready -h 127.0.0.1 -p 5432 -d "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432/pgbouncer"'
+docker compose -f compose.build.yaml --env-file .env exec pgbouncer sh -lc 'pg_isready -h 127.0.0.1 -p 5432 -d "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432/pgbouncer"'
 ```
 
 Expected:
@@ -249,7 +251,7 @@ If you want nginx inside the Compose stack instead of on the host, use the optio
 
 ```bash
 docker compose \
-  -f compose.yaml \
+  -f compose.build.yaml \
   -f compose.with-nginx.yaml \
   --env-file .env \
   up -d

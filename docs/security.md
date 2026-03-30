@@ -110,3 +110,4 @@ Repeated failed or forbidden admin access attempts are also subject to auth thro
 - no wildcard public-origin support
 - no full proxy-chain trust model
 - no external metrics or telemetry service yet; metrics are currently exposed from the app process and audit data is stored in PostgreSQL
+- auth throttling without Redis is process-local, so multi-instance deployments get weaker shared enforcement unless Redis is available

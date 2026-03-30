@@ -73,17 +73,21 @@ mv .env.example .env
 docker compose -f compose.yaml --env-file .env up -d
 ```
 
+This is the safer default stack. It only publishes the app port to the host. PostgreSQL, PgBouncer, Redis, and Garage stay on the internal Compose network.
+
 If you want to build locally instead:
 
 ```bash
 docker compose -f compose.build.yaml --env-file .env up -d
 ```
 
+Use the build stack for local development, debugging, and the test workflow. Unlike `compose.yaml`, it also publishes PostgreSQL, PgBouncer, Redis, and Garage ports on the host for local inspection and test tooling.
+
 ## Docker Compose Files
 
 - [`compose.beginner.yaml`](compose.beginner.yaml): simple single-app stack
-- [`compose.yaml`](compose.yaml): standard pull-based stack
-- [`compose.build.yaml`](compose.build.yaml): standard local-build stack
+- [`compose.yaml`](compose.yaml): standard pull-based stack with only the app port published
+- [`compose.build.yaml`](compose.build.yaml): standard local-build stack with extra internal-service ports published for debugging and local tests
 - [`compose.with-nginx.yaml`](compose.with-nginx.yaml): optional nginx companion
 
 Service-specific runtime files live under [`docker/`](docker/).

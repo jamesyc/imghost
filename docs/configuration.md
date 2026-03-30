@@ -151,6 +151,10 @@ Compose derives `DATABASE_URL` from these values instead of storing a second cop
 - `PGBOUNCER_DEFAULT_POOL_SIZE`
 
 The advanced stack uses these to configure the bundled PgBouncer service and publishes it on the host for optional inspection/debugging.
+More precisely:
+
+- `compose.build.yaml` publishes PgBouncer on the host for optional inspection/debugging
+- `compose.yaml` keeps PgBouncer on the internal Compose network
 
 ### Garage cluster/bootstrap values
 

@@ -7,6 +7,12 @@ There are two main Docker stacks plus one optional companion override:
 - advanced local-build variant: [`compose.build.yaml`](/home/james/imghost/compose.build.yaml)
 - optional nginx companion: [`compose.with-nginx.yaml`](/home/james/imghost/compose.with-nginx.yaml)
 
+Port-publishing posture:
+
+- `compose.beginner.yaml` publishes the app port and keeps bundled backing services private to the Compose network
+- `compose.yaml` publishes only the app port and keeps PostgreSQL, PgBouncer, Redis, and Garage private to the Compose network
+- `compose.build.yaml` is the local debug/test variant and also publishes PostgreSQL, PgBouncer, Redis, and Garage ports on the host
+
 ## Services
 
 Beginner stack:
@@ -112,6 +118,7 @@ Notably:
 - `DATABASE_URL` points app services at `pgbouncer:5432`
 - `DATABASE_USE_PGBOUNCER=true` is set for the advanced stack
 - Redis auth is handled by `REDIS_PASSWORD` plus `REDIS_URL`
+- only the local-build variant publishes internal service ports on the host
 
 The beginner stack is pull-only and forces:
 
@@ -137,6 +144,14 @@ Advanced stack:
 ```bash
 docker compose -f compose.yaml --env-file .env pull
 docker compose -f compose.yaml --env-file .env up -d
+```
+
+This is the safer default advanced deployment because it keeps PostgreSQL, PgBouncer, Redis, and Garage off the host network.
+
+If you need locally built images and direct host access to the internal services for debugging or tests, use:
+
+```bash
+docker compose -f compose.build.yaml --env-file .env up -d
 ```
 
 The image publish workflow is defined in [publish-image.yml](/home/james/imghost/.github/workflows/publish-image.yml) and pushes multi-arch images to `ghcr.io/jamesyc/imghost`.

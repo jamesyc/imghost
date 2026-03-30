@@ -32,8 +32,10 @@ Auth throttling:
 - repeated failed login attempts against the same normalized login identifier can also trigger a temporary lock
 - `POST /api/v1/auth/register` can return `429` after repeated attempts from one client IP
 - repeated invalid bearer API-key attempts can trigger `429` on protected API routes
-- repeated admin-access denials can trigger `429` on admin routes
+- repeated admin-access denials can trigger `429` on admin API routes and admin pages
 - throttled responses stay generic and do not reveal whether an account or API key is valid
+- successful password login clears the account-scoped login-failure lock for that normalized login identifier
+- successful API-key auth clears the current client-IP API-key failure lock
 
 ## OAuth flows
 
