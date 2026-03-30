@@ -95,6 +95,8 @@ class ShareXDeleteTokenManager:
             data = json.loads(payload_bytes.decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("invalid_sharex_delete_confirmation") from exc
+        if not isinstance(data, dict):
+            raise ValueError("invalid_sharex_delete_confirmation")
         created_at = str(data.get("created_at") or "").strip()
         selector = str(data.get("selector") or "").strip()
         album_id = str(data.get("album_id") or "").strip()

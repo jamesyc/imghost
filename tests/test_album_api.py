@@ -205,6 +205,72 @@ def test_deleting_only_media_deletes_album(tmp_path, monkeypatch) -> None:
         assert client.get(f"/api/v1/album/{album_id}").status_code == 404
 
 
+def test_anonymous_album_delete_token_cannot_be_reused_after_album_is_deleted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "Ephemeral Album"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+        delete_token = payload["manage_url"].split("token=")[1]
+        first_media_id = payload["media_id"]
+
+        appended = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"album_id": album_id, "delete_token": delete_token},
+        )
+        assert appended.status_code == 200
+        second_media_id = appended.json()["media_id"]
+
+        first_delete = client.delete(
+            f"/api/v1/media/{first_media_id}",
+            params={"delete_token": delete_token},
+        )
+        assert first_delete.status_code == 200
+        assert first_delete.json()["album_deleted"] is False
+
+        second_delete = client.delete(
+            f"/api/v1/media/{second_media_id}",
+            params={"delete_token": delete_token},
+        )
+        assert second_delete.status_code == 200
+        assert second_delete.json()["album_deleted"] is True
+
+        patch_response = client.patch(
+            f"/api/v1/album/{album_id}",
+            params={"delete_token": delete_token},
+            json={"title": "Should Not Work"},
+        )
+        assert patch_response.status_code == 404
+
+        reorder_response = client.patch(
+            f"/api/v1/album/{album_id}/order",
+            params={"delete_token": delete_token},
+            json=[{"media_id": first_media_id, "position": 10}],
+        )
+        assert reorder_response.status_code == 404
+
+        append_response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("three.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"album_id": album_id, "delete_token": delete_token},
+        )
+        assert append_response.status_code == 404
+
+        delete_response = client.delete(
+            f"/api/v1/album/{album_id}",
+            params={"delete_token": delete_token},
+        )
+        assert delete_response.status_code == 404
+
+
 def test_expired_anonymous_album_mutations_are_denied_even_with_valid_delete_token(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

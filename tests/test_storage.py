@@ -5,7 +5,7 @@ from io import BytesIO
 import pytest
 
 from imghost.config import load_settings
-from imghost.storage import LocalFilesystemBackend, S3StorageBackend, build_storage_backend
+from imghost.storage import InvalidByteRange, LocalFilesystemBackend, S3StorageBackend, build_storage_backend, normalize_byte_range
 
 
 async def _read_stream_bytes(stream) -> bytes:
@@ -117,6 +117,44 @@ def test_build_storage_backend_requires_s3_settings(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="S3_ENDPOINT_URL"):
         build_storage_backend(load_settings())
+
+
+@pytest.mark.parametrize(
+    ("range_header", "size", "expected"),
+    [
+        ("bytes=0-0", 10, (0, 0)),
+        ("bytes=9-", 10, (9, 9)),
+        ("bytes=0-999", 10, (0, 9)),
+        ("bytes=-999", 10, (0, 9)),
+        ("bytes= 2-5 ", 10, (2, 5)),
+    ],
+)
+def test_normalize_byte_range_accepts_boundary_and_clamped_ranges(
+    range_header: str,
+    size: int,
+    expected: tuple[int, int],
+) -> None:
+    byte_range = normalize_byte_range(range_header, size)
+
+    assert byte_range is not None
+    assert (byte_range.start, byte_range.end) == expected
+
+
+@pytest.mark.parametrize(
+    "range_header",
+    [
+        "bytes=",
+        "bytes=10-",
+        "bytes=-0",
+        "bytes=4-1",
+        "bytes=1-2,3-4",
+        "bytes=nope",
+        "items=0-1",
+    ],
+)
+def test_normalize_byte_range_rejects_invalid_ranges(range_header: str) -> None:
+    with pytest.raises(InvalidByteRange):
+        normalize_byte_range(range_header, 10)
 
 
 def test_local_filesystem_backend_stream_range_matches_expected_bytes(tmp_path) -> None:

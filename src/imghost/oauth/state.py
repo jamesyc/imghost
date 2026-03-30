@@ -54,6 +54,8 @@ class OAuthStateManager:
             data = json.loads(payload_bytes.decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("invalid_oauth_state") from exc
+        if not isinstance(data, dict):
+            raise ValueError("invalid_oauth_state")
         created_at = str(data.get("created_at") or "").strip()
         if not created_at:
             raise ValueError("invalid_oauth_state")

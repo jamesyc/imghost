@@ -7,7 +7,7 @@ from starlette.requests import Request
 
 from imghost.config import Settings
 from imghost.main import app
-from imghost.public_origin import public_base_url, request_uses_trusted_proxy_headers, trusted_forwarded_client_ip
+from imghost.public_origin import _normalize_origin, public_base_url, request_uses_trusted_proxy_headers, trusted_forwarded_client_ip
 from imghost.web.request_helpers import client_ip
 
 from .helpers import PNG_1X1, browser_session_headers, create_user_and_api_key, set_user_password
@@ -248,6 +248,12 @@ def test_forwarded_public_origin_uses_first_forwarded_value_only() -> None:
     )
 
     assert public_base_url(request, _settings(enabled=False)) == "https://fallback.example.com"
+
+
+def test_normalize_origin_rejects_invalid_ports_without_raising() -> None:
+    assert _normalize_origin("https://trusted.example:99999") is None
+    assert _normalize_origin("https://trusted.example:-1") is None
+    assert _normalize_origin("https://trusted.example:abc") is None
 
 
 def test_upload_uses_forwarded_public_origin_for_generated_urls(tmp_path, monkeypatch) -> None:

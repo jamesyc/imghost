@@ -357,6 +357,8 @@ async def sharex_delete_confirm_page(request: Request, album_id: str) -> HTMLRes
         raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
     if capability.purpose != "sharex_delete_album":
         raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
+    if capability.revoked_at is not None or capability.expires_at <= utcnow():
+        raise HTTPException(status_code=403, detail="Invalid ShareX deletion URL.")
     if album is None and capability.consumed_at is not None:
         response = await render_template_page(
             request,

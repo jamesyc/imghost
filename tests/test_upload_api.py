@@ -547,6 +547,52 @@ def test_sharex_confirm_post_rejects_valid_cookie_after_capability_is_revoked(tm
         assert rejected.json()["detail"] == "ShareX deletion confirmation expired or is invalid."
 
 
+def test_sharex_confirm_page_rejects_valid_cookie_after_capability_is_revoked(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexrevokeget", email="sharexrevokeget@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = response.json()
+        entry = client.get(payload["delete_url"], follow_redirects=False)
+        selector, _ = parse_sharex_delete_token(payload["delete_url"], "sharex-delete-secret")
+        _update_sharex_capability(client, selector, revoked_at=utcnow())
+
+        rejected = client.get(entry.headers["location"])
+        assert rejected.status_code == 403
+        assert rejected.json()["detail"] == "Invalid ShareX deletion URL."
+
+
+def test_sharex_confirm_page_rejects_valid_cookie_after_capability_expires(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "sharex-delete-secret")
+
+    _, api_key = create_user_and_api_key(capsys, username="sharexexpireget", email="sharexexpireget@example.com")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {api_key}"},
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+        )
+        payload = response.json()
+        entry = client.get(payload["delete_url"], follow_redirects=False)
+        selector, _ = parse_sharex_delete_token(payload["delete_url"], "sharex-delete-secret")
+        _update_sharex_capability(client, selector, expires_at=utcnow() - timedelta(seconds=1))
+
+        rejected = client.get(entry.headers["location"])
+        assert rejected.status_code == 403
+        assert rejected.json()["detail"] == "Invalid ShareX deletion URL."
+
+
 def test_invalid_image_upload_is_rejected(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

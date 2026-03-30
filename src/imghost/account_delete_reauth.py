@@ -53,6 +53,8 @@ class AccountDeleteReauthTokenManager:
             data = json.loads(payload_bytes.decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError("invalid_account_delete_reauth_token") from exc
+        if not isinstance(data, dict):
+            raise ValueError("invalid_account_delete_reauth_token")
         created_at = str(data.get("created_at") or "").strip()
         user_id = str(data.get("user_id") or "").strip()
         provider = str(data.get("provider") or "").strip().lower()

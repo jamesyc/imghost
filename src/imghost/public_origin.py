@@ -23,7 +23,10 @@ def _normalize_origin(origin: str) -> str | None:
     host = (parsed.hostname or "").strip().lower()
     if not host or any(char in host for char in "/?#@"):
         return None
-    port = parsed.port
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
     if (parsed.scheme == "http" and port == 80) or (parsed.scheme == "https" and port == 443):
         port = None
     netloc = host if port is None else f"{host}:{port}"

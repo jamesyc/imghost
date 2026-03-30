@@ -220,6 +220,8 @@ def _decode_signed_token(settings: Settings, token: str) -> SessionPayload | Non
         payload = json.loads(payload_bytes.decode("utf-8"))
     except json.JSONDecodeError:
         return None
+    if not isinstance(payload, dict):
+        return None
     expires_at_raw = payload.get("expires_at")
     if expires_at_raw:
         try:
