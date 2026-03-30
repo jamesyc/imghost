@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<script id="settings-bootstrap" type="application/json">{{ {"session_user": session_user, "delete_reauth": {"token": delete_reauth_token, "status": delete_reauth_status, "tone": delete_reauth_tone}}|tojson }}</script>
+<script id="settings-bootstrap" type="application/json">{{ {"session_user": session_user, "delete_reauth": {"status": delete_reauth_status, "tone": delete_reauth_tone}}|tojson }}</script>
 <section class="stack settings-shell">
   <section class="card hero-card settings-hero">
     <div class="settings-hero-copy">

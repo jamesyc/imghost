@@ -11,6 +11,7 @@ from ..oauth import OAuthStatePayload, build_code_challenge, generate_code_verif
 from ..public_origin import public_base_url
 from ..sessions import SessionBackendUnavailable
 from ..models import OAuthStateNonce, utcnow
+from .account_delete_reauth_cookie import set_account_delete_reauth_cookie
 from .auth_context import apply_session_cookie, authenticated_user
 from .page_context import login_redirect, normalize_next_path
 from .request_context import correlation_id, get_state
@@ -190,12 +191,13 @@ async def _oauth_callback(
                 provider_uid=identity.provider_uid,
                 outcome="delete_account_reauth",
             )
-            return _query_redirect(
+            response = _query_redirect(
                 "/settings",
                 delete_reauth_status=f"{_provider_label(provider_name)} re-authentication confirmed. You can now delete your account.",
                 delete_reauth_tone="success",
-                delete_reauth_token=reauth_token,
             )
+            set_account_delete_reauth_cookie(response, request, reauth_token)
+            return response
         user, outcome = await app_state.uploads.complete_oauth_login(
             identity,
             current_user=current_user,

@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from ..account_service import AccountDeletionConfirmationInput
 from ..service import PasswordChangeInput
 from ..public_origin import public_base_url
+from .account_delete_reauth_cookie import clear_account_delete_reauth_cookie, load_account_delete_reauth_cookie
 from .auth_context import authenticated_principal, authenticated_user, clear_browser_session
 from .pagination import validate_pagination
 from .request_context import correlation_id, get_state
@@ -24,7 +25,6 @@ class UserPasswordPatchRequest(BaseModel):
 class UserDeleteRequest(BaseModel):
     method: Literal["password", "oauth_reauth"]
     current_password: str | None = None
-    reauth_token: str | None = None
 
 
 @router.get("/api/v1/user/me")
@@ -121,12 +121,13 @@ async def delete_current_user(request: Request, payload: UserDeleteRequest) -> J
     state = get_state(request)
     user = await authenticated_user(request, required=True)
     cid = correlation_id(request)
+    reauth_token = load_account_delete_reauth_cookie(request) if payload.method == "oauth_reauth" else None
     await state.uploads.validate_account_deletion_confirmation(
         user,
         AccountDeletionConfirmationInput(
             method=payload.method,
             current_password=payload.current_password,
-            reauth_token=payload.reauth_token,
+            reauth_token=reauth_token,
         ),
     )
     deleted = await state.uploads.delete_user_account(user, cid)
@@ -139,6 +140,7 @@ async def delete_current_user(request: Request, payload: UserDeleteRequest) -> J
         },
         headers={"X-Correlation-ID": cid},
     )
+    clear_account_delete_reauth_cookie(response, request)
     await clear_browser_session(request, response)
     return response
 

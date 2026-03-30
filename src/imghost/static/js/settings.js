@@ -21,7 +21,6 @@ if (settingsBootstrapNode) {
 
   const state = {
     user: bootstrap.session_user || null,
-    deleteReauthToken: bootstrap.delete_reauth?.token || "",
   };
 
   const formatNumber = (value) => new Intl.NumberFormat().format(Number(value || 0));
@@ -288,14 +287,11 @@ if (settingsBootstrapNode) {
     }
     try {
       const currentPassword = String(deletePasswordInput?.value || "");
-      let payload;
+      const payload = currentPassword
+        ? { method: "password", current_password: currentPassword }
+        : { method: "oauth_reauth" };
       if (currentPassword) {
-        payload = { method: "password", current_password: currentPassword };
-      } else if (state.deleteReauthToken) {
-        payload = { method: "oauth_reauth", reauth_token: state.deleteReauthToken };
-      } else {
-        setInlineStatus(deleteStatus, "Enter your current password or complete OAuth re-authentication before deleting your account.", "error");
-        return;
+        deletePasswordInput.value = "";
       }
       await requestJson("/api/v1/user/me", {
         method: "DELETE",

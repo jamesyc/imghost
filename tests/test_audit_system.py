@@ -354,6 +354,28 @@ def test_json_log_sink_redacts_token_like_metadata_fields_and_referer_query_para
     assert "delete_reauth_token=%5BREDACTED%5D" in combined
 
 
+def test_json_log_sink_redacts_account_delete_reauth_cookie_metadata(caplog) -> None:
+    service = TelemetryService([JsonLogTelemetrySink(logging.getLogger("imghost.telemetry.test"))])
+
+    with caplog.at_level(logging.INFO, logger="imghost.telemetry.test"):
+        asyncio.run(
+            service.emit_event(
+                event_type="secret_cookie_test",
+                action="secret.cookie.test",
+                result="success",
+                actor=anonymous_actor(),
+                object=TelemetryObject(type="test", id="secret-cookie"),
+                metadata={
+                    "imghost_delete_reauth": "raw-delete-reauth-cookie",
+                },
+            )
+        )
+
+    combined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "raw-delete-reauth-cookie" not in combined
+    assert "[REDACTED]" in combined
+
+
 def test_postgres_audit_log_redacts_referer_query_tokens_and_token_metadata(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

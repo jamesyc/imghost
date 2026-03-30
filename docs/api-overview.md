@@ -65,6 +65,13 @@ Anonymous/public mutation rules:
 - `DELETE /api/v1/user/me`
 - `POST /api/v1/user/me/oauth/google/disconnect`
 
+`DELETE /api/v1/user/me` supports two confirmation modes:
+
+- `{"method":"password","password":"..."}`
+- `{"method":"oauth_reauth"}`
+
+For `oauth_reauth`, the short-lived confirmation proof is set by the OAuth callback in an `HttpOnly` cookie and is read server-side during deletion.
+
 `GET /api/v1/user/me/albums` returns a paginated envelope:
 
 - `items`

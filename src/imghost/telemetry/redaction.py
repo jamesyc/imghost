@@ -17,6 +17,7 @@ _SECRET_KEYS = {
     "cookie",
     "set-cookie",
     "session_token",
+    "imghost_delete_reauth",
     "token",
     "delete_token",
     "reauth_token",

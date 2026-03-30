@@ -14,6 +14,7 @@ from imghost.main import app
 from imghost.models import User, UserSsoLink, utcnow
 from imghost.oauth.pkce import build_code_challenge
 from imghost.sessions import _decode_signed_token
+from imghost.web.account_delete_reauth_cookie import ACCOUNT_DELETE_REAUTH_COOKIE_NAME
 
 from .helpers import browser_session_headers, create_admin_and_api_key, set_user_password
 from .test_redis_features import FakeRedis
@@ -732,7 +733,7 @@ def test_google_oauth_disconnect_succeeds_when_local_password_exists(tmp_path, m
         assert links == []
 
 
-def test_google_oauth_delete_account_mode_issues_reauth_token_for_account_deletion(tmp_path, monkeypatch) -> None:
+def test_google_oauth_delete_account_mode_sets_reauth_cookie_for_account_deletion(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")
     monkeypatch.setenv("GOOGLE_OAUTH_ENABLED", "true")
@@ -757,14 +758,17 @@ def test_google_oauth_delete_account_mode_issues_reauth_token_for_account_deleti
         assert callback.status_code == 303
         query = parse_qs(urlparse(callback.headers["location"]).query)
         assert query["delete_reauth_tone"] == ["success"]
-        assert "delete_reauth_token" in query
-        reauth_token = query["delete_reauth_token"][0]
+        assert "delete_reauth_token" not in query
+        assert ACCOUNT_DELETE_REAUTH_COOKIE_NAME in callback.headers["set-cookie"]
+        assert "HttpOnly" in callback.headers["set-cookie"]
+        assert "SameSite=lax" in callback.headers["set-cookie"]
+        assert "Max-Age=600" in callback.headers["set-cookie"]
 
         deleted = client.request(
             "DELETE",
             "/api/v1/user/me",
             headers=browser_session_headers("https://testserver", "/settings"),
-            json={"method": "oauth_reauth", "reauth_token": reauth_token},
+            json={"method": "oauth_reauth"},
         )
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True

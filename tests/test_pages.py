@@ -1252,6 +1252,37 @@ def test_settings_page_does_not_issue_api_key_just_by_loading(tmp_path, monkeypa
         assert client.portal.call(client.app.state.imghost.repository.get_api_key_for_user, user.id) is None
 
 
+def test_settings_page_bootstrap_does_not_embed_delete_reauth_token(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        user = create_raw_user(
+            client,
+            username="notokenbootstrap",
+            email="notokenbootstrap@example.com",
+        )
+        set_user_password(client, user.id, "open-sesame")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"login": "notokenbootstrap@example.com", "password": "open-sesame"},
+        )
+        assert login.status_code == 200
+
+        page = client.get(
+            "/settings",
+            params={
+                "delete_reauth_status": "Google re-authentication confirmed.",
+                "delete_reauth_tone": "success",
+            },
+        )
+        assert page.status_code == 200
+        assert '"status": "Google re-authentication confirmed."' in page.text
+        assert '"tone": "success"' in page.text
+        assert '"token"' not in page.text
+        assert "delete_reauth_token" not in page.text
+
+
 def test_static_settings_js_does_not_auto_issue_api_key(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

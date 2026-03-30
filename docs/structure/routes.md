@@ -87,6 +87,8 @@ These endpoints serve both authenticated owner actions and token-backed anonymou
 - `DELETE /api/v1/user/me`
 - `POST /api/v1/user/me/oauth/google/disconnect`
 
+`DELETE /api/v1/user/me` accepts either password confirmation or the cookie-backed `oauth_reauth` confirmation flow started from `/settings`. The OAuth callback stores a short-lived `HttpOnly` confirmation cookie, and the delete request sends only `{"method":"oauth_reauth"}`.
+
 ### Admin API
 
 - `GET /api/v1/admin/users`

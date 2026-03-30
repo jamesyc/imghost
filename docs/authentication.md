@@ -204,4 +204,15 @@ Supported confirmation modes:
 - `password`
 - `oauth_reauth`
 
+`password` expects the current password in the request body.
+
 `oauth_reauth` is currently used with the Google OAuth delete-account re-auth flow from `/settings`.
+
+Current `oauth_reauth` behavior:
+
+- the browser starts the Google re-auth flow from `/settings`
+- after a successful callback, the server stores the short-lived delete confirmation proof in an `HttpOnly` cookie
+- the browser then submits `{"method":"oauth_reauth"}` to `DELETE /api/v1/user/me`
+- the server reads the re-auth proof from that cookie instead of accepting a raw reauth token in the URL or JSON body
+
+This keeps the delete confirmation proof out of browser history, page bootstrap state, screenshots, and proxy logs.

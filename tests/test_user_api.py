@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from imghost.account_delete_reauth import AccountDeleteReauthPayload, AccountDeleteReauthTokenManager
 from imghost.main import app
 from imghost.models import User, UserSsoLink, utcnow
+from imghost.web.account_delete_reauth_cookie import ACCOUNT_DELETE_REAUTH_COOKIE_NAME
 
 from .helpers import (
     PNG_1X1,
@@ -846,7 +847,7 @@ def test_delete_current_user_rejects_password_confirmation_when_account_has_no_p
         assert response.json()["detail"] == "This account does not have a local password."
 
 
-def test_delete_current_user_rejects_missing_oauth_reauth_token(tmp_path, monkeypatch, capsys) -> None:
+def test_delete_current_user_rejects_missing_oauth_reauth_cookie(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
 
@@ -857,13 +858,13 @@ def test_delete_current_user_rejects_missing_oauth_reauth_token(tmp_path, monkey
             "DELETE",
             "/api/v1/user/me",
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"method": "oauth_reauth", "reauth_token": ""},
+            json={"method": "oauth_reauth"},
         )
         assert response.status_code == 400
         assert response.json()["detail"] == "OAuth re-authentication is required."
 
 
-def test_delete_current_user_rejects_invalid_oauth_reauth_token(tmp_path, monkeypatch, capsys) -> None:
+def test_delete_current_user_rejects_invalid_oauth_reauth_cookie(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("SECRET_KEY", "delete-reauth-secret")
@@ -871,17 +872,18 @@ def test_delete_current_user_rejects_invalid_oauth_reauth_token(tmp_path, monkey
     _, api_key = create_user_and_api_key(capsys, username="invalidreauth", email="invalidreauth@example.com")
 
     with TestClient(app) as client:
+        client.cookies.set(ACCOUNT_DELETE_REAUTH_COOKIE_NAME, "not-a-real-token")
         response = client.request(
             "DELETE",
             "/api/v1/user/me",
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"method": "oauth_reauth", "reauth_token": "not-a-real-token"},
+            json={"method": "oauth_reauth"},
         )
         assert response.status_code == 403
         assert response.json()["detail"] == "OAuth re-authentication has expired or is invalid."
 
 
-def test_delete_current_user_rejects_oauth_reauth_token_for_different_user(tmp_path, monkeypatch, capsys) -> None:
+def test_delete_current_user_rejects_oauth_reauth_cookie_for_different_user(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("SECRET_KEY", "delete-reauth-secret")
@@ -903,17 +905,18 @@ def test_delete_current_user_rejects_oauth_reauth_token_for_different_user(tmp_p
         token = AccountDeleteReauthTokenManager(client.app.state.imghost.settings.secret_key).dumps(
             AccountDeleteReauthPayload(user_id=other_user_id, provider="github", provider_uid="gh-user-1")
         )
+        client.cookies.set(ACCOUNT_DELETE_REAUTH_COOKIE_NAME, token)
         response = client.request(
             "DELETE",
             "/api/v1/user/me",
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"method": "oauth_reauth", "reauth_token": token},
+            json={"method": "oauth_reauth"},
         )
         assert response.status_code == 403
         assert response.json()["detail"] == "OAuth re-authentication has expired or is invalid."
 
 
-def test_delete_current_user_rejects_oauth_reauth_token_when_link_no_longer_exists(tmp_path, monkeypatch, capsys) -> None:
+def test_delete_current_user_rejects_oauth_reauth_cookie_when_link_no_longer_exists(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")
     monkeypatch.setenv("SECRET_KEY", "delete-reauth-secret")
@@ -935,11 +938,47 @@ def test_delete_current_user_rejects_oauth_reauth_token_when_link_no_longer_exis
             AccountDeleteReauthPayload(user_id=user_id, provider="github", provider_uid="gh-user-2")
         )
         client.portal.call(client.app.state.imghost.repository.delete_user_sso_link, user_id, "github")
+        client.cookies.set(ACCOUNT_DELETE_REAUTH_COOKIE_NAME, token)
         response = client.request(
             "DELETE",
             "/api/v1/user/me",
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"method": "oauth_reauth", "reauth_token": token},
+            json={"method": "oauth_reauth"},
         )
         assert response.status_code == 403
         assert response.json()["detail"] == "OAuth re-authentication has expired or is invalid."
+
+
+def test_delete_current_user_succeeds_with_valid_oauth_reauth_cookie_and_clears_it(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("SECRET_KEY", "delete-reauth-secret")
+
+    user_id, api_key = create_user_and_api_key(capsys, username="validreauth", email="validreauth@example.com")
+
+    with TestClient(app) as client:
+        client.portal.call(
+            client.app.state.imghost.repository.create_user_sso_link,
+            UserSsoLink(
+                id="33333333-3333-3333-3333-333333333333",
+                user_id=user_id,
+                provider="github",
+                provider_uid="gh-user-3",
+                linked_at=utcnow(),
+            ),
+        )
+        token = AccountDeleteReauthTokenManager(client.app.state.imghost.settings.secret_key).dumps(
+            AccountDeleteReauthPayload(user_id=user_id, provider="github", provider_uid="gh-user-3")
+        )
+        client.cookies.set(ACCOUNT_DELETE_REAUTH_COOKIE_NAME, token)
+        response = client.request(
+            "DELETE",
+            "/api/v1/user/me",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"method": "oauth_reauth"},
+        )
+        assert response.status_code == 200
+        assert response.json()["deleted"] is True
+        assert ACCOUNT_DELETE_REAUTH_COOKIE_NAME in response.headers["set-cookie"]
+        assert "Max-Age=0" in response.headers["set-cookie"]
+        assert client.portal.call(client.app.state.imghost.repository.get_user, user_id) is None
