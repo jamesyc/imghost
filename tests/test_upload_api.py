@@ -174,6 +174,26 @@ def test_multi_file_upload_reuses_album_and_delete_removes_media(tmp_path, monke
             assert client.get(f"/i/{media_id}.png").status_code == 404
 
 
+def test_album_zip_sanitizes_uploaded_windows_style_filenames(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("..\\win\\evil:name?.png", BytesIO(PNG_1X1), "image/png"))],
+            data={"title": "ZIP Names"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        zip_response = client.get(f"/api/v1/album/{payload['album_id']}/zip")
+
+        assert zip_response.status_code == 200
+        with ZipFile(BytesIO(zip_response.content)) as archive:
+            assert archive.namelist() == ["evil_name_.png"]
+
+
 def test_upload_limit_respects_runtime_config_updates(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

@@ -5,7 +5,7 @@ import mimetypes
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from time import monotonic
 from zipfile import ZIP_DEFLATED
 
@@ -816,7 +816,11 @@ class UploadService:
         )
 
     def _archive_name(self, media: Media, index: int, seen_names: set[str]) -> str:
-        candidate = Path(media.filename_orig).name or f"{media.id}.{media.format}"
+        candidate = self._sanitize_archive_filename(
+            media.filename_orig,
+            getattr(media, "id", "media"),
+            media.format,
+        )
         if "." not in candidate and media.format:
             candidate = f"{candidate}.{media.format}"
         if candidate not in seen_names:
@@ -831,6 +835,20 @@ class UploadService:
                 seen_names.add(deduped)
                 return deduped
             index += 1
+
+    def _sanitize_archive_filename(self, raw_name: str | None, media_id: str, media_format: str) -> str:
+        fallback = f"{media_id}.{media_format}" if media_format else media_id
+        if not raw_name:
+            return fallback
+        candidate = PurePosixPath(raw_name.replace("\\", "/")).name
+        candidate = "".join(
+            "_" if char in {'"', "*", ":", "<", ">", "?", "|"} else char
+            for char in candidate
+            if ord(char) >= 32 and char != "\x7f"
+        ).strip().rstrip(".")
+        if not candidate or candidate in {".", ".."}:
+            return fallback
+        return candidate
 
     def _require_delete_token(self, album: Album, delete_token: str | None) -> None:
         if album.delete_token and delete_token != album.delete_token:

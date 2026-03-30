@@ -915,6 +915,40 @@ def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -
     assert storage.get_bytes_called is False
 
 
+def test_stream_album_zip_sanitizes_windows_paths_and_control_chars_in_filenames() -> None:
+    storage = DummyStorage({"media/original.png": b"png-data"})
+    service, repository, _, _ = make_service(storage=storage)
+    repository.album = Album(
+        id="album-1",
+        title="Album",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=utcnow(),
+        updated_at=utcnow(),
+        expires_at=None,
+    )
+    repository.album_media = [
+        type(
+            "MediaStub",
+            (),
+            {
+                "id": "media-1",
+                "storage_key": "media/original.png",
+                "filename_orig": "..\\\\evil\x00name?.png",
+                "format": "png",
+            },
+        )()
+    ]
+
+    archive = asyncio.run(service.stream_album_zip("album-1"))
+    zipped = b"".join(archive)
+
+    with ZipFile(BytesIO(zipped)) as extracted:
+        assert extracted.namelist() == ["evilname_.png"]
+        assert extracted.read("evilname_.png") == b"png-data"
+
+
 def test_generate_thumbnail_records_processor_missing_failure(caplog) -> None:
     storage = DummyStorage({"originals/u/media.mp4": b"video"})
     service, repository, _, telemetry = make_service(storage=storage, processors=DummyProcessors(None))
