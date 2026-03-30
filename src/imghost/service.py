@@ -195,7 +195,10 @@ class UploadService:
             raise
         if not album.title and title:
             album.title = title
-        await self.repository.update_album(album)
+        try:
+            await self.repository.update_album(album)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Album not found.") from None
         if self.telemetry is not None:
             self.telemetry.record_upload(
                 result="success",
@@ -338,7 +341,11 @@ class UploadService:
             position=0,
             created_at=utcnow(),
         )
-        media = await self.repository.create_media_with_next_position(media)
+        try:
+            media = await self.repository.create_media_with_next_position(media)
+        except Exception:
+            await self._delete_storage_key_best_effort(storage_key, context="upload_create_rollback", object_id=media_id)
+            raise
         await self.event_bus.emit(
             MediaUploaded(
                 media_id=media.id,
@@ -525,14 +532,10 @@ class UploadService:
         self._require_album_access(album, delete_token, actor_user, allow_expired=bool(actor_user and actor_user.is_admin))
 
         media_items = await self.repository.list_album_media(album_id)
-        for media in media_items:
-            await self.storage.delete(media.storage_key)
-            if media.thumb_key and media.thumb_key != media.storage_key:
-                await self.storage.delete(media.thumb_key)
-
         deleted_album, deleted_media = await self.repository.delete_album(album_id)
         if deleted_album is None:
             raise HTTPException(status_code=404, detail="Album not found.")
+        await self._delete_media_storage_keys(deleted_media, context="album_delete_storage_cleanup")
 
         await self.event_bus.emit(
             AlbumDeleted(
@@ -604,7 +607,10 @@ class UploadService:
                 )
 
         if changed:
-            await self.repository.update_album(album)
+            try:
+                await self.repository.update_album(album)
+            except LookupError:
+                raise HTTPException(status_code=404, detail="Album not found.") from None
         return album, await self.repository.list_album_media(album_id)
 
     async def reorder_album(
@@ -640,7 +646,10 @@ class UploadService:
             positions = {item.id: index * 1000 for index, item in enumerate(reordered, start=1)}
             reordered = await self.repository.update_media_positions(album_id, positions)
 
-        await self.repository.update_album(album)
+        try:
+            await self.repository.update_album(album)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Album not found.") from None
         await self.event_bus.emit(
             AlbumReordered(
                 album_id=album.id,
@@ -670,13 +679,10 @@ class UploadService:
             raise HTTPException(status_code=404, detail="Album not found.")
         self._require_album_access(album, delete_token, actor_user)
 
-        await self.storage.delete(media.storage_key)
-        if media.thumb_key and media.thumb_key != media.storage_key:
-            await self.storage.delete(media.thumb_key)
-
         deleted_media = await self.repository.delete_media(media_id)
         if deleted_media is None:
             raise HTTPException(status_code=404, detail="Media not found.")
+        await self._delete_media_storage_keys([deleted_media], context="media_delete_storage_cleanup")
 
         await self.event_bus.emit(
             MediaDeleted(
@@ -716,7 +722,15 @@ class UploadService:
 
         if album.cover_media_id == deleted_media.id:
             album.cover_media_id = None
-        await self.repository.update_album(album)
+        try:
+            await self.repository.update_album(album)
+        except LookupError:
+            return MediaDeleteResult(
+                deleted_media=deleted_media,
+                album=None,
+                remaining_items=[],
+                album_deleted=True,
+            )
         return MediaDeleteResult(
             deleted_media=deleted_media,
             album=album,
@@ -743,6 +757,22 @@ class UploadService:
             return stream.body
 
         return AsyncIterableBridge(factory)
+
+    async def _delete_media_storage_keys(self, media_items: list[Media], *, context: str) -> None:
+        for media in media_items:
+            await self._delete_storage_key_best_effort(media.storage_key, context=context, object_id=media.id)
+            if media.thumb_key and media.thumb_key != media.storage_key:
+                await self._delete_storage_key_best_effort(media.thumb_key, context=context, object_id=media.id)
+
+    async def _delete_storage_key_best_effort(self, key: str, *, context: str, object_id: str) -> None:
+        try:
+            await self.storage.delete(key)
+        except Exception:
+            logger.warning(
+                "storage_cleanup_failed",
+                extra={"context": context, "object_id": object_id, "storage_key": key},
+                exc_info=True,
+            )
 
     async def prune_expired_albums(self, *, dry_run: bool = False) -> PruneResult:
         now = utcnow()

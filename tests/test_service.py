@@ -8,10 +8,11 @@ import bcrypt
 import pytest
 
 from fastapi import HTTPException
+from starlette.datastructures import UploadFile
 from imghost.config import Settings
 from imghost.events import ApiKeyIssued, UserAdminStatusChanged, UserLimitsChanged, UserPasswordChanged
 from imghost.models import Album, ApiKey, Media, User, UserSsoLink, utcnow
-from imghost.processors import MediaMetadata, ThumbnailResult
+from imghost.processors import MediaMetadata, SanitizedFile, ThumbnailResult, ValidationResult
 from imghost.storage import StorageStream
 from imghost.payloads import album_to_payload
 from imghost.service import CurrentActor, LocalLoginInput, PasswordChangeInput, UNSET, UploadService, UserCreateInput, UserUpdateInput
@@ -32,9 +33,13 @@ class DummyRepository:
         self.media: Media | None = None
         self.update_media_calls = 0
         self.fail_update_media_on_call: int | None = None
+        self.fail_update_album = False
         self.deleted_expired_sharex_delete_capabilities = 0
         self.deleted_consumed_sharex_delete_capabilities = 0
         self.deleted_revoked_sharex_delete_capabilities = 0
+        self.fail_create_media = False
+        self.fail_delete_media = False
+        self.fail_delete_album = False
 
     async def get_user_by_email(self, email: str) -> User | None:
         if self.user and self.user.email == email:
@@ -65,6 +70,12 @@ class DummyRepository:
         if self.album and self.album.id == album_id:
             return self.album
         return None
+
+    async def update_album(self, album: Album) -> Album:
+        if self.fail_update_album:
+            raise LookupError("album_not_found")
+        self.album = album
+        return album
 
     async def list_album_media(self, album_id: str) -> list[object]:
         if self.album and self.album.id == album_id:
@@ -100,12 +111,39 @@ class DummyRepository:
             return self.media
         return None
 
+    async def create_media_with_next_position(self, media: Media) -> Media:
+        if self.fail_create_media:
+            raise RuntimeError("insert failed")
+        self.media = media
+        return media
+
     async def update_media(self, media: Media) -> Media:
         self.update_media_calls += 1
         if self.fail_update_media_on_call == self.update_media_calls:
             raise RuntimeError("repository update failed")
         self.media = media
         return media
+
+    async def delete_media(self, media_id: str) -> Media | None:
+        if self.fail_delete_media:
+            return None
+        if self.media and self.media.id == media_id:
+            deleted = self.media
+            self.media = None
+            self.album_media = [item for item in self.album_media if not isinstance(item, Media) or item.id != media_id]
+            return deleted
+        return None
+
+    async def delete_album(self, album_id: str) -> tuple[Album | None, list[Media]]:
+        if self.fail_delete_album:
+            return None, []
+        if self.album and self.album.id == album_id:
+            deleted_album = self.album
+            deleted_media = [item for item in self.album_media if isinstance(item, Media)]
+            self.album = None
+            self.album_media = []
+            return deleted_album, deleted_media
+        return None, []
 
     async def delete_expired_sharex_delete_capabilities(self, now) -> int:
         return self.deleted_expired_sharex_delete_capabilities
@@ -211,6 +249,28 @@ class DummyProcessor:
         if self.generate_error is not None:
             raise self.generate_error
         return self.thumbnail
+
+
+class DummyUploadProcessor:
+    async def validate(self, payload: bytes) -> ValidationResult:
+        return ValidationResult(ok=True)
+
+    async def extract_metadata(self, payload: bytes, format_hint: str) -> MediaMetadata:
+        return MediaMetadata(
+            width=1,
+            height=1,
+            duration_secs=None,
+            codec_hint=None,
+            is_animated=False,
+            mime_type="image/png",
+            format="png",
+        )
+
+    async def sanitize(self, payload: bytes, metadata: MediaMetadata) -> SanitizedFile:
+        return SanitizedFile(data=payload, mime_type="image/png", format="png")
+
+    async def generate_thumbnail(self, payload: bytes, metadata: MediaMetadata) -> ThumbnailResult:
+        return ThumbnailResult(data=None, thumb_is_orig=True, format="png", size=len(payload))
 
 
 class DummyEventBus:
@@ -613,6 +673,83 @@ def test_issue_api_key_emits_event_with_replaced_existing_flag() -> None:
     assert api_event.replaced_existing is True
 
 
+def test_update_album_returns_404_when_album_disappears_before_persist() -> None:
+    service, repository, _, _ = make_service()
+    now = utcnow()
+    repository.album = Album(
+        id="album-1",
+        title="Before",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=now,
+        updated_at=now,
+        expires_at=None,
+    )
+    repository.album_media = []
+    repository.fail_update_album = True
+
+    with pytest.raises(HTTPException) as rejected:
+        asyncio.run(service.update_album("album-1", "token", "cid", title="After"))
+
+    assert rejected.value.status_code == 404
+    assert rejected.value.detail == "Album not found."
+
+
+def test_reorder_album_returns_404_when_album_disappears_before_touching_updated_at() -> None:
+    service, repository, _, _ = make_service()
+    now = utcnow()
+    repository.album = Album(
+        id="album-1",
+        title="Before",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=now,
+        updated_at=now,
+        expires_at=None,
+    )
+    repository.album_media = [
+        Media(
+            id="media-1",
+            album_id="album-1",
+            user_id=None,
+            filename_orig="one.png",
+            media_type="image",
+            format="png",
+            mime_type="image/png",
+            storage_key="originals/anon/one.png",
+            thumb_key=None,
+            thumb_is_orig=False,
+            thumb_status="pending",
+            file_size=1,
+            thumb_size=None,
+            width=1,
+            height=1,
+            duration_secs=None,
+            is_animated=False,
+            codec_hint=None,
+            position=1000,
+            created_at=now,
+        )
+    ]
+
+    async def _update_media_positions(album_id: str, positions: dict[str, int]) -> list[Media]:
+        for item in repository.album_media:
+            if item.id in positions:
+                item.position = positions[item.id]
+        return list(repository.album_media)
+
+    repository.update_media_positions = _update_media_positions  # type: ignore[method-assign]
+    repository.fail_update_album = True
+
+    with pytest.raises(HTTPException) as rejected:
+        asyncio.run(service.reorder_album("album-1", "token", [("media-1", 200)], "cid"))
+
+    assert rejected.value.status_code == 404
+    assert rejected.value.detail == "Album not found."
+
+
 def test_get_current_user_summary_includes_password_api_key_and_sso_metadata() -> None:
     user = make_user(password_hash=bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8"))
     service, repository, _, _ = make_service(user)
@@ -881,6 +1018,27 @@ def test_album_to_payload_omits_delete_token_by_default() -> None:
     assert "delete_url" not in payload
 
 
+def test_create_media_cleans_up_stored_object_when_repository_insert_fails() -> None:
+    storage = DummyStorage({})
+    service, repository, _, _ = make_service(storage=storage, processors=DummyProcessors(DummyUploadProcessor()))
+    repository.fail_create_media = True
+
+    with pytest.raises(RuntimeError, match="insert failed"):
+        asyncio.run(
+            service._create_media(
+                "album-1",
+                UploadFile(filename="sample.png", file=BytesIO(b"png-data"), headers={"content-type": "image/png"}),
+                b"png-data",
+                "create-media-fail",
+                actor=CurrentActor(user=None, source="web"),
+            )
+        )
+
+    assert len(storage.put_calls) == 1
+    assert storage.delete_calls == [storage.put_calls[0][0]]
+    assert storage.put_calls[0][0] not in storage.payloads
+
+
 def test_stream_album_zip_uses_storage_streams_without_buffering_whole_files() -> None:
     storage = DummyStorage({"media/original.png": b"png-data"})
     service, repository, _, _ = make_service(storage=storage)
@@ -947,6 +1105,214 @@ def test_stream_album_zip_sanitizes_windows_paths_and_control_chars_in_filenames
     with ZipFile(BytesIO(zipped)) as extracted:
         assert extracted.namelist() == ["evilname_.png"]
         assert extracted.read("evilname_.png") == b"png-data"
+
+
+def test_delete_album_does_not_remove_storage_when_repository_delete_fails() -> None:
+    now = utcnow()
+    storage = DummyStorage(
+        {
+            "originals/anon/media-1.png": b"orig",
+            "thumbnails/media-1.jpg": b"thumb",
+        }
+    )
+    service, repository, _, _ = make_service(storage=storage)
+    repository.album = Album(
+        id="album-1",
+        title="Album",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=now,
+        updated_at=now,
+        expires_at=None,
+    )
+    repository.album_media = [
+        Media(
+            id="media-1",
+            album_id="album-1",
+            user_id=None,
+            filename_orig="sample.png",
+            media_type="image",
+            format="png",
+            mime_type="image/png",
+            storage_key="originals/anon/media-1.png",
+            thumb_key="thumbnails/media-1.jpg",
+            thumb_is_orig=False,
+            thumb_status="done",
+            file_size=100,
+            thumb_size=20,
+            width=1,
+            height=1,
+            duration_secs=None,
+            is_animated=False,
+            codec_hint=None,
+            position=1000,
+            created_at=now,
+        )
+    ]
+    repository.fail_delete_album = True
+
+    with pytest.raises(HTTPException) as rejected:
+        asyncio.run(service.delete_album("album-1", "token", "delete-album-fail"))
+
+    assert rejected.value.status_code == 404
+    assert storage.delete_calls == []
+    assert set(storage.payloads) == {"originals/anon/media-1.png", "thumbnails/media-1.jpg"}
+
+
+def test_delete_album_best_effort_storage_cleanup_keeps_success_response() -> None:
+    now = utcnow()
+    storage = DummyStorage(
+        {
+            "originals/anon/media-1.png": b"orig",
+            "thumbnails/media-1.jpg": b"thumb",
+        }
+    )
+    storage.fail_delete = True
+    service, repository, _, _ = make_service(storage=storage)
+    repository.album = Album(
+        id="album-1",
+        title="Album",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=now,
+        updated_at=now,
+        expires_at=None,
+    )
+    repository.album_media = [
+        Media(
+            id="media-1",
+            album_id="album-1",
+            user_id=None,
+            filename_orig="sample.png",
+            media_type="image",
+            format="png",
+            mime_type="image/png",
+            storage_key="originals/anon/media-1.png",
+            thumb_key="thumbnails/media-1.jpg",
+            thumb_is_orig=False,
+            thumb_status="done",
+            file_size=100,
+            thumb_size=20,
+            width=1,
+            height=1,
+            duration_secs=None,
+            is_animated=False,
+            codec_hint=None,
+            position=1000,
+            created_at=now,
+        )
+    ]
+
+    deleted_album, deleted_media = asyncio.run(service.delete_album("album-1", "token", "delete-album-success"))
+
+    assert deleted_album.id == "album-1"
+    assert [item.id for item in deleted_media] == ["media-1"]
+    assert storage.delete_calls == ["originals/anon/media-1.png", "thumbnails/media-1.jpg"]
+
+
+def test_delete_media_does_not_remove_storage_when_repository_delete_fails() -> None:
+    now = utcnow()
+    storage = DummyStorage(
+        {
+            "originals/anon/media-1.png": b"orig",
+            "thumbnails/media-1.jpg": b"thumb",
+        }
+    )
+    service, repository, _, _ = make_service(storage=storage)
+    repository.album = Album(
+        id="album-1",
+        title="Album",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=now,
+        updated_at=now,
+        expires_at=None,
+    )
+    repository.media = Media(
+        id="media-1",
+        album_id="album-1",
+        user_id=None,
+        filename_orig="sample.png",
+        media_type="image",
+        format="png",
+        mime_type="image/png",
+        storage_key="originals/anon/media-1.png",
+        thumb_key="thumbnails/media-1.jpg",
+        thumb_is_orig=False,
+        thumb_status="done",
+        file_size=100,
+        thumb_size=20,
+        width=1,
+        height=1,
+        duration_secs=None,
+        is_animated=False,
+        codec_hint=None,
+        position=1000,
+        created_at=now,
+    )
+    repository.album_media = [repository.media]
+    repository.fail_delete_media = True
+
+    with pytest.raises(HTTPException) as rejected:
+        asyncio.run(service.delete_media("media-1", "token", "delete-media-fail"))
+
+    assert rejected.value.status_code == 404
+    assert storage.delete_calls == []
+    assert set(storage.payloads) == {"originals/anon/media-1.png", "thumbnails/media-1.jpg"}
+
+
+def test_delete_media_best_effort_storage_cleanup_keeps_success_response() -> None:
+    now = utcnow()
+    storage = DummyStorage(
+        {
+            "originals/anon/media-1.png": b"orig",
+            "thumbnails/media-1.jpg": b"thumb",
+        }
+    )
+    storage.fail_delete = True
+    service, repository, _, _ = make_service(storage=storage)
+    repository.album = Album(
+        id="album-1",
+        title="Album",
+        user_id=None,
+        cover_media_id=None,
+        delete_token="token",
+        created_at=now,
+        updated_at=now,
+        expires_at=None,
+    )
+    repository.media = Media(
+        id="media-1",
+        album_id="album-1",
+        user_id=None,
+        filename_orig="sample.png",
+        media_type="image",
+        format="png",
+        mime_type="image/png",
+        storage_key="originals/anon/media-1.png",
+        thumb_key="thumbnails/media-1.jpg",
+        thumb_is_orig=False,
+        thumb_status="done",
+        file_size=100,
+        thumb_size=20,
+        width=1,
+        height=1,
+        duration_secs=None,
+        is_animated=False,
+        codec_hint=None,
+        position=1000,
+        created_at=now,
+    )
+    repository.album_media = [repository.media]
+
+    result = asyncio.run(service.delete_media("media-1", "token", "delete-media-success"))
+
+    assert result.deleted_media.id == "media-1"
+    assert result.album_deleted is True
+    assert storage.delete_calls == ["originals/anon/media-1.png", "thumbnails/media-1.jpg"]
 
 
 def test_generate_thumbnail_records_processor_missing_failure(caplog) -> None:
