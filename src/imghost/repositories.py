@@ -160,6 +160,9 @@ class PostgresRepository:
     async def create_media(self, media: Media) -> Media:
         return await self.albums.create_media(media)
 
+    async def create_media_with_next_position(self, media: Media) -> Media:
+        return await self.albums.create_media_with_next_position(media)
+
     async def get_media(self, media_id: str) -> Media | None:
         return await self.albums.get_media(media_id)
 

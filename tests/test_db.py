@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import asyncpg
 from imghost.db import Database
-from imghost.models import Album, User
+from imghost.models import Album, Media, User, utcnow
 from imghost.repositories import PostgresRepository
 
 
@@ -214,6 +214,63 @@ def test_config_updated_at_trigger_overrides_manual_timestamp() -> None:
             await conn.close()
 
     assert asyncio.run(run()) > stale
+
+
+def test_concurrent_media_inserts_assign_distinct_positions_per_album() -> None:
+    async def run() -> list[int]:
+        database = Database(os.environ["DATABASE_URL"])
+        await database.connect()
+        try:
+            repository = PostgresRepository(database)
+            now = utcnow()
+            album = await repository.create_album(
+                Album(
+                    id="album-concurrent-positions",
+                    title="Concurrent",
+                    user_id=None,
+                    cover_media_id=None,
+                    delete_token="token",
+                    created_at=now,
+                    updated_at=now,
+                    expires_at=None,
+                )
+            )
+
+            async def insert_media(media_id: str) -> Media:
+                return await repository.create_media_with_next_position(
+                    Media(
+                        id=media_id,
+                        album_id=album.id,
+                        user_id=None,
+                        filename_orig=f"{media_id}.png",
+                        media_type="image",
+                        format="png",
+                        mime_type="image/png",
+                        storage_key=f"originals/anon/{media_id}.png",
+                        thumb_key=None,
+                        thumb_is_orig=False,
+                        thumb_status="pending",
+                        file_size=1,
+                        thumb_size=None,
+                        width=1,
+                        height=1,
+                        duration_secs=None,
+                        is_animated=False,
+                        codec_hint=None,
+                        position=0,
+                        created_at=utcnow(),
+                    )
+                )
+
+            first, second = await asyncio.gather(
+                insert_media("media-concurrent-1"),
+                insert_media("media-concurrent-2"),
+            )
+            return sorted([first.position, second.position])
+        finally:
+            await database.close()
+
+    assert asyncio.run(run()) == [1000, 2000]
 
 
 def test_users_updated_at_trigger_applies_to_bulk_updates() -> None:

@@ -315,7 +315,6 @@ class UploadService:
         owner_segment = actor.user.id if actor.user else "anon"
         storage_key = f"originals/{owner_segment}/{media_id}{suffix}"
         await self.storage.put(storage_key, payload)
-        position = await self.repository.next_position(album_id)
 
         media = Media(
             id=media_id,
@@ -336,10 +335,10 @@ class UploadService:
             duration_secs=metadata.duration_secs if metadata else None,
             is_animated=metadata.is_animated if metadata else False,
             codec_hint=metadata.codec_hint if metadata else None,
-            position=position,
+            position=0,
             created_at=utcnow(),
         )
-        await self.repository.create_media(media)
+        media = await self.repository.create_media_with_next_position(media)
         await self.event_bus.emit(
             MediaUploaded(
                 media_id=media.id,

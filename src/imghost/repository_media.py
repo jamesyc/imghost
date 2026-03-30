@@ -301,6 +301,50 @@ class AlbumMediaRepository:
             )
         return row_to_media(row)
 
+    async def create_media_with_next_position(self, media: Media) -> Media:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.fetchrow("SELECT id FROM albums WHERE id = $1 FOR UPDATE", media.album_id)
+            position = await conn.fetchval(
+                "SELECT COALESCE(MAX(position) + 1000, 1000) FROM media WHERE album_id = $1",
+                media.album_id,
+            )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO media (
+                  id, album_id, user_id, filename_orig, media_type, format, mime_type, storage_key,
+                  thumb_key, thumb_is_orig, thumb_status, file_size, thumb_size, width, height,
+                  duration_secs, is_animated, codec_hint, position, created_at
+                ) VALUES (
+                  $1, $2, $3::uuid, $4, $5, $6, $7, $8,
+                  $9, $10, $11, $12, $13, $14, $15,
+                  $16, $17, $18, $19, $20
+                )
+                RETURNING *
+                """,
+                media.id,
+                media.album_id,
+                media.user_id,
+                media.filename_orig,
+                media.media_type,
+                media.format,
+                media.mime_type,
+                media.storage_key,
+                media.thumb_key,
+                media.thumb_is_orig,
+                media.thumb_status,
+                media.file_size,
+                media.thumb_size,
+                media.width,
+                media.height,
+                media.duration_secs,
+                media.is_animated,
+                media.codec_hint,
+                int(position),
+                media.created_at,
+            )
+        return row_to_media(row)
+
     async def get_media(self, media_id: str) -> Media | None:
         pool = self.database.require_pool()
         async with pool.acquire() as conn:
