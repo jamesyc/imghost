@@ -260,6 +260,8 @@ class AlbumMediaRepository:
                 album.delete_token,
                 album.expires_at,
             )
+        if row is None:
+            raise LookupError("album_not_found")
         return row_to_album(row)
 
     async def create_media(self, media: Media) -> Media:
@@ -400,6 +402,8 @@ class AlbumMediaRepository:
                 media.position,
                 media.created_at,
             )
+        if row is None:
+            raise LookupError("media_not_found")
         return row_to_media(row)
 
     async def list_media_by_thumb_status(self, *statuses: str) -> list[Media]:
