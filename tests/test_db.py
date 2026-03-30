@@ -1,11 +1,12 @@
 import asyncio
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import asyncpg
 from imghost.db import Database
-from imghost.models import Album, Media, User, utcnow
+from imghost.models import Album, Media, ShareXDeleteCapability, User, utcnow
 from imghost.repositories import PostgresRepository
 
 
@@ -35,6 +36,7 @@ def test_database_connect_uses_default_asyncpg_settings_when_pgbouncer_disabled(
         return DummyPool()
 
     monkeypatch.setattr("imghost.db.asyncpg.create_pool", fake_create_pool)
+    monkeypatch.setattr("imghost.db._startup_sql_paths", lambda: ())
 
     async def run() -> None:
         database = Database("postgresql://example/db")
@@ -66,6 +68,7 @@ def test_database_connect_disables_statement_cache_when_pgbouncer_enabled(monkey
         return DummyPool()
 
     monkeypatch.setattr("imghost.db.asyncpg.create_pool", fake_create_pool)
+    monkeypatch.setattr("imghost.db._startup_sql_paths", lambda: ())
 
     async def run() -> None:
         database = Database("postgresql://example/db", use_pgbouncer=True)
@@ -74,6 +77,59 @@ def test_database_connect_disables_statement_cache_when_pgbouncer_enabled(monkey
     asyncio.run(run())
 
     assert recorded["statement_cache_size"] == 0
+
+
+def test_database_connect_applies_startup_sql_when_present(monkeypatch, tmp_path: Path) -> None:
+    applied: list[str] = []
+    sql_path = tmp_path / "startup.sql"
+    sql_path.write_text("SELECT 1;", encoding="utf-8")
+
+    class DummyConnection:
+        async def set_type_codec(self, name, encoder, decoder, schema, format="text"):
+            return None
+
+        async def execute(self, sql: str, *args) -> None:
+            applied.append(sql)
+
+    class DummyAcquire:
+        def __init__(self, conn: DummyConnection) -> None:
+            self.conn = conn
+
+        async def __aenter__(self) -> DummyConnection:
+            return self.conn
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    class DummyPool:
+        def __init__(self, conn: DummyConnection) -> None:
+            self.conn = conn
+
+        def acquire(self) -> DummyAcquire:
+            return DummyAcquire(self.conn)
+
+        async def close(self) -> None:
+            return None
+
+    async def fake_create_pool(*, dsn, min_size, max_size, init, **kwargs):
+        conn = DummyConnection()
+        await init(conn)
+        return DummyPool(conn)
+
+    monkeypatch.setattr("imghost.db.asyncpg.create_pool", fake_create_pool)
+    monkeypatch.setattr("imghost.db._startup_sql_paths", lambda: (sql_path,))
+
+    async def run() -> None:
+        database = Database("postgresql://example/db")
+        await database.connect()
+
+    asyncio.run(run())
+
+    assert applied == [
+        "SELECT pg_advisory_lock($1)",
+        "SELECT 1;",
+        "SELECT pg_advisory_unlock($1)",
+    ]
 
 
 def test_init_sql_registers_updated_at_triggers_for_mutable_tables() -> None:
@@ -271,6 +327,136 @@ def test_concurrent_media_inserts_assign_distinct_positions_per_album() -> None:
             await database.close()
 
     assert asyncio.run(run()) == [1000, 2000]
+
+
+def test_repository_update_album_missing_row_raises_lookup_error() -> None:
+    async def run() -> None:
+        database = Database(os.environ["DATABASE_URL"])
+        await database.connect()
+        try:
+            repository = PostgresRepository(database)
+            now = utcnow()
+            missing = Album(
+                id="missing-album",
+                title="Missing",
+                user_id=None,
+                cover_media_id=None,
+                delete_token="token",
+                created_at=now,
+                updated_at=now,
+                expires_at=None,
+            )
+            try:
+                await repository.update_album(missing)
+            except LookupError as exc:
+                assert str(exc) == "album_not_found"
+            else:
+                raise AssertionError("expected LookupError")
+        finally:
+            await database.close()
+
+    asyncio.run(run())
+
+
+def test_repository_update_media_missing_row_raises_lookup_error() -> None:
+    async def run() -> None:
+        database = Database(os.environ["DATABASE_URL"])
+        await database.connect()
+        try:
+            repository = PostgresRepository(database)
+            now = utcnow()
+            missing = Media(
+                id="missing-media",
+                album_id="missing-album",
+                user_id=None,
+                filename_orig="missing.png",
+                media_type="image",
+                format="png",
+                mime_type="image/png",
+                storage_key="originals/anon/missing.png",
+                thumb_key=None,
+                thumb_is_orig=False,
+                thumb_status="pending",
+                file_size=1,
+                thumb_size=None,
+                width=1,
+                height=1,
+                duration_secs=None,
+                is_animated=False,
+                codec_hint=None,
+                position=1000,
+                created_at=now,
+            )
+            try:
+                await repository.update_media(missing)
+            except LookupError as exc:
+                assert str(exc) == "media_not_found"
+            else:
+                raise AssertionError("expected LookupError")
+        finally:
+            await database.close()
+
+    asyncio.run(run())
+
+
+def test_concurrent_sharex_capability_consumption_is_single_use() -> None:
+    async def run() -> list[bool]:
+        database = Database(os.environ["DATABASE_URL"])
+        await database.connect()
+        try:
+            repository = PostgresRepository(database)
+            now = utcnow()
+            await repository.create_user(
+                User(
+                    id="11111111-1111-1111-1111-111111111111",
+                    username="sharexrace",
+                    email="sharexrace@example.com",
+                    password_hash=None,
+                    is_admin=False,
+                    suspended=False,
+                    quota_bytes=None,
+                    rate_limit_rpm=None,
+                    rate_limit_bph=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await repository.create_album(
+                Album(
+                    id="album-sharex-race",
+                    title="ShareX Race",
+                    user_id="11111111-1111-1111-1111-111111111111",
+                    cover_media_id=None,
+                    delete_token=None,
+                    created_at=now,
+                    updated_at=now,
+                    expires_at=None,
+                )
+            )
+            await repository.create_sharex_delete_capability(
+                ShareXDeleteCapability(
+                    selector="selector-race",
+                    purpose="sharex_delete_album",
+                    album_id="album-sharex-race",
+                    user_id="11111111-1111-1111-1111-111111111111",
+                    secret_hash="hash",
+                    created_at=now,
+                    expires_at=now + timedelta(days=1),
+                    consumed_at=None,
+                    revoked_at=None,
+                    last_seen_at=None,
+                )
+            )
+
+            first, second = await asyncio.gather(
+                repository.consume_sharex_delete_capability("selector-race", "album-sharex-race"),
+                repository.consume_sharex_delete_capability("selector-race", "album-sharex-race"),
+            )
+            return [first is not None, second is not None]
+        finally:
+            await database.close()
+
+    assert sorted(asyncio.run(run())) == [False, True]
 
 
 def test_users_updated_at_trigger_applies_to_bulk_updates() -> None:
