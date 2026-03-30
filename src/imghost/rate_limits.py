@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from hashlib import sha256
 import logging
 from time import monotonic, time
 
@@ -222,7 +221,3 @@ def build_rate_limiter(
     if redis.enabled:
         return RedisRateLimiter(runtime_config, redis, fallback, telemetry)
     return fallback
-
-
-def hash_anon_identity(ip: str, user_agent: str) -> str:
-    return sha256(f"{ip}|{user_agent}".encode("utf-8")).hexdigest()

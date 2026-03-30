@@ -89,6 +89,50 @@ def test_anon_rate_limit_blocks_after_runtime_threshold(tmp_path, monkeypatch) -
         assert second.json()["detail"] == "Upload rate limit exceeded."
 
 
+def test_anon_rate_limit_uses_ip_even_when_user_agent_changes(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        state = client.app.state.imghost
+        admin = client.portal.call(
+            lambda: state.uploads.create_user(
+                UserCreateInput(
+                    username="anon-ip-only-admin",
+                    email="anon-ip-only-admin@example.com",
+                    password="secret-pass",
+                    is_admin=True,
+                    quota_bytes=None,
+                ),
+                method="admin",
+                correlation_id="anon-ip-only-admin",
+                source="api",
+            )
+        )
+        issued = client.portal.call(state.uploads.issue_api_key, admin)
+        configured = client.patch(
+            "/api/v1/admin/config",
+            headers={"Authorization": f"Bearer {issued.raw_key}"},
+            json={"rate_limit_anon_rpm": 1, "rate_limit_anon_bph": 1000000, "rate_limit_global_anon_rpm": 10},
+        )
+        assert configured.status_code == 200
+
+        first = client.post(
+            "/api/v1/upload",
+            files=[("file", ("one.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent-A", "CF-Connecting-IP": "198.51.100.10"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/api/v1/upload",
+            files=[("file", ("two.png", BytesIO(PNG_1X1), "image/png"))],
+            headers={"User-Agent": "Anon-Agent-B", "CF-Connecting-IP": "198.51.100.10"},
+        )
+        assert second.status_code == 429
+        assert second.json()["detail"] == "Upload rate limit exceeded."
+
+
 def test_anon_rate_limit_ignores_spoofed_forwarding_headers_from_untrusted_clients(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

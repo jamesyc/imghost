@@ -4,7 +4,6 @@ from fastapi import Request
 
 from ..models import User
 from ..public_origin import trusted_forwarded_client_ip
-from ..rate_limits import hash_anon_identity
 from .request_context import get_state
 
 
@@ -24,4 +23,4 @@ def auth_rate_limit_ip_key(request: Request) -> str:
 def upload_rate_limit_key(request: Request, user: User | None) -> str:
     if user is not None:
         return user.id
-    return hash_anon_identity(client_ip(request), request.headers.get("User-Agent", ""))
+    return client_ip(request)
