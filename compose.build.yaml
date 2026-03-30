@@ -2,7 +2,7 @@ name: imghost
 
 services:
   app:
-    image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    image: ${APP_BUILD_IMAGE:-imghost-build}:${APP_BUILD_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -34,7 +34,7 @@ services:
       - "${PORT:-8000}:8000"
 
   worker-thumbnails:
-    image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    image: ${APP_BUILD_IMAGE:-imghost-build}:${APP_BUILD_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -64,7 +64,7 @@ services:
         condition: service_completed_successfully
 
   worker-cleanup:
-    image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    image: ${APP_BUILD_IMAGE:-imghost-build}:${APP_BUILD_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -94,7 +94,7 @@ services:
         condition: service_completed_successfully
 
   worker-default:
-    image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    image: ${APP_BUILD_IMAGE:-imghost-build}:${APP_BUILD_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -124,7 +124,7 @@ services:
         condition: service_completed_successfully
 
   scheduler:
-    image: ${APP_IMAGE:-ghcr.io/jamesyc/imghost}:${APP_IMAGE_TAG:-latest}
+    image: ${APP_BUILD_IMAGE:-imghost-build}:${APP_BUILD_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
