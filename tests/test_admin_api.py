@@ -74,6 +74,60 @@ def test_admin_runtime_status_reports_observability_snapshot(tmp_path, monkeypat
         }
 
 
+def test_admin_runtime_status_read_is_audited(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="runtimeauditadmin", email="runtimeauditadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/v1/admin/runtime-status",
+            headers={"Authorization": f"Bearer {admin_key}", "X-Correlation-ID": "admin-runtime-status-read"},
+        )
+        assert response.status_code == 200
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={
+                "event_type": "admin_api_read",
+                "correlation_id": "admin-runtime-status-read",
+            },
+        )
+        assert audit.status_code == 200
+        payload = audit.json()
+        assert len(payload) == 1
+        assert payload[0]["metadata"]["resource"] == "admin.runtime_status"
+
+
+def test_admin_stats_read_is_audited(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="statsauditadmin", email="statsauditadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        response = client.get(
+            "/api/v1/admin/stats",
+            headers={"Authorization": f"Bearer {admin_key}", "X-Correlation-ID": "admin-stats-read"},
+        )
+        assert response.status_code == 200
+
+        audit = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={
+                "event_type": "admin_api_read",
+                "correlation_id": "admin-stats-read",
+            },
+        )
+        assert audit.status_code == 200
+        payload = audit.json()
+        assert len(payload) == 1
+        assert payload[0]["metadata"]["resource"] == "admin.stats"
+
+
 def test_admin_runtime_status_reports_worker_service_view_for_worker_role(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "https://testserver")

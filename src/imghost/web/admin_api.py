@@ -437,14 +437,16 @@ async def admin_delete_album(request: Request, album_id: str) -> JSONResponse:
 @router.get("/api/v1/admin/stats")
 async def admin_stats(request: Request) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     payload = await state.uploads.global_storage_stats()
+    await _audit_admin_read(request, admin=admin, resource="admin.stats")
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
 
 
 @router.get("/api/v1/admin/runtime-status")
 async def admin_runtime_status(request: Request) -> JSONResponse:
     state = get_state(request)
-    await require_admin_user(request)
+    admin = await require_admin_user(request)
     payload = await state.runtime_status()
+    await _audit_admin_read(request, admin=admin, resource="admin.runtime_status")
     return JSONResponse(payload, headers={"X-Correlation-ID": correlation_id(request)})
