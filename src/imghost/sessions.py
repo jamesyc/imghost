@@ -128,7 +128,7 @@ class RedisBackedSessionBackend(SessionBackend):
             )
             if self.settings.session_redis_fail_closed:
                 logger.warning("session_backend_unavailable", extra={"reason": "redis_unavailable", "action": "resolve"})
-                return None
+                raise SessionBackendUnavailable("Redis-backed sessions are currently unavailable.")
             logger.warning("session_backend_fallback", extra={"reason": "redis_unavailable", "action": "resolve"})
             return payload.user_id
         self.telemetry.mark_subsystem_recovered("sessions", operation="resolve session")

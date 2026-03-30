@@ -632,6 +632,8 @@ class UploadService:
             media = media_by_id.get(media_id)
             if media is None:
                 raise HTTPException(status_code=404, detail=f"Media {media_id} not found in album.")
+            if media_id in positions:
+                raise HTTPException(status_code=400, detail=f"Duplicate media {media_id} in order payload.")
             positions[media_id] = position
 
         reordered = await self.repository.update_media_positions(album_id, positions)

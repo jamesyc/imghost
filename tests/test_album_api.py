@@ -374,6 +374,38 @@ def test_anonymous_delete_token_is_scoped_to_single_album(tmp_path, monkeypatch)
         assert delete_album_other.status_code == 403
 
 
+def test_anonymous_reorder_rejects_duplicate_media_ids(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
+            ],
+            data={"title": "Batch"},
+        )
+
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+        delete_token = payload["manage_url"].split("token=")[1]
+        media_id = payload["items"][0]["media_id"]
+
+        reordered = client.patch(
+            f"/api/v1/album/{album_id}/order",
+            params={"delete_token": delete_token},
+            json=[
+                {"media_id": media_id, "position": 10},
+                {"media_id": media_id, "position": 20},
+            ],
+        )
+        assert reordered.status_code == 400
+        assert reordered.json()["detail"] == f"Duplicate media {media_id} in order payload."
+
+
 def test_anonymous_delete_token_cannot_manage_owned_album(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse, Response
 
 from ..config import Settings
 from ..models import User, utcnow
+from ..sessions import SessionBackendUnavailable
 from .page_context import login_redirect
 from .request_context import get_state
 from .request_helpers import auth_rate_limit_ip_key
@@ -94,7 +95,12 @@ async def authenticated_principal(request: Request, *, required: bool = False) -
     session_token = request.cookies.get(state.settings.session_cookie_name)
     if session_token:
         request.state.telemetry_auth_method = "session"
-        user_id = await state.session_backend.resolve_user(session_token)
+        try:
+            user_id = await state.session_backend.resolve_user(session_token)
+        except SessionBackendUnavailable:
+            if required:
+                raise HTTPException(status_code=401, detail="Invalid session.") from None
+            return None
         if not user_id:
             request.state.clear_session_cookie = True
         else:

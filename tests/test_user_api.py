@@ -304,6 +304,39 @@ def test_current_user_albums_endpoint_preserves_item_order_after_reorder(tmp_pat
         assert album_payload["cover_url"].endswith(f"/i/{media_ids[2]}.png")
 
 
+def test_authenticated_reorder_rejects_duplicate_media_ids(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+
+    _, api_key = create_user_and_api_key(capsys, username="albumsduplicate", email="albumsduplicate@example.com")
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/upload",
+            files=[
+                ("file", ("one.png", BytesIO(PNG_1X1), "image/png")),
+                ("file", ("two.png", BytesIO(PNG_1X1), "image/png")),
+            ],
+            data={"title": "Ordered Album"},
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        assert created.status_code == 200
+        payload = created.json()
+        album_id = payload["album_id"]
+        media_id = payload["items"][0]["media_id"]
+
+        reordered = client.patch(
+            f"/api/v1/album/{album_id}/order",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=[
+                {"media_id": media_id, "position": 100},
+                {"media_id": media_id, "position": 200},
+            ],
+        )
+        assert reordered.status_code == 400
+        assert reordered.json()["detail"] == f"Duplicate media {media_id} in order payload."
+
+
 def test_current_user_albums_endpoint_rejects_invalid_pagination_values(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("BASE_URL", "http://testserver")

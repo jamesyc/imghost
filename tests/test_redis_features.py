@@ -355,7 +355,8 @@ def test_redis_session_backend_strict_mode_fails_closed_when_redis_goes_down_aft
     token, _ = asyncio.run(backend.create_session(make_user(), remember_me=True))
     fake.fail = True
 
-    assert asyncio.run(backend.resolve_user(token)) is None
+    with pytest.raises(SessionBackendUnavailable, match="Redis-backed sessions"):
+        asyncio.run(backend.resolve_user(token))
 
 
 def test_redis_rate_limiter_enforces_limits_when_available() -> None:
@@ -864,6 +865,44 @@ def test_app_existing_browser_session_fails_closed_when_redis_sessions_are_stric
         fake.fail = True
         me = client.get("/api/v1/user/me")
         assert me.status_code == 401
+
+
+def test_app_existing_browser_session_preserves_cookie_during_strict_redis_outage_and_recovers_afterward(
+    tmp_path, monkeypatch
+) -> None:
+    fake = FakeRedis()
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+    monkeypatch.setenv("REDIS_URL", "redis://fake")
+    monkeypatch.setenv("REDIS_MODE", "auto")
+    monkeypatch.setenv("SESSION_REDIS_FAIL_CLOSED", "true")
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setattr("imghost.redis_support.redis_async", SimpleNamespace(from_url=lambda *args, **kwargs: fake))
+
+    with TestClient(app, base_url="https://testserver") as client:
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "strictrecover",
+                "email": "strictrecover@example.com",
+                "password": "secret-pass",
+            },
+        )
+        assert registered.status_code == 200
+        original_cookie = client.cookies.get("imghost_session")
+        assert original_cookie is not None
+
+        fake.fail = True
+        denied = client.get("/api/v1/user/me")
+        assert denied.status_code == 401
+        assert denied.headers.get("set-cookie") is None
+        assert client.cookies.get("imghost_session") == original_cookie
+
+        fake.fail = False
+        client.app.state.imghost.redis._blocked_until = 0
+        recovered = client.get("/api/v1/user/me")
+        assert recovered.status_code == 200
+        assert recovered.json()["username"] == "strictrecover"
 
 
 def test_app_existing_browser_session_still_works_when_redis_sessions_fail_open_and_redis_goes_down(tmp_path, monkeypatch) -> None:
