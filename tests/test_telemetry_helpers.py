@@ -10,7 +10,7 @@ from starlette.requests import Request
 
 from imghost.config import Settings
 from imghost.models import Media, utcnow
-from imghost.telemetry.context import anonymous_actor
+from imghost.telemetry.context import anonymous_actor, build_cli_process_context
 from imghost.telemetry.helpers import (
     emit_request_action,
     record_api_key_auth_failed,
@@ -291,6 +291,18 @@ async def test_record_cli_command_executed_uses_cli_actor() -> None:
     assert call["actor"].type == "cli"
     assert call["metadata"]["source"] == "cli"
     assert call["metadata"]["command"] == "init-storage"
+
+
+def test_build_cli_process_context_redacts_password_flag_values() -> None:
+    process = build_cli_process_context(["create-user", "--username", "demo", "--password", "hunter2"])
+
+    assert process.command == "create-user --username demo --password [REDACTED]"
+
+
+def test_build_cli_process_context_redacts_inline_password_flag_values() -> None:
+    process = build_cli_process_context(["create-user", "--password=hunter2", "--email", "demo@example.com"])
+
+    assert process.command == "create-user --password=[REDACTED] --email demo@example.com"
 
 
 @pytest.mark.anyio

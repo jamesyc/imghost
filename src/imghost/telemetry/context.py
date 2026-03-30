@@ -65,7 +65,7 @@ def build_runtime_process_context(source: str, *, command: str | None = None) ->
 
 
 def build_cli_process_context(argv: Sequence[str]) -> TelemetryProcessContext:
-    return build_runtime_process_context("cli", command=" ".join(argv))
+    return build_runtime_process_context("cli", command=" ".join(_redact_cli_argv(argv)))
 
 
 def hash_client_ip(client_ip: str | None) -> str | None:
@@ -79,3 +79,24 @@ def _safe_username() -> str | None:
         return getpass.getuser()
     except Exception:
         return None
+
+
+def _redact_cli_argv(argv: Sequence[str]) -> list[str]:
+    sensitive_flags = {"--password"}
+    redacted: list[str] = []
+    hide_next = False
+    for arg in argv:
+        if hide_next:
+            redacted.append("[REDACTED]")
+            hide_next = False
+            continue
+        if arg in sensitive_flags:
+            redacted.append(arg)
+            hide_next = True
+            continue
+        if any(arg.startswith(f"{flag}=") for flag in sensitive_flags):
+            flag, _, _ = arg.partition("=")
+            redacted.append(f"{flag}=[REDACTED]")
+            continue
+        redacted.append(arg)
+    return redacted

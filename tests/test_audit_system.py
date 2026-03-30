@@ -17,7 +17,13 @@ from imghost.telemetry.sinks.postgres import PostgresTelemetrySink
 from imghost.config import load_settings
 from imghost.main import app
 
-from .helpers import browser_session_headers, create_admin_and_api_key, create_user_and_api_key, set_user_password
+from .helpers import (
+    TEST_CLI_PASSWORD,
+    browser_session_headers,
+    create_admin_and_api_key,
+    create_user_and_api_key,
+    set_user_password,
+)
 
 
 class _RecordingSink:
@@ -143,6 +149,9 @@ def test_cli_create_user_and_issue_api_key_are_audited(tmp_path, monkeypatch, ca
         issue_key_event = next(item for item in payload if item["metadata"]["command"] == "issue-api-key")
         assert create_user_event["metadata"]["process"]["source"] == "cli"
         assert create_user_event["target_id"] == user_id
+        assert create_user_event["metadata"]["process"]["command"] is not None
+        assert TEST_CLI_PASSWORD not in create_user_event["metadata"]["process"]["command"]
+        assert "[REDACTED]" in create_user_event["metadata"]["process"]["command"]
         assert issue_key_event["target_id"] == user_id
         assert "api_key" not in issue_key_event["metadata"]
 
