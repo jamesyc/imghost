@@ -104,6 +104,8 @@ def _resolve_redis_url(raw_url: str | None, raw_password: str | None) -> str | N
 def load_settings() -> Settings:
     data_dir = Path(os.getenv("IMGHOST_DATA_DIR", "data")).resolve()
     base_url = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
+    secret_key = (os.getenv("SECRET_KEY") or "").strip()
+    database_url = (os.getenv("DATABASE_URL") or "").strip()
     session_cookie_secure = _env_bool("SESSION_COOKIE_SECURE")
     public_origin_enabled = _env_bool("PUBLIC_ORIGIN_ENABLED")
     trusted_proxy_cidrs_enabled = _env_bool("TRUSTED_PROXY_CIDRS_ENABLED")
@@ -118,6 +120,10 @@ def load_settings() -> Settings:
         trusted_proxy_cidrs_enabled = False
     if session_redis_fail_closed is None:
         session_redis_fail_closed = False
+    if not secret_key:
+        raise ValueError("SECRET_KEY must be set.")
+    if not database_url:
+        raise ValueError("DATABASE_URL must be set.")
     if trusted_proxy_cidrs_enabled and not trusted_proxy_cidrs:
         raise ValueError("TRUSTED_PROXY_CIDRS_ENABLED=true requires TRUSTED_PROXY_CIDRS to be set.")
     for cidr in trusted_proxy_cidrs:
@@ -133,7 +139,7 @@ def load_settings() -> Settings:
         trusted_public_origins=_env_csv("TRUSTED_PUBLIC_ORIGINS"),
         trusted_proxy_cidrs_enabled=trusted_proxy_cidrs_enabled,
         trusted_proxy_cidrs=trusted_proxy_cidrs,
-        database_url=os.getenv("DATABASE_URL", "postgresql://imghost:imghost@localhost:5432/imghost"),
+        database_url=database_url,
         data_dir=data_dir,
         redis_url=_resolve_redis_url(os.getenv("REDIS_URL"), redis_password),
         redis_password=redis_password,
@@ -145,7 +151,7 @@ def load_settings() -> Settings:
         s3_secret_access_key=(os.getenv("S3_SECRET_ACCESS_KEY") or "").strip() or None,
         s3_bucket=(os.getenv("S3_BUCKET") or "").strip() or None,
         s3_region=os.getenv("S3_REGION", "garage").strip() or "garage",
-        secret_key=os.getenv("SECRET_KEY", "dev-secret-key"),
+        secret_key=secret_key,
         promote_username_to_admin=(os.getenv("PROMOTE_USERNAME_TO_ADMIN") or "").strip() or None,
         session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "imghost_session"),
         session_cookie_secure=session_cookie_secure,

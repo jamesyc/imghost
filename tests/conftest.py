@@ -84,4 +84,5 @@ async def _truncate_database() -> None:
 @pytest.fixture(autouse=True)
 def clean_database() -> None:
     os.environ["DATABASE_URL"] = _database_url()
+    os.environ.setdefault("SECRET_KEY", "test-secret")
     asyncio.run(_truncate_database())
