@@ -10,7 +10,7 @@ import pytest
 
 from imghost.app_state import AppState
 from imghost.telemetry.context import anonymous_actor
-from imghost.telemetry.models import TelemetryObject
+from imghost.telemetry.models import TelemetryObject, TelemetryRequestContext
 from imghost.telemetry.service import TelemetryService
 from imghost.telemetry.sinks.jsonlog import JsonLogTelemetrySink
 from imghost.telemetry.sinks.postgres import PostgresTelemetrySink
@@ -312,6 +312,87 @@ def test_json_log_sink_redacts_secret_fields(caplog) -> None:
     assert "[REDACTED]" in combined
     assert "super-secret" not in combined
     assert "raw-key" not in combined
+
+
+def test_json_log_sink_redacts_token_like_metadata_fields_and_referer_query_params(caplog) -> None:
+    service = TelemetryService([JsonLogTelemetrySink(logging.getLogger("imghost.telemetry.test"))])
+
+    with caplog.at_level(logging.INFO, logger="imghost.telemetry.test"):
+        asyncio.run(
+            service.emit_event(
+                event_type="secret_url_test",
+                action="secret.url.test",
+                result="success",
+                actor=anonymous_actor(),
+                object=TelemetryObject(type="test", id="secret-url"),
+                metadata={
+                    "delete_token": "album-delete-token",
+                    "reauth_token": "oauth-reauth-token",
+                    "delete_url": "https://example.test/sharex/delete/album123?token=raw-sharex-token",
+                    "nested": {
+                        "referer": "https://example.test/settings?delete_reauth_token=raw-reauth-token&ok=1"
+                    },
+                },
+            )
+        )
+
+    combined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "album-delete-token" not in combined
+    assert "oauth-reauth-token" not in combined
+    assert "raw-sharex-token" not in combined
+    assert "raw-reauth-token" not in combined
+    assert "[REDACTED]" in combined
+    assert "delete_reauth_token=%5BREDACTED%5D" in combined
+
+
+def test_postgres_audit_log_redacts_referer_query_tokens_and_token_metadata(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "https://testserver")
+
+    _, admin_key = create_admin_and_api_key(capsys, username="auditredactadmin", email="auditredactadmin@example.com")
+
+    with TestClient(app, base_url="https://testserver") as client:
+        async def _emit() -> None:
+            await client.app.state.imghost.telemetry.emit_event(
+                event_type="secret_audit_test",
+                action="secret.audit.test",
+                result="success",
+                actor=anonymous_actor(),
+                object=TelemetryObject(type="test", id="secret-audit"),
+                metadata={
+                    "delete_token": "album-delete-token",
+                    "manage_url": "https://example.test/manage/album123?token=raw-manage-token",
+                },
+                request=TelemetryRequestContext(
+                    request_id="audit-redact-request",
+                    correlation_id="audit-redact-correlation",
+                    method="GET",
+                    route="/secret-audit",
+                    path="/secret-audit",
+                    host="example.test",
+                    origin="https://example.test",
+                    referer="https://example.test/settings?delete_reauth_token=raw-reauth-token&ok=1",
+                    user_agent="pytest",
+                    client_ip="127.0.0.1",
+                    forwarded_for=None,
+                    auth_method="session",
+                ),
+            )
+
+        client.portal.call(_emit)
+
+        response = client.get(
+            "/api/v1/admin/audit",
+            headers={"Authorization": f"Bearer {admin_key}"},
+            params={"event_type": "secret_audit_test", "correlation_id": "audit-redact-correlation"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert len(payload) == 1
+        metadata = payload[0]["metadata"]
+        assert metadata["delete_token"] == "[REDACTED]"
+        assert metadata["manage_url"] == "[REDACTED]"
+        assert metadata["request"]["referer"] == "https://example.test/settings?delete_reauth_token=%5BREDACTED%5D&ok=1"
 
 
 def test_audit_service_continues_when_one_sink_fails(caplog) -> None:
