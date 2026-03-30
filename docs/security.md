@@ -75,6 +75,7 @@ Anonymous album manage-token flows are separate from browser-session auth, but i
 - exact trusted public-origin allowlist
 - optional trusted proxy CIDR gate for forwarded headers
 - fallback to `BASE_URL` when request-derived origin data is rejected
+- the same forwarded-header trust model also affects client-IP identity for auth throttling and anonymous upload throttling
 
 ## Baseline browser security headers
 

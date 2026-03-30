@@ -36,6 +36,7 @@ Auth throttling:
 - throttled responses stay generic and do not reveal whether an account or API key is valid
 - successful password login clears the account-scoped login-failure lock for that normalized login identifier
 - successful API-key auth clears the current client-IP API-key failure lock
+- the client-IP side of these throttles follows the same trusted-proxy settings used for forwarded headers
 
 ## OAuth flows
 

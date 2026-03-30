@@ -58,7 +58,9 @@ Deployed mode:
 Why this matters:
 
 - forwarded headers tell the app what public host and protocol to reflect into generated links
+- forwarded client-IP headers also influence auth throttling and anonymous upload rate limiting
 - if you trust forwarded headers from arbitrary clients in a real deployment, a direct client can try to influence that public host/protocol view
+- if you trust forwarded client-IP headers from arbitrary clients in a real deployment, a direct client can also spoof the client identity used for auth and anonymous upload throttling
 - the app still falls back safely, but explicit proxy trust is the right long-term deployment posture
 
 ## Recommended nginx headers
