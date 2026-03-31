@@ -22,34 +22,6 @@ body {
   background: transparent;
 }
 
-body::before,
-body::after {
-  content: "";
-  position: fixed;
-  inset: auto;
-  pointer-events: none;
-  z-index: 0;
-  filter: blur(18px);
-}
-
-body::before {
-  top: 5vh;
-  left: -8vw;
-  width: 34vw;
-  height: 34vw;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.16), transparent 66%);
-}
-
-body::after {
-  right: -12vw;
-  bottom: -10vh;
-  width: 42vw;
-  height: 42vw;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.08), transparent 72%);
-}
-
 .page-shell {
   position: relative;
   z-index: 1;
