@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -123,6 +124,26 @@ class DummyRepository:
             raise RuntimeError("repository update failed")
         self.media = media
         return media
+
+    async def update_media_thumbnail_state(
+        self,
+        media_id: str,
+        *,
+        thumb_key: str | None,
+        thumb_is_orig: bool,
+        thumb_status: str,
+        thumb_size: int | None,
+    ) -> Media:
+        self.update_media_calls += 1
+        if self.fail_update_media_on_call == self.update_media_calls:
+            raise RuntimeError("repository update failed")
+        if self.media is None or self.media.id != media_id:
+            raise LookupError("media_not_found")
+        self.media.thumb_key = thumb_key
+        self.media.thumb_is_orig = thumb_is_orig
+        self.media.thumb_status = thumb_status
+        self.media.thumb_size = thumb_size
+        return self.media
 
     async def delete_media(self, media_id: str) -> Media | None:
         if self.fail_delete_media:
@@ -349,13 +370,16 @@ class RecordingTelemetry:
 def make_service(
     user: User | None = None,
     *,
+    repository: DummyRepository | None = None,
+    event_bus: DummyEventBus | None = None,
+    telemetry: RecordingTelemetry | None = None,
     storage=None,
     processors=None,
     runtime_values: dict[str, int | bool] | None = None,
 ) -> tuple[UploadService, DummyRepository, DummyEventBus, RecordingTelemetry]:
-    repository = DummyRepository(user)
-    event_bus = DummyEventBus()
-    telemetry = RecordingTelemetry()
+    repository = repository or DummyRepository(user)
+    event_bus = event_bus or DummyEventBus()
+    telemetry = telemetry or RecordingTelemetry()
     runtime_config = DummyRuntimeConfig(runtime_values)
     settings = Settings(
         base_url="http://testserver",
@@ -1426,6 +1450,44 @@ def test_generate_thumbnail_uses_runtime_configured_video_thumb_frames() -> None
     assert processor.thumb_frames == 17  # type: ignore[attr-defined]
     assert repository.media is not None
     assert repository.media.thumb_status == "done"
+
+
+def test_generate_thumbnail_does_not_revert_reordered_position_with_stale_snapshot() -> None:
+    class CopyingRepository(DummyRepository):
+        async def get_media(self, media_id: str) -> Media | None:
+            media = await super().get_media(media_id)
+            if media is None:
+                return None
+            return dataclasses.replace(media)
+
+    storage = DummyStorage({"originals/u/media.mp4": b"video"})
+    processor = DummyProcessor()
+    repository = CopyingRepository()
+    event_bus = DummyEventBus()
+    telemetry = RecordingTelemetry()
+    service, _, _, _ = make_service(
+        repository=repository,
+        storage=storage,
+        processors=DummyProcessors(processor),
+        event_bus=event_bus,
+        telemetry=telemetry,
+    )
+    repository.media = make_media()
+
+    original_get_bytes = storage.get_bytes
+
+    async def reorder_during_read(key: str) -> bytes:
+        assert repository.media is not None
+        repository.media.position = 200
+        return await original_get_bytes(key)
+
+    storage.get_bytes = reorder_during_read  # type: ignore[method-assign]
+
+    asyncio.run(service.generate_thumbnail("media-1", "thumb-stale-reorder"))
+
+    assert repository.media is not None
+    assert repository.media.thumb_status == "done"
+    assert repository.media.position == 200
 
 
 def test_generate_thumbnail_cleans_up_written_thumbnail_on_repository_update_failure() -> None:

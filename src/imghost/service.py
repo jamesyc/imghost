@@ -379,7 +379,13 @@ class UploadService:
 
         started_at = monotonic()
         media.thumb_status = "processing"
-        await self.repository.update_media(media)
+        await self.repository.update_media_thumbnail_state(
+            media.id,
+            thumb_key=media.thumb_key,
+            thumb_is_orig=media.thumb_is_orig,
+            thumb_status=media.thumb_status,
+            thumb_size=media.thumb_size,
+        )
 
         written_thumb_key: str | None = None
         try:
@@ -404,7 +410,13 @@ class UploadService:
                 media.thumb_key = thumb_key
                 media.thumb_size = thumbnail.size
             media.thumb_status = "done"
-            await self.repository.update_media(media)
+            await self.repository.update_media_thumbnail_state(
+                media.id,
+                thumb_key=media.thumb_key,
+                thumb_is_orig=media.thumb_is_orig,
+                thumb_status=media.thumb_status,
+                thumb_size=media.thumb_size,
+            )
             if self.telemetry is not None:
                 self.telemetry.record_thumbnail_job(
                     result="success",
@@ -428,7 +440,13 @@ class UploadService:
                             "thumbnail_retry_cleanup_failed",
                             extra={"media_id": media.id, "correlation_id": correlation_id, "attempt": attempt},
                         )
-                await self.repository.update_media(media)
+                await self.repository.update_media_thumbnail_state(
+                    media.id,
+                    thumb_key=media.thumb_key,
+                    thumb_is_orig=media.thumb_is_orig,
+                    thumb_status=media.thumb_status,
+                    thumb_size=media.thumb_size,
+                )
                 if self.telemetry is not None:
                     self.telemetry.record_thumbnail_job(
                         result="retry",
@@ -465,7 +483,13 @@ class UploadService:
                         error=cleanup_exc,
                     )
             try:
-                await self.repository.update_media(media)
+                await self.repository.update_media_thumbnail_state(
+                    media.id,
+                    thumb_key=media.thumb_key,
+                    thumb_is_orig=media.thumb_is_orig,
+                    thumb_status=media.thumb_status,
+                    thumb_size=media.thumb_size,
+                )
             except Exception as update_exc:
                 if reason != "repository_update_failed":
                     self._record_thumbnail_failure(

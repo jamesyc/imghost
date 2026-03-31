@@ -169,6 +169,23 @@ class PostgresRepository:
     async def update_media(self, media: Media) -> Media:
         return await self.albums.update_media(media)
 
+    async def update_media_thumbnail_state(
+        self,
+        media_id: str,
+        *,
+        thumb_key: str | None,
+        thumb_is_orig: bool,
+        thumb_status: str,
+        thumb_size: int | None,
+    ) -> Media:
+        return await self.albums.update_media_thumbnail_state(
+            media_id,
+            thumb_key=thumb_key,
+            thumb_is_orig=thumb_is_orig,
+            thumb_status=thumb_status,
+            thumb_size=thumb_size,
+        )
+
     async def list_media_by_thumb_status(self, *statuses: str) -> list[Media]:
         return await self.albums.list_media_by_thumb_status(*statuses)
 

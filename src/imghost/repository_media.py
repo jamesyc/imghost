@@ -406,6 +406,37 @@ class AlbumMediaRepository:
             raise LookupError("media_not_found")
         return row_to_media(row)
 
+    async def update_media_thumbnail_state(
+        self,
+        media_id: str,
+        *,
+        thumb_key: str | None,
+        thumb_is_orig: bool,
+        thumb_status: str,
+        thumb_size: int | None,
+    ) -> Media:
+        pool = self.database.require_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE media
+                SET thumb_key = $2,
+                    thumb_is_orig = $3,
+                    thumb_status = $4,
+                    thumb_size = $5
+                WHERE id = $1
+                RETURNING *
+                """,
+                media_id,
+                thumb_key,
+                thumb_is_orig,
+                thumb_status,
+                thumb_size,
+            )
+        if row is None:
+            raise LookupError("media_not_found")
+        return row_to_media(row)
+
     async def list_media_by_thumb_status(self, *statuses: str) -> list[Media]:
         pool = self.database.require_pool()
         async with pool.acquire() as conn:
