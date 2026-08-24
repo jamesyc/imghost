@@ -6,7 +6,7 @@ It is aimed at local development, debugging, and operators who already have Pyth
 
 ## What this guide assumes
 
-- Python 3.12
+- Python 3.14
 - `uv` installed
 - PostgreSQL available
 - Redis available if you want Redis-backed sessions, rate limits, workers, or scheduler leases
