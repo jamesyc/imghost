@@ -144,17 +144,29 @@ For deployment guidance, see:
 
 ## Development
 
-Run tests with:
+The host development environment uses Python 3.14 and uv from `mise.toml`.
+Docker continues to use its image's Python runtime. Install host dependencies with:
 
 ```bash
-uv run pytest -q
+mise trust
+mise install
+mise exec -- uv sync --locked --extra dev
+```
+
+Run tests against a dedicated PostgreSQL test database (the database name must
+contain `test`). Some legacy tests require `localhost:5432/imghost_test`, so use
+a dedicated test instance there with user `imghost` and password `imghost`.
+Set `TEST_DATABASE_URL` to that test database, then run:
+
+```bash
+mise exec -- uv run --locked --extra dev pytest -q
 ```
 
 Useful commands:
 
 ```bash
-uv run python -m imghost init-storage
-uv run python -m imghost run-worker
+mise exec -- uv run --locked python -m imghost init-storage
+mise exec -- uv run --locked python -m imghost run-worker
 ```
 
 ## License
