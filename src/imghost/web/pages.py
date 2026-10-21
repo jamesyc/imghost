@@ -140,6 +140,7 @@ async def index(request: Request) -> str:
         request,
         "pages/home.html",
         "imghost",
+        public_analytics=True,
         user=user,
         extra_context={
             "open_graph": build_open_graph(
@@ -561,6 +562,7 @@ async def album_page(request: Request, album_id: str) -> HTMLResponse:
         request,
         "pages/public-album.html",
         album.title or "Untitled album",
+        public_analytics=True,
         user=user,
         extra_context=build_public_album_page_context(
             base_url,
@@ -582,6 +584,7 @@ async def user_album_list_page(request: Request, username: str) -> HTMLResponse:
         request,
         "pages/public-user-albums.html",
         f"{user.username} albums",
+        public_analytics=True,
         user=viewer,
         extra_context={
             "public_user": user,

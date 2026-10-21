@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from ipaddress import ip_network
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,9 @@ class Settings:
     google_oauth_enabled: bool = False
     google_client_id: str | None = None
     google_client_secret: str | None = None
+    umami_website_id: str | None = None
+    umami_host_url: str | None = None
+    umami_domains: tuple[str, ...] = ()
 
 
 def _env_bool(name: str) -> bool | None:
@@ -133,6 +138,24 @@ def load_settings() -> Settings:
         google_oauth_enabled = False
     google_client_id = (os.getenv("GOOGLE_CLIENT_ID") or "").strip() or None
     google_client_secret = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip() or None
+    umami_website_id = (os.getenv("UMAMI_WEBSITE_ID") or "").strip() or None
+    umami_host_url = (os.getenv("UMAMI_HOST_URL") or "").strip().rstrip("/") or None
+    umami_domains = _dedupe_strings(_env_csv("UMAMI_DOMAINS"))
+    if umami_website_id or umami_host_url:
+        if not umami_website_id or not umami_host_url:
+            raise ValueError("UMAMI_WEBSITE_ID and UMAMI_HOST_URL must both be set.")
+        try:
+            umami_website_id = str(UUID(umami_website_id))
+        except ValueError as exc:
+            raise ValueError("UMAMI_WEBSITE_ID must be a UUID.") from exc
+        if not re.fullmatch(r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?", umami_host_url):
+            raise ValueError("UMAMI_HOST_URL must be an HTTPS origin without a path or credentials.")
+        # Parse the port too so out-of-range values fail at startup.
+        urlsplit(umami_host_url).port
+        if not umami_domains:
+            umami_domains = (urlsplit(base_url).hostname or "",)
+        if any(not re.fullmatch(r"[A-Za-z0-9.-]+", domain) for domain in umami_domains):
+            raise ValueError("UMAMI_DOMAINS must contain only hostnames.")
     return Settings(
         base_url=base_url,
         public_origin_enabled=public_origin_enabled,
@@ -177,4 +200,7 @@ def load_settings() -> Settings:
         google_oauth_enabled=google_oauth_enabled,
         google_client_id=google_client_id,
         google_client_secret=google_client_secret,
+        umami_website_id=umami_website_id,
+        umami_host_url=umami_host_url,
+        umami_domains=umami_domains,
     )

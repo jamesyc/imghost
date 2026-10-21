@@ -27,6 +27,12 @@ CONTENT_SECURITY_POLICY = "; ".join(
 )
 
 
+def analytics_content_security_policy(origin: str) -> str:
+    return CONTENT_SECURITY_POLICY.replace(
+        "script-src 'self'", f"script-src 'self' {origin}"
+    ).replace("connect-src 'self'", f"connect-src 'self' {origin}")
+
+
 def _request_is_effectively_https(request: Request) -> bool:
     if request.url.scheme.lower() == "https":
         return True
