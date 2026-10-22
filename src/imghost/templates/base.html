@@ -23,6 +23,13 @@
     <meta name="twitter:description" content="{{ open_graph.twitter_description }}">
     {% if open_graph.twitter_image is defined %}<meta name="twitter:image" content="{{ open_graph.twitter_image }}">{% endif %}
     {% endif %}
+    {% if analytics %}
+    <script src="{{ analytics.umami_host_url }}/init.js" async
+      data-website-id="{{ analytics.umami_website_id }}"
+      data-host-url="{{ analytics.umami_host_url }}"
+      data-domains="{{ analytics.umami_domains | join(',') }}"
+      data-before-send="umamiBeforeSend" data-exclude-search="true" data-exclude-hash="true"></script>
+    {% endif %}
     <script src="/static/js/theme-init.js"></script>
     <link rel="stylesheet" href="/static/css/base.css">
   </head>

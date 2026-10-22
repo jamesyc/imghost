@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from ..models import User
 from ..public_origin import public_base_url
 from .request_context import get_state
+from .security_headers import analytics_content_security_policy
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -95,10 +96,17 @@ async def render_template_page(
     user: User | None = None,
     extra_context: dict[str, Any] | None = None,
     script_paths: list[str] | None = None,
+    public_analytics: bool = False,
 ) -> HTMLResponse:
     context = await build_page_context(request, user=user)
     if extra_context:
         context.update(extra_context)
     context["page_title"] = title
     context["script_paths"] = script_paths or []
-    return templates.TemplateResponse(request=request, name=template_name, context=context)
+    settings = get_state(request).settings
+    analytics_enabled = public_analytics and settings.umami_website_id and settings.umami_host_url
+    context["analytics"] = settings if analytics_enabled else None
+    response = templates.TemplateResponse(request=request, name=template_name, context=context)
+    if analytics_enabled:
+        response.headers["Content-Security-Policy"] = analytics_content_security_policy(settings.umami_host_url)
+    return response

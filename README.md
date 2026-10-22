@@ -83,6 +83,26 @@ docker compose -f compose.build.yaml --env-file .env up -d
 
 Use the build stack for local development, debugging, and the test workflow. Unlike `compose.yaml`, it also publishes PostgreSQL, PgBouncer, Redis, and Garage ports on the host for local inspection and test tooling.
 
+## Optional public-page analytics
+
+Set `UMAMI_WEBSITE_ID` to your website UUID and `UMAMI_HOST_URL` to the HTTPS
+collector origin to enable Umami on the home page, public albums and public user
+galleries. Set `UMAMI_DOMAINS` to comma-separated production hostnames (defaults
+to the hostname in `BASE_URL`). Tracking is absent on auth, management, settings
+and admin pages. Signed-in visits to public pages count normally.
+
+The collector must serve `/init.js` defining `window.umamiBeforeSend` before
+loading Umami's `/script.js`, and expose `/api/send`. The initializer must normalize
+public album IDs and usernames, use a fixed site title, strip queries/fragments,
+sanitize referrers and suppress private routes. The tracker is loaded only by the
+initializer so collection fails closed when it cannot load. CSP permits only the
+configured origin, and only on tracked pages. Query strings and fragments are
+excluded in the tracker as well. No user identification or event properties are
+sent by this integration.
+
+Restart/recreate the app after changing these settings. The optional settings are
+already passed through Compose's env file; no Compose edits are required.
+
 ## Docker Compose Files
 
 - [`compose.beginner.yaml`](compose.beginner.yaml): simple single-app stack
