@@ -29,6 +29,7 @@ from .storage import StorageBackend
 
 UNSET = object()
 MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_BYTES = 72
 
 
 @dataclass
@@ -753,11 +754,15 @@ class AccountService:
         raise HTTPException(status_code=409, detail="Unable to generate a unique username for this OAuth account.")
 
     def _hash_password(self, password: str) -> str:
-        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        encoded = password.encode("utf-8")
+        if len(encoded) > MAX_PASSWORD_BYTES:
+            raise HTTPException(status_code=400, detail="Password must be at most 72 UTF-8 bytes.")
+        return bcrypt.hashpw(encoded, bcrypt.gensalt()).decode("utf-8")
 
     def _verify_password(self, password: str, password_hash: str) -> bool:
         try:
-            return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+            # bcrypt < 5 silently truncated existing passwords at this byte boundary.
+            return bcrypt.checkpw(password.encode("utf-8")[:MAX_PASSWORD_BYTES], password_hash.encode("utf-8"))
         except ValueError:
             return False
 

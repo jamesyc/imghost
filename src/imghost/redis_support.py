@@ -11,6 +11,8 @@ T = TypeVar("T")
 try:
     from redis import asyncio as redis_async
     from redis.exceptions import RedisError
+    from redis.backoff import NoBackoff
+    from redis.asyncio.retry import Retry
 except ImportError:  # pragma: no cover - exercised in tests via monkeypatch
     redis_async = None
     RedisError = None
@@ -66,7 +68,14 @@ class RedisHandle:
             if self._client_factory is not None:
                 self._client = self._client_factory(self.url or "")
             elif redis_async is not None:
-                self._client = redis_async.from_url(self.url or "", decode_responses=True)
+                self._client = redis_async.from_url(
+                    self.url or "",
+                    decode_responses=True,
+                    protocol=3,
+                    legacy_responses=True,
+                    # Retrying a write after a lost reply can duplicate a queued job.
+                    retry=Retry(NoBackoff(), 0),
+                )
             else:
                 raise RedisUnavailable("redis dependency is not installed.")
         return self._client

@@ -6,6 +6,8 @@ import sys
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from fastapi import HTTPException
+
 from .app_state import AppState
 from .account_service import UserCreateInput
 from .config import load_settings
@@ -162,11 +164,8 @@ async def run_cli(argv: list[str] | None = None) -> int:
         run_task_worker=_runs_worker_for_command(args.command),
         task_worker_queues=_worker_queues_for_command(args.command, configured_queues=settings.task_worker_queues),
     )
-    service_command = (args.command in WORKER_COMMAND_QUEUES and args.command != "retry-thumbnails") or (
-        args.command in SCHEDULER_COMMANDS
-    )
-    if not service_command:
-        await state.database.connect()
+    # CLI startup audit events also use the database before state.start().
+    await state.database.connect()
 
     try:
         if args.command == "prune":
@@ -357,7 +356,11 @@ async def run_cli(argv: list[str] | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    return asyncio.run(run_cli(argv))
+    try:
+        return asyncio.run(run_cli(argv))
+    except HTTPException as exc:
+        print(exc.detail, file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

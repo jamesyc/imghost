@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
-import httpx
+import httpx2
 from fastapi import HTTPException
 
 from .base import OAuthIdentity
@@ -40,7 +40,7 @@ class GoogleOAuthProvider:
         })}"
 
     async def exchange_code(self, *, code: str, redirect_uri: str, code_verifier: str) -> OAuthIdentity:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx2.AsyncClient(timeout=10.0) as client:
             token_response = await client.post(
                 GOOGLE_TOKEN_URL,
                 data={

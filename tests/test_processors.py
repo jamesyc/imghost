@@ -2,6 +2,7 @@ import asyncio
 import math
 import subprocess
 import threading
+import pytest
 from io import BytesIO
 import json
 from pathlib import Path
@@ -33,7 +34,7 @@ from imghost.processors import (
     VideoProcessingError,
 )
 from imghost.service import CurrentActor
-from imghost.processors import GifProcessor, MovProcessor, Mp4Processor
+from imghost.processors import GifProcessor, MovProcessor, Mp4Processor, WebmProcessor
 
 register_heif_opener(thumbnails=False)
 
@@ -740,8 +741,13 @@ def test_video_processor_uses_expected_command_timeouts(monkeypatch) -> None:
     assert ("ffmpeg", VIDEO_ANIMATED_THUMB_TIMEOUT_SECS) in timeouts
 
 
-def test_video_processor_reencodes_rotated_video_to_bake_in_orientation(monkeypatch) -> None:
-    processor = Mp4Processor(max_pixels=50_000_000, thumb_frames=10)
+@pytest.mark.parametrize("processor_type,format_name,codec", [
+    (Mp4Processor, "mp4", "libx264"),
+    (MovProcessor, "mov", "libx264"),
+    (WebmProcessor, "webm", "libvpx-vp9"),
+])
+def test_video_processor_reencodes_rotated_video_to_bake_in_orientation(monkeypatch, processor_type, format_name, codec) -> None:
+    processor = processor_type(max_pixels=50_000_000, thumb_frames=10)
     ffmpeg_commands: list[list[str]] = []
 
     def fake_run(args, stdout=None, stderr=None, text=False, timeout=None, check=False):
@@ -772,13 +778,13 @@ def test_video_processor_reencodes_rotated_video_to_bake_in_orientation(monkeypa
 
     monkeypatch.setattr("imghost.processors.subprocess.run", fake_run)
 
-    metadata = asyncio.run(processor.extract_metadata(b"fake-mp4", "mp4"))
-    sanitized = asyncio.run(processor.sanitize(b"fake-mp4", metadata))
+    metadata = asyncio.run(processor.extract_metadata(b"fake-video", format_name))
+    sanitized = asyncio.run(processor.sanitize(b"fake-video", metadata))
 
     assert sanitized.data == b"remuxed"
     assert ffmpeg_commands
     assert "-c:v" in ffmpeg_commands[0]
-    assert "libx264" in ffmpeg_commands[0]
+    assert codec in ffmpeg_commands[0]
     assert "-c:a" in ffmpeg_commands[0]
     assert "copy" in ffmpeg_commands[0]
     assert "-metadata:s:v:0" in ffmpeg_commands[0]

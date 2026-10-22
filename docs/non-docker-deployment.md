@@ -6,11 +6,13 @@ It is aimed at local development, debugging, and operators who already have Pyth
 
 ## What this guide assumes
 
-- Python 3.14
+- Python 3.15.x
 - `uv` installed
 - PostgreSQL available
 - Redis available if you want Redis-backed sessions, rate limits, workers, or scheduler leases
 - an S3-compatible storage backend available if you are not using a local storage configuration
+
+Image processing also needs Cairo, and video processing needs FFmpeg and ffprobe with H.264, VP8/VP9, software AV1 decoding, and WebP support. On macOS these can be installed with `brew install cairo ffmpeg`. If a standalone Python cannot locate Homebrew's Cairo library, run the virtual environment directly with `DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib" .venv/bin/python -m imghost` (with the desired command).
 
 ## 1. Clone the repo
 
@@ -22,7 +24,7 @@ cd imghost
 ## 2. Install dependencies
 
 ```bash
-uv sync
+uv sync --extra dev
 ```
 
 ## 3. Create an env file

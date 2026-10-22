@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 from datetime import UTC, datetime, timedelta
@@ -6,9 +7,24 @@ from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
+import pytest
 from imghost.db import Database
 from imghost.models import Album, ApiKey, Media, ShareXDeleteCapability, User, utcnow
 from imghost.repositories import PostgresRepository
+
+
+@pytest.mark.skipif(not os.getenv("TEST_PGBOUNCER_URL"), reason="Set TEST_PGBOUNCER_URL for transaction-pool coverage")
+def test_concurrent_startup_schema_changes_use_one_transaction_per_pool() -> None:
+    async def run() -> None:
+        databases = [Database(os.environ["TEST_PGBOUNCER_URL"], use_pgbouncer=True) for _ in range(4)]
+        try:
+            await asyncio.wait_for(asyncio.gather(*(database.connect() for database in databases)), timeout=30)
+            for database in databases:
+                assert await database.require_pool().fetchval("SELECT 1") == 1
+        finally:
+            await asyncio.gather(*(database.close() for database in databases))
+
+    asyncio.run(run())
 
 
 def test_database_connect_uses_default_asyncpg_settings_when_pgbouncer_disabled(monkeypatch) -> None:
@@ -92,6 +108,14 @@ def test_database_connect_applies_startup_sql_when_present(monkeypatch, tmp_path
         async def execute(self, sql: str, *args) -> None:
             applied.append(sql)
 
+        @asynccontextmanager
+        async def transaction(self):
+            applied.append("BEGIN")
+            try:
+                yield
+            finally:
+                applied.append("END")
+
     class DummyAcquire:
         def __init__(self, conn: DummyConnection) -> None:
             self.conn = conn
@@ -127,9 +151,10 @@ def test_database_connect_applies_startup_sql_when_present(monkeypatch, tmp_path
     asyncio.run(run())
 
     assert applied == [
-        "SELECT pg_advisory_lock($1)",
+        "BEGIN",
+        "SELECT pg_advisory_xact_lock($1)",
         "SELECT 1;",
-        "SELECT pg_advisory_unlock($1)",
+        "END",
     ]
 
 

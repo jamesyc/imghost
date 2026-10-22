@@ -13,7 +13,7 @@ This document summarizes the security-relevant behavior currently implemented.
 ## Auth
 
 - passwords hashed with bcrypt
-- local passwords must be at least 8 characters when created or changed through the app APIs
+- local passwords must be at least 8 characters and at most 72 UTF-8 bytes when created or changed; existing bcrypt passwords retain their historical byte-truncation behavior at login
 - API keys stored hash-only
 - browser sessions signed with `SECRET_KEY`
 - cookie security controlled by `SESSION_COOKIE_SECURE`

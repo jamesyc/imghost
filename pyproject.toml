@@ -1,34 +1,43 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=80,<85"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "imghost"
 version = "0.1.0"
 description = "V1 of a self-hosted image host prototype"
-requires-python = ">=3.14"
+requires-python = ">=3.15,<3.16"
 dependencies = [
-  "asyncpg>=0.30,<1",
-  "bcrypt>=4.2,<5",
-  "boto3>=1.35,<2",
-  "cairosvg>=2.7,<3",
-  "fastapi>=0.115,<1",
-  "httpx>=0.28,<1",
-  "jinja2>=3.1,<4",
+  "asyncpg<1",
+  "bcrypt>=5,<6",
+  "boto3>=1,<2",
+  "cairosvg>=2,<3",
+  "fastapi<1",
+  "httpx2>=2,<3",
+  "jinja2>=3,<4",
   "markupsafe>=3,<4",
-  "pillow>=11,<12",
+  "pillow>=12,<14",
   "pillow-heif>=1,<2",
-  "prometheus-client>=0.22,<1",
-  "python-multipart>=0.0.9,<1",
-  "redis>=5,<6",
-  "uvicorn[standard]>=0.30,<1",
-  "zipstream-ng>=1.9,<2",
+  "prometheus-client<1",
+  "pydantic>=2,<3",
+  "python-multipart<1",
+  "redis>=8,<9",
+  "starlette>=1,<2",
+  "uvicorn[standard]<1",
+  "zipstream-ng>=1,<2",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8,<9",
+  "pytest>=9,<10",
 ]
+
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.uv.extra-build-variables]
+# PyYAML has no CPython 3.15 wheels yet; YAML is only used for optional server config.
+pyyaml = { PYYAML_FORCE_LIBYAML = "0" }
 
 [tool.setuptools]
 package-dir = {"" = "src"}

@@ -144,7 +144,13 @@ For deployment guidance, see:
 
 ## Development
 
-The host development environment uses Python 3.14 and uv from `mise.toml`.
+The supported Python line is **3.15.x**. `mise.toml`, `.python-version` and the container base follow that line without fixing a patch release. Python dependency ranges allow minor and patch upgrades within the supported major versions, and uv excludes releases newer than seven days. Pillow's range includes both 12 and 13 so version 13 can be selected after that delay.
+
+`uv.lock` records the resolved versions for a particular build. Refresh it with `uv lock --upgrade`, then run `uv sync --extra dev`. CI refreshes the lock, tests that resolution, and uses the same lockfile for both image architectures before publishing.
+
+See [dependency upgrades](docs/dependency-upgrades.md) for native image refreshes and service migration steps.
+
+The host development environment uses Python and uv from `mise.toml`.
 Docker continues to use its image's Python runtime. Install host dependencies with:
 
 ```bash
@@ -154,9 +160,7 @@ mise exec -- uv sync --locked --extra dev
 ```
 
 Run tests against a dedicated PostgreSQL test database (the database name must
-contain `test`). Some legacy tests require `localhost:5432/imghost_test`, so use
-a dedicated test instance there with user `imghost` and password `imghost`.
-Set `TEST_DATABASE_URL` to that test database, then run:
+contain `test`). Set `TEST_DATABASE_URL` to that test database, then run:
 
 ```bash
 mise exec -- uv run --locked --extra dev pytest -q

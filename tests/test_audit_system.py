@@ -571,7 +571,7 @@ def test_audit_query_reads_legacy_metadata_only_rows(tmp_path, monkeypatch, caps
     _, admin_key = create_admin_and_api_key(capsys, username="legacyauditadmin", email="legacyauditadmin@example.com")
 
     async def insert_legacy_row() -> None:
-        conn = await asyncpg.connect("postgresql://imghost:imghost@localhost:5432/imghost_test")
+        conn = await asyncpg.connect(os.environ["DATABASE_URL"])
         try:
             await conn.execute(
                 """

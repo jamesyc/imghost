@@ -1,19 +1,9 @@
-from collections import defaultdict
-
 from imghost.main import app
 
 
 def test_expected_routes_are_registered() -> None:
-    routes_by_path: dict[str, set[str]] = defaultdict(set)
-    for route in app.routes:
-        methods = getattr(route, "methods", None)
-        path = getattr(route, "path", None)
-        if not methods or not path:
-            continue
-        for method in methods:
-            if method in {"HEAD", "OPTIONS"}:
-                continue
-            routes_by_path[path].add(method)
+    # FastAPI now keeps included routers lazy rather than flattening app.routes.
+    routes_by_path = app.openapi()["paths"]
 
     expected = {
         "/": {"GET"},
@@ -69,7 +59,7 @@ def test_expected_routes_are_registered() -> None:
 
     for path, methods in expected.items():
         assert path in routes_by_path
-        assert methods.issubset(routes_by_path[path])
+        assert {method.lower() for method in methods}.issubset(routes_by_path[path])
 
 
 def test_static_files_route_is_registered() -> None:

@@ -73,9 +73,9 @@ class Database:
             return
         pool = self.require_pool()
         async with pool.acquire() as conn:
-            await conn.execute("SELECT pg_advisory_lock($1)", 184537478640522980)
-            try:
+            # Transaction pooling can switch backends between standalone statements.
+            # Keep the lock and schema changes on the same backend until commit.
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock($1)", 184537478640522980)
                 for path in sql_paths:
                     await conn.execute(path.read_text(encoding="utf-8"))
-            finally:
-                await conn.execute("SELECT pg_advisory_unlock($1)", 184537478640522980)

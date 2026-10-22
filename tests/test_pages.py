@@ -21,6 +21,8 @@ from .helpers import (
     wait_for_thumbnail,
 )
 
+APP_ROOT = Path(__file__).resolve().parents[1] / "src" / "imghost"
+
 HOSTILE_TITLE = '</script><img src=x onerror=alert(1)>'
 HOSTILE_FILENAME = '<svg onload=alert(1)>.png'
 HOSTILE_USERNAME = '</script><img src=x onerror=alert(1)>'
@@ -885,9 +887,7 @@ def test_public_album_page_shows_last_edited_only_after_album_changes(tmp_path, 
 
 
 def test_public_album_template_uses_inline_video_previews_with_lightbox_hooks() -> None:
-    template = Path(
-        "/home/james/imghost/src/imghost/templates/pages/public-album.html"
-    ).read_text(encoding="utf-8")
+    template = (APP_ROOT / "templates/pages/public-album.html").read_text(encoding="utf-8")
 
     assert 'class="public-album-preview is-video"' in template
     assert 'role="button"' in template
@@ -901,7 +901,7 @@ def test_public_album_template_uses_inline_video_previews_with_lightbox_hooks() 
 
 def test_album_detail_renderer_uses_inline_video_previews_with_lightbox_hooks() -> None:
     script = (
-        Path("/home/james/imghost/src/imghost/static/js/album-detail-render.js")
+        (APP_ROOT / "static/js/album-detail-render.js")
         .read_text(encoding="utf-8")
     )
 
@@ -914,13 +914,13 @@ def test_album_detail_renderer_uses_inline_video_previews_with_lightbox_hooks() 
     assert "inlineVideo.pause();" in script
     assert "activeInlineVideoState.video.play().catch(() => {});" in script
 
-    interactions = Path("/home/james/imghost/src/imghost/static/js/album-detail.js").read_text(encoding="utf-8")
+    interactions = (APP_ROOT / "static/js/album-detail.js").read_text(encoding="utf-8")
     assert '.album-detail-thumb[role="button"]' in interactions
     assert 'event.key !== "Enter" && event.key !== " "' in interactions
 
 
 def test_public_album_script_checks_video_compatibility_client_side() -> None:
-    script = Path("/home/james/imghost/src/imghost/static/js/public-album.js").read_text(encoding="utf-8")
+    script = (APP_ROOT / "static/js/public-album.js").read_text(encoding="utf-8")
 
     assert "canPlayType" in script
     assert 'video/mp4; codecs="hev1"' in script
@@ -931,13 +931,11 @@ def test_public_album_script_checks_video_compatibility_client_side() -> None:
     assert 'event.key !== "Enter" && event.key !== " "' in script
     assert "pollThumb" not in script
     assert "data-thumb-status" not in script
-    assert "data-client-compat-warning" in Path(
-        "/home/james/imghost/src/imghost/templates/pages/public-album.html"
-    ).read_text(encoding="utf-8")
+    assert "data-client-compat-warning" in (APP_ROOT / "templates/pages/public-album.html").read_text(encoding="utf-8")
 
 
 def test_album_cards_script_polls_pending_thumbnail_placeholders() -> None:
-    script = Path("/home/james/imghost/src/imghost/static/js/album-cards.js").read_text(encoding="utf-8")
+    script = (APP_ROOT / "static/js/album-cards.js").read_text(encoding="utf-8")
 
     assert "data-album-card-thumb-status" in script
     assert "data-album-card-thumb-src" in script
@@ -947,15 +945,15 @@ def test_album_cards_script_polls_pending_thumbnail_placeholders() -> None:
 
 
 def test_dashboard_and_albums_scripts_attach_album_card_thumb_polling_after_render() -> None:
-    dashboard_script = Path("/home/james/imghost/src/imghost/static/js/dashboard.js").read_text(encoding="utf-8")
-    albums_script = Path("/home/james/imghost/src/imghost/static/js/albums.js").read_text(encoding="utf-8")
+    dashboard_script = (APP_ROOT / "static/js/dashboard.js").read_text(encoding="utf-8")
+    albums_script = (APP_ROOT / "static/js/albums.js").read_text(encoding="utf-8")
 
     assert "window.attachAlbumCardThumbPolling?.(recentAlbumsRoot);" in dashboard_script
     assert "window.attachAlbumCardThumbPolling?.(albumsRoot);" in albums_script
 
 
 def test_upload_box_script_rejects_unsupported_files_before_upload() -> None:
-    script = Path("/home/james/imghost/src/imghost/static/js/upload-box.js").read_text(encoding="utf-8")
+    script = (APP_ROOT / "static/js/upload-box.js").read_text(encoding="utf-8")
 
     assert "SUPPORTED_UPLOAD_EXTENSIONS" in script
     assert '"m4v"' in script
@@ -973,7 +971,7 @@ def test_upload_box_script_rejects_unsupported_files_before_upload() -> None:
 
 
 def test_album_detail_css_caps_image_preview_height_like_public_album() -> None:
-    stylesheet = Path("/home/james/imghost/src/imghost/static/css/base-pages.css").read_text(encoding="utf-8")
+    stylesheet = (APP_ROOT / "static/css/base-pages.css").read_text(encoding="utf-8")
 
     assert ".album-detail-thumb img" in stylesheet
     assert "max-height: min(80vh, 960px);" in stylesheet
@@ -983,7 +981,7 @@ def test_album_detail_css_caps_image_preview_height_like_public_album() -> None:
 
 
 def test_admin_overview_script_renders_storage_breakdown_and_quota_progress() -> None:
-    script = Path("/home/james/imghost/src/imghost/static/js/admin-index.js").read_text(encoding="utf-8")
+    script = (APP_ROOT / "static/js/admin-index.js").read_text(encoding="utf-8")
 
     assert "admin-storage-table" in script
     assert "usage-meter" in script
@@ -993,7 +991,7 @@ def test_admin_overview_script_renders_storage_breakdown_and_quota_progress() ->
 
 
 def test_admin_users_script_renders_usage_quota_percent_and_counts() -> None:
-    script = Path("/home/james/imghost/src/imghost/static/js/admin-users.js").read_text(encoding="utf-8")
+    script = (APP_ROOT / "static/js/admin-users.js").read_text(encoding="utf-8")
 
     assert "admin-user-storage-grid" in script
     assert "Quota %" in script
@@ -1543,10 +1541,8 @@ def test_public_user_album_list_page_shows_owned_albums_sorted_by_recent_update(
 
 
 def test_public_user_album_list_template_marks_pending_cover_thumbnails_for_polling() -> None:
-    template = Path(
-        "/home/james/imghost/src/imghost/templates/pages/public-user-albums.html"
-    ).read_text(encoding="utf-8")
-    script = Path("/home/james/imghost/src/imghost/static/js/public-user-albums.js").read_text(encoding="utf-8")
+    template = (APP_ROOT / "templates/pages/public-user-albums.html").read_text(encoding="utf-8")
+    script = (APP_ROOT / "static/js/public-user-albums.js").read_text(encoding="utf-8")
 
     assert 'id="public-user-albums-list"' in template
     assert 'data-album-card-thumb-status="{{ album.cover_thumb_status }}"' in template

@@ -289,14 +289,12 @@ class VideoProcessor(MediaProcessor):
             "-1",
         ]
         if rotation_degrees:
+            if output_path.suffix.lower() == ".webm":
+                args.extend(["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "4", "-crf", "30", "-b:v", "0"])
+            else:
+                args.extend(["-c:v", "libx264", "-preset", "fast", "-crf", "18"])
             args.extend(
                 [
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "fast",
-                    "-crf",
-                    "18",
                     "-pix_fmt",
                     "yuv420p",
                     "-c:a",

@@ -667,6 +667,30 @@ def test_verify_password_returns_false_for_invalid_stored_hash() -> None:
     assert service._verify_password("secret-pass", "not-a-bcrypt-hash") is False
 
 
+@pytest.mark.parametrize("password", ["a" * 71, "a" * 72, "é" * 36])
+def test_hash_password_accepts_passwords_up_to_72_utf8_bytes(password: str) -> None:
+    service, _, _, _ = make_service()
+    hashed = service._hash_password(password)
+    assert service._verify_password(password, hashed)
+
+
+@pytest.mark.parametrize("password", ["a" * 73, "é" * 37, "🙂" * 19])
+def test_hash_password_rejects_new_passwords_over_72_utf8_bytes(password: str) -> None:
+    service, _, _, _ = make_service()
+    with pytest.raises(HTTPException) as rejected:
+        service._hash_password(password)
+    assert rejected.value.status_code == 400
+    assert rejected.value.detail == "Password must be at most 72 UTF-8 bytes."
+
+
+@pytest.mark.parametrize("password", ["a" * 73, "é" * 37, "a" * 71 + "🙂"])
+def test_verify_password_preserves_legacy_bcrypt_byte_truncation(password: str) -> None:
+    service, _, _, _ = make_service()
+    legacy_hash = bcrypt.hashpw(password.encode("utf-8")[:72], bcrypt.gensalt()).decode()
+    assert service._verify_password(password, legacy_hash)
+    assert not service._verify_password("wrong-password", legacy_hash)
+
+
 def test_issue_api_key_emits_event_with_replaced_existing_flag() -> None:
     old_hash = bcrypt.hashpw(b"old-pass", bcrypt.gensalt()).decode("utf-8")
     user = make_user(password_hash=old_hash)

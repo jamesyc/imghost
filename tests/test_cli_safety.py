@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from fastapi import HTTPException
+import pytest
+
 from imghost.__main__ import (
     _confirm_risky_cli_target,
     _process_role_for_command,
@@ -9,6 +12,52 @@ from imghost.__main__ import (
     _worker_queues_for_command,
     build_parser,
 )
+
+
+def test_cli_reports_password_validation_without_a_traceback(monkeypatch, capsys) -> None:
+    import imghost.__main__ as cli
+
+    async def rejected(argv):
+        raise HTTPException(status_code=400, detail="Password must be at most 72 UTF-8 bytes.")
+
+    monkeypatch.setattr(cli, "run_cli", rejected)
+    assert cli.main(["create-user"]) == 1
+    assert capsys.readouterr().err == "Password must be at most 72 UTF-8 bytes.\n"
+
+
+@pytest.mark.parametrize("command", ["run-worker-thumbnails", "run-scheduler"])
+def test_service_cli_initializes_database_before_startup_audit(monkeypatch, tmp_path, command) -> None:
+    from types import SimpleNamespace
+    import imghost.__main__ as cli
+
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    connected = False
+    recorded = False
+
+    async def connect():
+        nonlocal connected
+        connected = True
+
+    async def close():
+        pass
+
+    async def record(**kwargs):
+        nonlocal recorded
+        assert connected, "Startup audit used an uninitialized database pool"
+        recorded = True
+
+    async def start():
+        raise RuntimeError("stop after startup audit")
+
+    state = SimpleNamespace(
+        database=SimpleNamespace(connect=connect, close=close),
+        telemetry=SimpleNamespace(record_cli_command=record),
+        task_worker_queues=("thumbnails",), settings=cli.load_settings(), start=start,
+    )
+    monkeypatch.setattr(cli, "AppState", lambda *args, **kwargs: state)
+    with pytest.raises(RuntimeError, match="stop after startup audit"):
+        cli.main([command])
+    assert recorded
 
 
 def test_cli_confirmation_bypasses_local_database() -> None:
