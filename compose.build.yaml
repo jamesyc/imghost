@@ -172,7 +172,7 @@ services:
       retries: 10
 
   pgbouncer:
-    image: edoburu/pgbouncer:v1.25.1-p0
+    image: edoburu/pgbouncer:latest
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -194,7 +194,7 @@ services:
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     restart: unless-stopped
     command:
       - /bin/sh
@@ -224,7 +224,11 @@ services:
       retries: 10
 
   garage:
-    image: dxflrs/garage:v2.2.0
+    image: ${GARAGE_INIT_BUILD_IMAGE:-imghost-garage-build}:latest
+    build:
+      context: .
+      dockerfile: docker/garage-init.Dockerfile
+    entrypoint: []
     restart: unless-stopped
     command: ["/garage", "-c", "/etc/garage.toml", "server"]
     environment:
@@ -245,6 +249,7 @@ services:
       retries: 10
 
   garage-init:
+    image: ${GARAGE_INIT_BUILD_IMAGE:-imghost-garage-build}:latest
     build:
       context: .
       dockerfile: docker/garage-init.Dockerfile

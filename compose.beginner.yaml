@@ -46,7 +46,8 @@ services:
       retries: 10
 
   garage:
-    image: dxflrs/garage:v2.2.0
+    image: ${GARAGE_INIT_IMAGE:-ghcr.io/jamesyc/imghost-garage-init}:${GARAGE_INIT_IMAGE_TAG:-latest}
+    entrypoint: []
     restart: unless-stopped
     command: ["/garage", "-c", "/etc/garage.toml", "server"]
     environment:

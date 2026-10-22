@@ -1,6 +1,6 @@
 services:
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:mainline-alpine
     restart: unless-stopped
     depends_on:
       app:
