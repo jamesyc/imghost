@@ -41,7 +41,8 @@ jobs:
       TEST_PGBOUNCER_URL: postgresql://imghost:imghost@localhost:6432/imghost_test
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      # Upstream has no floating v10 tag; keep action updates unpinned to minors.
+      - uses: astral-sh/setup-uv@main
         with:
           python-version: '3.15'
           enable-cache: true
