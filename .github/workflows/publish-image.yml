@@ -22,7 +22,7 @@ jobs:
           POOL_MODE: transaction
           IGNORE_STARTUP_PARAMETERS: extra_float_digits
         ports: ['6432:5432']
-        options: --health-cmd 'pg_isready -h 127.0.0.1 -p 5432' --health-interval 5s --health-retries 20
+        options: --health-cmd "pg_isready -h 127.0.0.1 -p 5432" --health-interval 5s --health-retries 20
       postgres:
         image: postgres:16-alpine
         env:
@@ -34,7 +34,7 @@ jobs:
       redis:
         image: redis:8-alpine
         ports: ['6379:6379']
-        options: --health-cmd 'redis-cli ping' --health-interval 5s --health-retries 20
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
     env:
       TEST_DATABASE_URL: postgresql://imghost:imghost@localhost:5432/imghost_test
       TEST_REDIS_URL: redis://localhost:6379/15
@@ -78,7 +78,7 @@ jobs:
           POOL_MODE: transaction
           IGNORE_STARTUP_PARAMETERS: extra_float_digits
         ports: ['6432:5432']
-        options: --health-cmd 'pg_isready -h 127.0.0.1 -p 5432' --health-interval 5s --health-retries 20
+        options: --health-cmd "pg_isready -h 127.0.0.1 -p 5432" --health-interval 5s --health-retries 20
       postgres:
         image: postgres:16-alpine
         env:
@@ -90,7 +90,7 @@ jobs:
       redis:
         image: redis:8-alpine
         ports: ['6379:6379']
-        options: --health-cmd 'redis-cli ping' --health-interval 5s --health-retries 20
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
