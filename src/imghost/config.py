@@ -140,7 +140,7 @@ def load_settings() -> Settings:
     google_client_secret = (os.getenv("GOOGLE_CLIENT_SECRET") or "").strip() or None
     umami_website_id = (os.getenv("UMAMI_WEBSITE_ID") or "").strip() or None
     umami_host_url = (os.getenv("UMAMI_HOST_URL") or "").strip().rstrip("/") or None
-    umami_domains = _dedupe_strings(_env_csv("UMAMI_DOMAINS"))
+    umami_domains = _dedupe_strings(tuple(domain.lower() for domain in _env_csv("UMAMI_DOMAINS")))
     if umami_website_id or umami_host_url:
         if not umami_website_id or not umami_host_url:
             raise ValueError("UMAMI_WEBSITE_ID and UMAMI_HOST_URL must both be set.")

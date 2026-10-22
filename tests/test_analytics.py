@@ -105,3 +105,11 @@ def test_analytics_domains_default_to_canonical_hostname(tmp_path, monkeypatch) 
     configure_analytics(monkeypatch, tmp_path)
     monkeypatch.delenv("UMAMI_DOMAINS")
     assert load_settings().umami_domains == ("testserver",)
+
+
+def test_analytics_domains_are_lowercase_and_deduplicated(tmp_path, monkeypatch) -> None:
+    configure_analytics(monkeypatch, tmp_path)
+    monkeypatch.setenv("UMAMI_DOMAINS", "TESTSERVER,Images.Example.COM,testserver,IMAGES.EXAMPLE.COM")
+    assert load_settings().umami_domains == ("testserver", "images.example.com")
+    with TestClient(app, base_url="https://testserver") as client:
+        assert_tracked(client.get("/"))
