@@ -164,7 +164,7 @@ For deployment guidance, see:
 
 ## Development
 
-The supported Python line is **3.15.x**. `mise.toml`, `.python-version` and the container base follow that line without fixing a patch release. Python dependency ranges allow minor and patch upgrades within the supported major versions, and uv excludes releases newer than seven days. Pillow uses 13.x and is exempt from that release delay.
+The supported Python line is **3.15.x**. `mise.toml`, `.python-version` and the container base follow that line without fixing a patch release. Python dependency ranges allow minor and patch upgrades within the supported major versions, and uv excludes releases newer than one day. Pillow uses 13.x and is exempt from that release delay.
 
 `uv.lock` records the resolved versions for a particular build. Refresh it with `uv lock --upgrade`, then run `uv sync --extra dev`. CI refreshes the lock, tests that resolution, and uses the same lockfile for both image architectures before publishing.
 

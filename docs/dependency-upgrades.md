@@ -1,6 +1,6 @@
 # Dependency upgrades
 
-Python follows 3.15.x. Python package requirements specify supported major-version ranges, without fixing minor or patch releases. uv applies a seven-day release delay to package resolution. The lockfile records a tested resolution; it is not a ceiling on future updates.
+Python follows 3.15.x. Python package requirements specify supported major-version ranges, without fixing minor or patch releases. uv applies a one-day release delay to package resolution. The lockfile records a tested resolution; it is not a ceiling on future updates.
 
 To refresh development dependencies:
 
@@ -10,7 +10,7 @@ uv sync --locked --extra dev
 uv run --locked pytest -q
 ```
 
-Pillow follows 13.x and is exempt from the seven-day release delay. Other packages keep that delay. Botocore currently requires python-dateutil below 3; allow uv to respect that upstream constraint.
+Pillow follows 13.x and is exempt from the one-day release delay. Other packages keep that delay. Botocore currently requires python-dateutil below 3; allow uv to respect that upstream constraint.
 
 CI refreshes dependencies once, runs the full test suite, and passes that lockfile to the amd64 and arm64 image verification jobs. Each image runs real image/video processing and anonymous/authenticated upload, download, range, ZIP, and thumbnail checks against Garage and Redis. AV1 MP4 and WebM checks use a checked-in fixture and exercise software decoding, thumbnails, and rotation re-encoding. Image check output also records the native codec versions bundled inside Pillow and pillow-heif.
 
@@ -29,7 +29,7 @@ docker build --pull --no-cache-filter native-versions -t imghost-build:latest .
 docker build --pull --no-cache-filter garage -f docker/garage-init.Dockerfile -t imghost-garage-build:latest .
 ```
 
-Pulling an image or rebuilding picks up its floating release channel; an already running container does not replace itself. Python package updates still pass through tests and, except for Pillow, the seven-day uv gate. Operating system images and verified native releases follow their upstream stable channels.
+Pulling an image or rebuilding picks up its floating release channel; an already running container does not replace itself. Python package updates still pass through tests and, except for Pillow, the one-day uv gate. Operating system images and verified native releases follow their upstream stable channels.
 
 ## Deploying without upgrading PostgreSQL
 
