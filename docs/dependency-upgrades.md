@@ -10,7 +10,7 @@ uv sync --locked --extra dev
 uv run --locked pytest -q
 ```
 
-Pillow permits both 12.x and 13.x: the initial seven-day cutoff excludes the newly released Pillow 13. A later refresh can select it without editing the requirement. Botocore currently requires python-dateutil below 3; allow uv to respect that upstream constraint.
+Pillow follows 13.x and is exempt from the seven-day release delay. Other packages keep that delay. Botocore currently requires python-dateutil below 3; allow uv to respect that upstream constraint.
 
 CI refreshes dependencies once, runs the full test suite, and passes that lockfile to the amd64 and arm64 image verification jobs. Each image runs real image/video processing and anonymous/authenticated upload, download, range, ZIP, and thumbnail checks against Garage and Redis. AV1 MP4 and WebM checks use a checked-in fixture and exercise software decoding, thumbnails, and rotation re-encoding. Image check output also records the native codec versions bundled inside Pillow and pillow-heif.
 
@@ -29,7 +29,7 @@ docker build --pull --no-cache-filter native-versions -t imghost-build:latest .
 docker build --pull --no-cache-filter garage -f docker/garage-init.Dockerfile -t imghost-garage-build:latest .
 ```
 
-Pulling an image or rebuilding picks up its floating release channel; an already running container does not replace itself. Python package updates still pass through the seven-day uv gate and tests. The seven-day gate applies to Python packages; operating system images and verified native releases follow their upstream stable channels.
+Pulling an image or rebuilding picks up its floating release channel; an already running container does not replace itself. Python package updates still pass through tests and, except for Pillow, the seven-day uv gate. Operating system images and verified native releases follow their upstream stable channels.
 
 ## Deploying without upgrading PostgreSQL
 

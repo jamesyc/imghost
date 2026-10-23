@@ -3,8 +3,10 @@ from pathlib import Path
 from datetime import timedelta
 from zipfile import ZipFile
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 from pillow_heif import register_heif_opener
 
 from imghost.main import app
@@ -58,6 +60,48 @@ def modern_image_bytes(
     output = BytesIO()
     image.save(output, format=format_name)
     return output.getvalue()
+
+
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_16_bit_png_upload_preserves_pixels_and_strips_metadata(tmp_path, monkeypatch, capsys, authenticated) -> None:
+    monkeypatch.setenv("IMGHOST_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("BASE_URL", "http://testserver")
+    monkeypatch.setenv("TASK_QUEUE_MODE", "sync")
+
+    image = Image.frombytes("I;16", (2, 2), b"\x00\x00\xff\x00\x00\x80\xff\xff")
+    metadata = PngInfo()
+    metadata.add_text("Comment", "private upload metadata")
+    output = BytesIO()
+    image.save(output, format="PNG", pnginfo=metadata)
+
+    with TestClient(app) as client:
+        headers = {}
+        user_id = None
+        if authenticated:
+            user_id, api_key = create_user_and_api_key(capsys, username="png-user", email="png@example.com")
+            headers["Authorization"] = f"Bearer {api_key}"
+        response = client.post(
+            "/api/v1/upload",
+            files=[("file", ("scan.png", BytesIO(output.getvalue()), "image/png"))],
+            headers=headers,
+        )
+        assert response.status_code == 200
+        media_id = response.json()["items"][0]["media_id"]
+        media = client.portal.call(client.app.state.imghost.repository.get_media, media_id)
+        assert media.user_id == user_id
+
+        original = client.get(f"/i/{media_id}.png")
+        assert original.status_code == 200
+        with Image.open(BytesIO(original.content)) as sanitized:
+            assert sanitized.size == (2, 2)
+            assert [sanitized.getpixel((x, y)) for y in range(2) for x in range(2)] == [0, 255, 32768, 65535]
+            assert "Comment" not in sanitized.info
+
+        thumb = client.get(f"/t/{media_id}.jpg")
+        assert thumb.status_code == 200
+        with Image.open(BytesIO(thumb.content)) as thumbnail:
+            assert thumbnail.format == "JPEG"
+            assert thumbnail.size == (2, 2)
 
 
 def test_upload_album_and_media_serving(tmp_path, monkeypatch) -> None:
